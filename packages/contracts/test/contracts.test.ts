@@ -9,6 +9,7 @@ import {
   deviceControlActionSchema,
   deviceFileListResponseSchema,
   deviceListResponseSchema,
+  deviceLogcatResponseSchema,
   deviceUiTreeResponseSchema,
   healthResponseSchema,
 } from "../src/index.js";
@@ -140,6 +141,23 @@ describe("shared contracts", () => {
         readAt: "2026-07-20T10:00:00.000Z",
       }),
     ).toMatchObject({ applications: [{ packageName: "com.example.app" }] });
+
+    expect(
+      deviceLogcatResponseSchema.parse({
+        serial: "device-1",
+        entries: [
+          {
+            timestamp: "07-21 10:00:00.123",
+            processId: 1000,
+            threadId: 1001,
+            level: "info",
+            tag: "ActivityManager",
+            message: "Displayed com.example.app",
+          },
+        ],
+        readAt: "2026-07-21T10:00:00.000Z",
+      }),
+    ).toMatchObject({ entries: [{ level: "info", tag: "ActivityManager" }] });
   });
 
   it("accepts a local Appium runtime diagnostic", () => {

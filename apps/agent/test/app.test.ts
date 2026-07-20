@@ -121,7 +121,7 @@ describe("DeviceRobot Agent", () => {
     await app.close();
   });
 
-  it("serves read-only file and application management data", async () => {
+  it("serves read-only file, application, and Logcat management data", async () => {
     const { app } = await createAgentApp({
       localAppData: createTemporaryRoot(),
       deviceManagementService: {
@@ -150,6 +150,20 @@ describe("DeviceRobot Agent", () => {
           ],
           readAt: "2026-07-20T10:00:00.000Z",
         }),
+        readLogcat: async (serial) => ({
+          serial,
+          entries: [
+            {
+              timestamp: "07-21 10:00:00.123",
+              processId: 1000,
+              threadId: 1001,
+              level: "info" as const,
+              tag: "ActivityManager",
+              message: "Displayed com.example.app",
+            },
+          ],
+          readAt: "2026-07-21T10:00:00.000Z",
+        }),
       },
     });
     const headers = { host: "127.0.0.1:43110" };
@@ -165,6 +179,11 @@ describe("DeviceRobot Agent", () => {
         url: "/api/v1/devices/device-1/applications?filter=user",
         headers,
       });
+      const logcat = await app.inject({
+        method: "GET",
+        url: "/api/v1/devices/device-1/logcat?limit=120",
+        headers,
+      });
 
       expect(files.statusCode).toBe(200);
       expect(files.json()).toMatchObject({
@@ -175,6 +194,10 @@ describe("DeviceRobot Agent", () => {
       expect(applications.json()).toMatchObject({
         filter: "user",
         applications: [{ packageName: "com.example.app", source: "user" }],
+      });
+      expect(logcat.statusCode).toBe(200);
+      expect(logcat.json()).toMatchObject({
+        entries: [{ level: "info", tag: "ActivityManager" }],
       });
     } finally {
       await app.close();

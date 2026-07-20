@@ -186,6 +186,29 @@ const applicationsResponse = {
   readAt: "2026-07-20T10:00:00.000Z",
 };
 
+const logcatResponse = {
+  serial: "8B3Y0THX0",
+  entries: [
+    {
+      timestamp: "07-21 10:00:00.123",
+      processId: 1234,
+      threadId: 1235,
+      level: "info",
+      tag: "ActivityManager",
+      message: "Displayed com.example.app",
+    },
+    {
+      timestamp: "07-21 10:00:01.000",
+      processId: 1234,
+      threadId: 1235,
+      level: "error",
+      tag: "AndroidRuntime",
+      message: "FATAL EXCEPTION",
+    },
+  ],
+  readAt: "2026-07-21T10:00:00.000Z",
+};
+
 const apkArtifactResponse = {
   id: "123e4567-e89b-12d3-a456-426614174000",
   fileName: "sample.apk",
@@ -272,6 +295,13 @@ function mockApis(options: { healthError?: Error } = {}): {
 
     if (url.includes("/applications")) {
       return new Response(JSON.stringify(applicationsResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (url.includes("/logcat")) {
+      return new Response(JSON.stringify(logcatResponse), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -387,6 +417,22 @@ describe("DeviceRobot Web UI", () => {
 
     expect(await screen.findByRole("button", { name: /Download/ })).toBeInTheDocument();
     expect(screen.getByText("notes.txt")).toBeInTheDocument();
+  });
+
+  it("adds the device Logcat view and filters actual log entries", async () => {
+    mockApis();
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
+    await user.click(screen.getByRole("button", { name: "设备日志" }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "设备日志" })).toBeInTheDocument();
+    expect(await screen.findByText("Displayed com.example.app")).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole("combobox", { name: "筛选日志级别" }), "error");
+
+    expect(screen.queryByText("Displayed com.example.app")).not.toBeInTheDocument();
+    expect(screen.getByText("FATAL EXCEPTION")).toBeInTheDocument();
   });
 
   it("filters applications and sends only structured app actions", async () => {

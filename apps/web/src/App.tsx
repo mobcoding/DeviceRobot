@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   Play,
   Plus,
+  ScrollText,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AndroidDevice } from "@device-robot/contracts";
@@ -18,6 +19,7 @@ import { AppiumRuntimePanel } from "./components/AppiumRuntimePanel";
 import { ApkInstallDialog } from "./components/ApkInstallDialog";
 import { ApplicationManagerPanel } from "./components/ApplicationManagerPanel";
 import { DeviceControlPanel } from "./components/DeviceControlPanel";
+import { DeviceLogcatPanel } from "./components/DeviceLogcatPanel";
 import { DeviceMirrorPanel } from "./components/DeviceMirrorPanel";
 import { FileManagerPanel } from "./components/FileManagerPanel";
 
@@ -25,6 +27,7 @@ const viewIds = [
   "devices",
   "files",
   "applications",
+  "logs",
   "projects",
   "conversations",
   "runs",
@@ -35,7 +38,7 @@ const GOLDEN_RATIO = 1.618;
 const MINIMUM_MIRROR_WIDTH = 280;
 
 type ViewId = (typeof viewIds)[number];
-type PlannedViewId = Exclude<ViewId, "devices" | "files" | "applications">;
+type PlannedViewId = Exclude<ViewId, "devices" | "files" | "applications" | "logs">;
 type WorkspaceTab = { id: ViewId; label: string };
 
 type PlannedViewContent = {
@@ -59,6 +62,7 @@ const workspaceTabs: readonly WorkspaceTab[] = [
   { id: "devices", label: "概览" },
   { id: "files", label: "文件管理器" },
   { id: "applications", label: "应用管理器" },
+  { id: "logs", label: "设备日志" },
   { id: "projects", label: "项目" },
   { id: "conversations", label: "AI 与用例" },
   { id: "runs", label: "测试运行" },
@@ -148,6 +152,8 @@ function WorkspaceIcon({ viewId }: { viewId: ViewId }): React.JSX.Element {
       return <FolderOpen {...iconProps} />;
     case "applications":
       return <AppWindow {...iconProps} />;
+    case "logs":
+      return <ScrollText {...iconProps} />;
     case "projects":
       return <FolderGit2 {...iconProps} />;
     case "conversations":
@@ -588,7 +594,10 @@ export function App(): React.JSX.Element {
           )}
 
           {selectedDevice === undefined &&
-          (activeView === "devices" || activeView === "files" || activeView === "applications") ? (
+          (activeView === "devices" ||
+            activeView === "files" ||
+            activeView === "applications" ||
+            activeView === "logs") ? (
             <section className="main-empty-state" aria-label="设备工作台">
               <h1>连接 Android 设备</h1>
               <p>连接设备并完成 USB 调试授权后，即可在这里查看和管理设备内容。</p>
@@ -602,6 +611,8 @@ export function App(): React.JSX.Element {
               device={selectedDevice}
               onRequestApkInstall={() => apkInputRef.current?.click()}
             />
+          ) : activeView === "logs" && selectedDevice !== undefined ? (
+            <DeviceLogcatPanel device={selectedDevice} />
           ) : (
             <PlannedView content={plannedViews[activeView as PlannedViewId]} />
           )}

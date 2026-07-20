@@ -3,6 +3,7 @@ import type { DeviceListResponse } from "@device-robot/contracts";
 
 import {
   AdbDeviceManagementService,
+  parseLogcatEntries,
   type DeviceManagementCommandRunner,
 } from "../src/devices/adb-device-management-service.js";
 import type { DeviceDiscoveryService } from "../src/devices/adb-device-service.js";
@@ -109,6 +110,65 @@ describe("ADB device management", () => {
       "-f",
       "--show-versioncode",
       "-s",
+    ]);
+  });
+
+  it("reads a bounded Logcat snapshot using fixed ADB arguments", async () => {
+    const runner = createRunner(
+      [
+        "07-21 10:00:00.123  1234  1235 I ActivityManager: Displayed com.example.app",
+        "07-21 10:00:01.000  1234  1235 E AndroidRuntime: FATAL EXCEPTION",
+      ].join("\n"),
+    );
+    const service = new AdbDeviceManagementService({
+      deviceService: createDiscoveryService(),
+      runner,
+    });
+
+    const result = await service.readLogcat("device-1", 120);
+
+    expect(result.entries).toMatchObject([
+      { level: "info", tag: "ActivityManager", processId: 1234 },
+      { level: "error", tag: "AndroidRuntime", message: "FATAL EXCEPTION" },
+    ]);
+    expect(runner.runText).toHaveBeenCalledWith([
+      "-s",
+      "device-1",
+      "logcat",
+      "-d",
+      "-v",
+      "threadtime",
+      "-t",
+      "120",
+    ]);
+  });
+
+  it("caps parsed Logcat entries at the requested limit", async () => {
+    const runner = createRunner(
+      Array.from(
+        { length: 12 },
+        (_value, index) =>
+          `07-21 10:00:${String(index).padStart(2, "0")}.000  1234  1235 I TestTag: ${index}`,
+      ).join("\n"),
+    );
+    const service = new AdbDeviceManagementService({
+      deviceService: createDiscoveryService(),
+      runner,
+    });
+
+    const result = await service.readLogcat("device-1", 10);
+
+    expect(result.entries).toHaveLength(10);
+    expect(result.entries[0]).toMatchObject({ message: "2" });
+    expect(result.entries[9]).toMatchObject({ message: "11" });
+  });
+
+  it("keeps unexpected Logcat lines as unclassified entries", () => {
+    expect(
+      parseLogcatEntries("--------- beginning of main\njava.lang.IllegalStateException"),
+    ).toEqual([
+      { level: "unknown", message: "--------- beginning of main" },
+      { level: "unknown", message: "java.lang.IllegalStateException" },
     ]);
   });
 });

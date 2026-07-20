@@ -50,6 +50,9 @@ export {
   deviceFileEntrySchema,
   deviceFileKindSchema,
   deviceFileListResponseSchema,
+  deviceLogcatEntrySchema,
+  deviceLogcatLevelSchema,
+  deviceLogcatResponseSchema,
   type DeviceApplication,
   type DeviceApplicationFilter,
   type DeviceApplicationListResponse,
@@ -57,4 +60,7 @@ export {
   type DeviceFileEntry,
   type DeviceFileKind,
   type DeviceFileListResponse,
+  type DeviceLogcatEntry,
+  type DeviceLogcatLevel,
+  type DeviceLogcatResponse,
 } from "./device-management.js";

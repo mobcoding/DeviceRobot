@@ -33,6 +33,32 @@ export const deviceApplicationListResponseSchema = z.object({
   readAt: z.iso.datetime(),
 });
 
+export const deviceLogcatLevelSchema = z.enum([
+  "verbose",
+  "debug",
+  "info",
+  "warn",
+  "error",
+  "fatal",
+  "assert",
+  "unknown",
+]);
+
+export const deviceLogcatEntrySchema = z.object({
+  timestamp: z.string().min(1).optional(),
+  processId: z.number().int().nonnegative().optional(),
+  threadId: z.number().int().nonnegative().optional(),
+  level: deviceLogcatLevelSchema,
+  tag: z.string().min(1).optional(),
+  message: z.string(),
+});
+
+export const deviceLogcatResponseSchema = z.object({
+  serial: z.string().min(1),
+  entries: z.array(deviceLogcatEntrySchema).max(1_000),
+  readAt: z.iso.datetime(),
+});
+
 export type DeviceFileKind = z.infer<typeof deviceFileKindSchema>;
 export type DeviceFileEntry = z.infer<typeof deviceFileEntrySchema>;
 export type DeviceFileListResponse = z.infer<typeof deviceFileListResponseSchema>;
@@ -40,3 +66,6 @@ export type DeviceApplicationSource = z.infer<typeof deviceApplicationSourceSche
 export type DeviceApplicationFilter = z.infer<typeof deviceApplicationFilterSchema>;
 export type DeviceApplication = z.infer<typeof deviceApplicationSchema>;
 export type DeviceApplicationListResponse = z.infer<typeof deviceApplicationListResponseSchema>;
+export type DeviceLogcatLevel = z.infer<typeof deviceLogcatLevelSchema>;
+export type DeviceLogcatEntry = z.infer<typeof deviceLogcatEntrySchema>;
+export type DeviceLogcatResponse = z.infer<typeof deviceLogcatResponseSchema>;

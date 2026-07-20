@@ -1,9 +1,11 @@
 import {
   deviceApplicationListResponseSchema,
   deviceFileListResponseSchema,
+  deviceLogcatResponseSchema,
   type DeviceApplicationFilter,
   type DeviceApplicationListResponse,
   type DeviceFileListResponse,
+  type DeviceLogcatResponse,
 } from "@device-robot/contracts";
 
 async function fetchManagementResponse<T>(
@@ -52,6 +54,18 @@ export async function fetchDeviceApplications(
   return await fetchManagementResponse(
     `/api/v1/devices/${encodeURIComponent(serial)}/applications?filter=${filter}`,
     deviceApplicationListResponseSchema,
+    signal,
+  );
+}
+
+export async function fetchDeviceLogcat(
+  serial: string,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<DeviceLogcatResponse> {
+  return await fetchManagementResponse(
+    `/api/v1/devices/${encodeURIComponent(serial)}/logcat?limit=${limit}`,
+    deviceLogcatResponseSchema,
     signal,
   );
 }

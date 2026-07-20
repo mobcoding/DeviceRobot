@@ -15,6 +15,7 @@ import {
   deviceControlActionSchema,
   deviceFileListResponseSchema,
   deviceListResponseSchema,
+  deviceLogcatResponseSchema,
   deviceUiTreeResponseSchema,
   healthResponseSchema,
   appiumRuntimeSchema,
@@ -164,6 +165,28 @@ function parseApplicationFilter(
   }
 }
 
+function parseLogcatLimit(query: unknown): number | undefined {
+  if (typeof query !== "object" || query === null) {
+    return undefined;
+  }
+
+  const limit = (query as Record<string, unknown>).limit;
+  if (limit === undefined) {
+    return undefined;
+  }
+
+  if (typeof limit !== "string" || !/^\d+$/u.test(limit)) {
+    throw new DeviceControlError("The logcat limit is invalid", 400);
+  }
+
+  const parsed = Number.parseInt(limit, 10);
+  if (parsed < 10 || parsed > 1_000) {
+    throw new DeviceControlError("The logcat limit must be between 10 and 1000", 400);
+  }
+
+  return parsed;
+}
+
 function appiumErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
   if (error instanceof AppiumRuntimeError) {
     return reply.code(error.statusCode).send({ error: error.message });
@@ -300,6 +323,18 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
         parseApplicationFilter(request.query),
       );
       return deviceApplicationListResponseSchema.parse(response);
+    } catch (error) {
+      return controlErrorReply(reply, error);
+    }
+  });
+
+  app.get("/api/v1/devices/:serial/logcat", async (request, reply) => {
+    try {
+      const response = await deviceManagementService.readLogcat(
+        parseSerial(request.params),
+        parseLogcatLimit(request.query),
+      );
+      return deviceLogcatResponseSchema.parse(response);
     } catch (error) {
       return controlErrorReply(reply, error);
     }

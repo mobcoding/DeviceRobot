@@ -716,7 +716,8 @@ summary:focus-visible {
 }
 
 .manager-toolbar,
-.application-toolbar {
+.application-toolbar,
+.logcat-toolbar {
   display: flex;
   min-height: 40px;
   align-items: center;
@@ -755,7 +756,9 @@ summary:focus-visible {
 
 .manager-path-form input,
 .application-search input,
-.application-filter select {
+.application-filter select,
+.logcat-search input,
+.logcat-level-filter select {
   min-width: 0;
   height: 32px;
   border: 1px solid #444;
@@ -769,6 +772,54 @@ summary:focus-visible {
   width: 100%;
   padding: 0 9px;
   font-family: "Cascadia Code", Consolas, monospace;
+}
+
+.logcat-toolbar {
+  flex-wrap: wrap;
+}
+
+.logcat-search {
+  display: flex;
+  min-width: 180px;
+  max-width: 460px;
+  flex: 1 1 240px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid #444;
+  border-radius: 4px;
+  background: #151515;
+}
+
+.logcat-search svg {
+  flex: 0 0 auto;
+  color: #9ca8ad;
+}
+
+.logcat-search input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+}
+
+.logcat-level-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #aeb7bb;
+  font-size: 11px;
+}
+
+.logcat-level-filter select {
+  min-width: 96px;
+  padding: 0 7px;
+}
+
+.logcat-read-at {
+  margin-left: auto;
+  color: #aeb7bb;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .manager-path-form button {
@@ -885,6 +936,75 @@ summary:focus-visible {
   min-width: 680px;
   border-collapse: collapse;
   table-layout: fixed;
+}
+
+.logcat-table {
+  min-width: 880px;
+}
+
+.logcat-table th:nth-child(1),
+.logcat-table td:nth-child(1) {
+  width: 146px;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.logcat-table th:nth-child(2),
+.logcat-table td:nth-child(2) {
+  width: 52px;
+}
+
+.logcat-table th:nth-child(3),
+.logcat-table td:nth-child(3) {
+  width: 150px;
+}
+
+.logcat-table th:nth-child(4),
+.logcat-table td:nth-child(4) {
+  width: 92px;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 10px;
+}
+
+.logcat-level {
+  display: inline-flex;
+  width: 19px;
+  height: 19px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #475156;
+  border-radius: 3px;
+  color: #c2cccf;
+  background: #242729;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.logcat-level.warn {
+  border-color: #765d2d;
+  color: #eccb7e;
+  background: #332a19;
+}
+
+.logcat-level.error,
+.logcat-level.fatal,
+.logcat-level.assert {
+  border-color: #714047;
+  color: #eda1aa;
+  background: #351b20;
+}
+
+.logcat-level.info {
+  border-color: #2f6b63;
+  color: #88d8c0;
+  background: #173029;
+}
+
+.logcat-message {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .manager-table th,

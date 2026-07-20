@@ -4,7 +4,7 @@ DeviceRobot is a Windows-first, local Android AI testing workspace. The current 
 
 ## Current status
 
-The repository discovers locally connected Android devices through ADB and reports authorized, unauthorized, offline, USB, TCP, and emulator states using real device data. For an authorized device, the device workspace provides a live scrcpy stream, manual input, directory browsing, installed-package management, and audited structured controls. APK files can be selected from the application manager or dropped onto the live screen; the Agent stages the file, validates its format and size, calculates SHA-256, reads package metadata with `aapt`, asks for installation confirmation, and records the result. It also diagnoses the local Appium, UiAutomator2, Java, and Android SDK runtime, and starts or stops an Appium server restricted to `127.0.0.1:4723`. Source analysis, AI execution, DSL test-case execution, and test reporting remain future work.
+The repository discovers locally connected Android devices through ADB and reports authorized, unauthorized, offline, USB, TCP, and emulator states using real device data. For an authorized device, the device workspace provides a live scrcpy stream, manual input, directory browsing, installed-package management, a bounded read-only Logcat viewer, and audited structured controls. APK files can be selected from the application manager or dropped onto the live screen; the Agent stages the file, validates its format and size, calculates SHA-256, reads package metadata with `aapt`, asks for installation confirmation, and records the result. It also diagnoses the local Appium, UiAutomator2, Java, and Android SDK runtime, and starts or stops an Appium server restricted to `127.0.0.1:4723`. Source analysis, AI execution, DSL test-case execution, and test reporting remain future work.
 
 ## Requirements
 
@@ -67,6 +67,7 @@ Runtime data is stored under `%LOCALAPPDATA%\AIMobileTester` and is not committe
 - AI output must validate against a structured ActionPlan before execution.
 - High-risk ADB actions require approval unless a project is explicitly trusted.
 - AI-requested APK installs can only reference a locally staged artifact and always require explicit approval.
+- Logcat is read through a fixed, bounded ADB command; arbitrary Shell filters and arguments are not exposed.
 - Direct device controls use an allowlisted action schema and are persisted to a local audit trail.
 - No telemetry is implemented or enabled.
 

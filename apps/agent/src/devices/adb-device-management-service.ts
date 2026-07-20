@@ -10,6 +10,9 @@ import type {
   DeviceFileKind,
   DeviceFileListResponse,
   DeviceListResponse,
+  DeviceLogcatEntry,
+  DeviceLogcatLevel,
+  DeviceLogcatResponse,
 } from "@device-robot/contracts";
 
 import { DeviceControlError } from "./adb-device-control-service.js";
@@ -38,6 +41,20 @@ const shellMetaCharacters = new Set([
   "!",
   "~",
 ]);
+const DEFAULT_LOGCAT_LIMIT = 300;
+const MINIMUM_LOGCAT_LIMIT = 10;
+const MAXIMUM_LOGCAT_LIMIT = 1_000;
+const logcatLevelByLetter: Record<string, DeviceLogcatLevel> = {
+  V: "verbose",
+  D: "debug",
+  I: "info",
+  W: "warn",
+  E: "error",
+  F: "fatal",
+  A: "assert",
+};
+const logcatThreadtimePattern =
+  /^(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3})\s+(\d+)\s+(\d+)\s+([VDIWEFA])\s+([^:]+):\s?(.*)$/u;
 
 export interface DeviceManagementCommandRunner {
   runText(args: readonly string[]): Promise<string>;
@@ -49,6 +66,7 @@ export interface DeviceManagementService {
     serial: string,
     filter?: DeviceApplicationFilter,
   ): Promise<DeviceApplicationListResponse>;
+  readLogcat(serial: string, limit?: number): Promise<DeviceLogcatResponse>;
 }
 
 export type AdbDeviceManagementServiceOptions = {
@@ -170,6 +188,57 @@ function parseApplications(output: string, source: DeviceApplicationSource): Dev
   });
 }
 
+function normalizeLogcatLimit(value: number | undefined): number {
+  const limit = value ?? DEFAULT_LOGCAT_LIMIT;
+  if (!Number.isInteger(limit) || limit < MINIMUM_LOGCAT_LIMIT || limit > MAXIMUM_LOGCAT_LIMIT) {
+    throw new DeviceControlError(
+      `The logcat limit must be an integer between ${MINIMUM_LOGCAT_LIMIT} and ${MAXIMUM_LOGCAT_LIMIT}`,
+      400,
+    );
+  }
+  return limit;
+}
+
+export function parseLogcatEntries(output: string): DeviceLogcatEntry[] {
+  return output.split(/\r?\n/u).flatMap((line): DeviceLogcatEntry[] => {
+    if (line.trim().length === 0) {
+      return [];
+    }
+
+    const match = logcatThreadtimePattern.exec(line);
+    if (match === null) {
+      return [{ level: "unknown", message: line }];
+    }
+
+    const [, timestamp, processIdValue, threadIdValue, levelLetter, tagValue, message] = match;
+    const processId = Number.parseInt(processIdValue ?? "", 10);
+    const threadId = Number.parseInt(threadIdValue ?? "", 10);
+    const level = logcatLevelByLetter[levelLetter ?? ""];
+    const tag = tagValue?.trim();
+
+    if (
+      Number.isNaN(processId) ||
+      Number.isNaN(threadId) ||
+      level === undefined ||
+      tag === undefined ||
+      tag.length === 0
+    ) {
+      return [{ level: "unknown", message: line }];
+    }
+
+    return [
+      {
+        timestamp,
+        processId,
+        threadId,
+        level,
+        tag,
+        message: message ?? "",
+      },
+    ];
+  });
+}
+
 export class AdbDeviceManagementService implements DeviceManagementService {
   readonly #deviceService: DeviceDiscoveryService;
   readonly #runner: DeviceManagementCommandRunner;
@@ -247,6 +316,34 @@ export class AdbDeviceManagementService implements DeviceManagementService {
       };
     } catch (error) {
       throw this.#asManagementError(error, "Application list failed");
+    }
+  }
+
+  public async readLogcat(
+    serial: string,
+    requestedLimit: number = DEFAULT_LOGCAT_LIMIT,
+  ): Promise<DeviceLogcatResponse> {
+    await this.#requireReadyDevice(serial);
+    const limit = normalizeLogcatLimit(requestedLimit);
+
+    try {
+      const output = await this.#runner.runText([
+        "-s",
+        serial,
+        "logcat",
+        "-d",
+        "-v",
+        "threadtime",
+        "-t",
+        String(limit),
+      ]);
+      return {
+        serial,
+        entries: parseLogcatEntries(output).slice(-limit),
+        readAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      throw this.#asManagementError(error, "Logcat read failed");
     }
   }
 

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Bot, FileText, FolderGit2, LayoutDashboard, Play, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { AndroidDevice } from "@device-robot/contracts";
 
@@ -102,6 +103,23 @@ function batteryLabel(device: AndroidDevice | undefined): string {
   return `电量 ${battery.level}%${suffix}`;
 }
 
+function WorkspaceIcon({ viewId }: { viewId: ViewId }): React.JSX.Element {
+  const iconProps = { "aria-hidden": true, size: 16, strokeWidth: 1.8 };
+
+  switch (viewId) {
+    case "devices":
+      return <LayoutDashboard {...iconProps} />;
+    case "projects":
+      return <FolderGit2 {...iconProps} />;
+    case "conversations":
+      return <Bot {...iconProps} />;
+    case "runs":
+      return <Play {...iconProps} />;
+    case "reports":
+      return <FileText {...iconProps} />;
+  }
+}
+
 function PlannedView({ content }: { content: PlannedViewContent }): React.JSX.Element {
   return (
     <section className="planned-workspace" aria-label={`${content.title} 工作区`}>
@@ -182,7 +200,8 @@ function ConsoleHeader({
             aria-current={activeView === tab.id ? "page" : undefined}
             onClick={() => onNavigate(tab.id)}
           >
-            {tab.label}
+            <WorkspaceIcon viewId={tab.id} />
+            <span>{tab.label}</span>
           </button>
         ))}
         <div className="workspace-add">
@@ -190,17 +209,19 @@ function ConsoleHeader({
             type="button"
             className="workspace-add-trigger"
             aria-label="添加工作页签"
+            title="添加工作页签"
             aria-expanded={addMenuOpen}
             disabled={addableTabs.length === 0}
             onClick={onToggleAddMenu}
           >
-            +
+            <Plus aria-hidden="true" size={17} strokeWidth={1.8} />
           </button>
           {addMenuOpen && (
             <div className="workspace-add-menu" aria-label="可添加的工作页签">
               {addableTabs.map((tab) => (
                 <button key={tab.id} type="button" onClick={() => onAddView(tab.id)}>
-                  {tab.label}
+                  <WorkspaceIcon viewId={tab.id} />
+                  <span>{tab.label}</span>
                 </button>
               ))}
             </div>

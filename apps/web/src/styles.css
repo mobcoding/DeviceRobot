@@ -124,6 +124,18 @@ summary:focus-visible {
   font-weight: 700;
 }
 
+.console-nav > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.console-nav > button svg,
+.workspace-add-menu button svg {
+  flex: 0 0 auto;
+}
+
 .console-nav > button:hover,
 .workspace-add-trigger:hover:not(:disabled),
 .workspace-add-trigger[aria-expanded="true"] {
@@ -143,11 +155,11 @@ summary:focus-visible {
 }
 
 .workspace-add-trigger {
+  display: inline-flex;
   min-width: 38px;
+  align-items: center;
+  justify-content: center;
   padding: 0;
-  font-size: 21px;
-  font-weight: 300;
-  line-height: 1;
 }
 
 .workspace-add-trigger:disabled {
@@ -170,7 +182,10 @@ summary:focus-visible {
 }
 
 .workspace-add-menu button {
-  min-height: 32px;
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 7px;
   padding: 0 8px;
   border: 0;
   border-radius: 3px;

@@ -1,4 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  BatteryCharging,
+  Cable,
+  ChevronDown,
+  Cpu,
+  ListTree,
+  Network,
+  Package,
+  Smartphone,
+  Wrench,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import type { AndroidDevice, DeviceControlAction } from "@device-robot/contracts";
 
@@ -53,6 +64,49 @@ function connectionLabel(connection: AndroidDevice["connection"]): string {
     default:
       return "模拟器";
   }
+}
+
+function networkLabel(device: AndroidDevice): string {
+  const network = device.network;
+  if (network === undefined) {
+    return "状态未知";
+  }
+
+  if (!network.connected) {
+    return "未连接";
+  }
+
+  switch (network.transport) {
+    case "wifi":
+      return "Wi-Fi 已连接";
+    case "mobile":
+      return "移动网络已连接";
+    case "ethernet":
+      return "以太网已连接";
+    default:
+      return "已连接";
+  }
+}
+
+function batteryLabel(device: AndroidDevice): string {
+  const battery = device.battery;
+  if (battery === undefined) {
+    return "状态未知";
+  }
+
+  switch (battery.state) {
+    case "charging":
+      return `${battery.level}%（充电中）`;
+    case "full":
+      return `${battery.level}%（已充满）`;
+    default:
+      return `${battery.level}%`;
+  }
+}
+
+function androidLabel(device: AndroidDevice): string {
+  const version = device.androidVersion ?? "未上报";
+  return device.apiLevel === undefined ? version : `${version} · API ${device.apiLevel}`;
 }
 
 export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.JSX.Element {
@@ -146,49 +200,102 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
   return (
     <section className="device-overview" aria-label="设备工作台">
       <header className="overview-heading">
-        <div>
-          <p className="eyebrow">设备</p>
+        <div className="overview-title-row">
+          <Smartphone aria-hidden="true" size={28} strokeWidth={1.8} />
           <h1>概览</h1>
         </div>
-        <span className="overview-device-name">{deviceName(device)}</span>
       </header>
 
       <dl className="overview-grid">
         <div>
-          <dt>制造商</dt>
+          <dt>
+            <Smartphone aria-hidden="true" size={16} strokeWidth={1.8} />
+            制造商
+          </dt>
           <dd>{device.manufacturer ?? "未上报"}</dd>
         </div>
         <div>
-          <dt>型号</dt>
+          <dt>
+            <Cpu aria-hidden="true" size={16} strokeWidth={1.8} />
+            型号
+          </dt>
           <dd>{deviceName(device)}</dd>
         </div>
         <div>
-          <dt>Android 版本</dt>
-          <dd>{device.androidVersion ?? "未上报"}</dd>
-        </div>
-        <div>
-          <dt>API 级别</dt>
-          <dd>{device.apiLevel ?? "未上报"}</dd>
-        </div>
-        <div>
-          <dt>传输连接</dt>
+          <dt>
+            <Cable aria-hidden="true" size={16} strokeWidth={1.8} />
+            传输连接
+          </dt>
           <dd>{connectionLabel(device.connection)}</dd>
         </div>
         <div>
-          <dt>设备序列号</dt>
+          <dt>
+            <Network aria-hidden="true" size={16} strokeWidth={1.8} />
+            网络状态
+          </dt>
+          <dd>{networkLabel(device)}</dd>
+        </div>
+        <div>
+          <dt>
+            <Smartphone aria-hidden="true" size={16} strokeWidth={1.8} />
+            Android 版本
+          </dt>
+          <dd>{androidLabel(device)}</dd>
+        </div>
+        <div>
+          <dt>
+            <BatteryCharging aria-hidden="true" size={16} strokeWidth={1.8} />
+            电池电量
+          </dt>
+          <dd>{batteryLabel(device)}</dd>
+        </div>
+        <div>
+          <dt>
+            <Package aria-hidden="true" size={16} strokeWidth={1.8} />
+            产品代号
+          </dt>
+          <dd>{device.product ?? device.deviceName ?? "未上报"}</dd>
+        </div>
+        <div>
+          <dt>
+            <Smartphone aria-hidden="true" size={16} strokeWidth={1.8} />
+            设备序列号
+          </dt>
           <dd className="serial-value">{serial}</dd>
         </div>
       </dl>
 
       <details className="console-accordion">
-        <summary>测试运行环境</summary>
+        <summary>
+          <span className="accordion-title">
+            <Cpu aria-hidden="true" size={18} strokeWidth={1.8} />
+            测试运行环境
+          </span>
+          <ChevronDown
+            className="accordion-chevron"
+            aria-hidden="true"
+            size={18}
+            strokeWidth={1.8}
+          />
+        </summary>
         <div className="console-accordion-content">
           <AppiumRuntimePanel controls={false} />
         </div>
       </details>
 
       <details className="console-accordion">
-        <summary>设备控制</summary>
+        <summary>
+          <span className="accordion-title">
+            <Wrench aria-hidden="true" size={18} strokeWidth={1.8} />
+            设备控制
+          </span>
+          <ChevronDown
+            className="accordion-chevron"
+            aria-hidden="true"
+            size={18}
+            strokeWidth={1.8}
+          />
+        </summary>
         <div className="console-accordion-content">
           {errorMessage !== undefined && (
             <p className="control-error" role="alert">
@@ -319,7 +426,18 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
       </details>
 
       <details className="console-accordion">
-        <summary>应用控制</summary>
+        <summary>
+          <span className="accordion-title">
+            <Package aria-hidden="true" size={18} strokeWidth={1.8} />
+            应用控制
+          </span>
+          <ChevronDown
+            className="accordion-chevron"
+            aria-hidden="true"
+            size={18}
+            strokeWidth={1.8}
+          />
+        </summary>
         <div className="console-accordion-content application-control">
           {errorMessage !== undefined && (
             <p className="control-error" role="alert">
@@ -356,7 +474,18 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
       </details>
 
       <details className="console-accordion">
-        <summary>UI 层级与操作审计</summary>
+        <summary>
+          <span className="accordion-title">
+            <ListTree aria-hidden="true" size={18} strokeWidth={1.8} />
+            UI 层级与操作审计
+          </span>
+          <ChevronDown
+            className="accordion-chevron"
+            aria-hidden="true"
+            size={18}
+            strokeWidth={1.8}
+          />
+        </summary>
         <div className="console-accordion-content evidence-content">
           <section>
             <div className="evidence-heading">

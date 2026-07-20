@@ -176,7 +176,7 @@ describe("DeviceRobot Web UI", () => {
     expect(screen.getByRole("region", { name: "设备工作台" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "启动" })).toBeInTheDocument();
     expect(screen.getByText("ADB 就绪")).toBeInTheDocument();
-    expect(screen.getByText("Wi-Fi 已连接")).toBeInTheDocument();
+    expect(screen.getAllByText("Wi-Fi 已连接")).toHaveLength(2);
     expect(screen.getByText("电量 86% 充电中")).toBeInTheDocument();
   });
 

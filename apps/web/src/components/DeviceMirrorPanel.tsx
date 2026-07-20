@@ -420,7 +420,6 @@ export function DeviceMirrorPanel({ device }: DeviceMirrorPanelProps): React.JSX
       <header className="mirror-header">
         <div>
           <p>实时画面</p>
-          <strong>{deviceName(device)}</strong>
         </div>
         <div className="mirror-actions">
           <button

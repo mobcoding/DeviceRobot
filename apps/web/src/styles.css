@@ -305,7 +305,7 @@ summary:focus-visible {
 
 .device-console-layout {
   display: grid;
-  grid-template-columns: 348px minmax(0, 1fr);
+  grid-template-columns: minmax(360px, 1fr) minmax(0, 1.618fr);
   min-height: calc(100vh - 54px);
 }
 
@@ -349,15 +349,6 @@ summary:focus-visible {
   margin: 0 0 3px;
   color: #959da2;
   font-size: 10px;
-}
-
-.mirror-header strong {
-  overflow: hidden;
-  max-width: 220px;
-  color: #eceeef;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .mirror-refresh,

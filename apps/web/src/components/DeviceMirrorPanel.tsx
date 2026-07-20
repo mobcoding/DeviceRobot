@@ -185,7 +185,9 @@ export function DeviceMirrorPanel({ device }: DeviceMirrorPanelProps): React.JSX
         const description = decodeBase64(configuration.description);
         decoder = new VideoDecoder({
           output: drawFrame,
-          error: () => fail("实时画面解码失败"),
+          error: () => {
+            fail("实时画面解码失败");
+          },
         });
         decoder.configure({
           codec: configuration.codec,
@@ -260,9 +262,6 @@ export function DeviceMirrorPanel({ device }: DeviceMirrorPanelProps): React.JSX
       }
 
       const keyframe = (packetType & 1) === 1;
-      if (!keyframe && decoder.decodeQueueSize > 2) {
-        return;
-      }
 
       try {
         const timestamp = Number(new DataView(packet.buffer).getBigUint64(1, false));

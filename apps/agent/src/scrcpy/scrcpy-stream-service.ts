@@ -68,7 +68,7 @@ type ScrcpySession = {
     read(): Promise<{ done: boolean; value?: ScrcpyMediaStreamPacket | undefined }>;
     cancel(): Promise<void>;
   };
-  subscribers: Set<ScrcpyStreamSubscriber>;
+  subscribers: Map<ScrcpyStreamSubscriber, { awaitingKeyframe: boolean }>;
   configuration?: string;
   pump?: Promise<void>;
   closeTimer?: NodeJS.Timeout | undefined;
@@ -276,9 +276,10 @@ export class AdbScrcpyStreamService implements ScrcpyStreamService {
       session.closeTimer = undefined;
     }
 
-    session.subscribers.add(subscriber);
+    session.subscribers.set(subscriber, { awaitingKeyframe: true });
     if (session.configuration !== undefined) {
       subscriber.send(session.configuration, false);
+      void session.controller.resetVideo().catch(() => undefined);
     }
 
     session.pump ??= this.#pump(session);
@@ -400,7 +401,7 @@ export class AdbScrcpyStreamService implements ScrcpyStreamService {
         client,
         controller,
         reader: video.stream.getReader(),
-        subscribers: new Set(),
+        subscribers: new Map(),
         closed: false,
       };
     } catch (error) {
@@ -420,11 +421,11 @@ export class AdbScrcpyStreamService implements ScrcpyStreamService {
 
         if (value.type === "configuration") {
           session.configuration = configurationMessage(value.data);
-          this.#broadcast(session, session.configuration, false);
+          this.#broadcastConfiguration(session, session.configuration);
           continue;
         }
 
-        this.#broadcast(session, encodeVideoPacket(value), true);
+        this.#broadcastVideoPacket(session, value);
       }
     } catch (error) {
       if (!session.closed) {
@@ -443,9 +444,44 @@ export class AdbScrcpyStreamService implements ScrcpyStreamService {
   }
 
   #broadcast(session: ScrcpySession, data: string | Uint8Array, binary: boolean): void {
-    for (const subscriber of session.subscribers) {
+    for (const subscriber of session.subscribers.keys()) {
       try {
         subscriber.send(data, binary);
+      } catch {
+        session.subscribers.delete(subscriber);
+      }
+    }
+  }
+
+  #broadcastConfiguration(session: ScrcpySession, configuration: string): void {
+    for (const [subscriber, state] of session.subscribers) {
+      try {
+        state.awaitingKeyframe = true;
+        subscriber.send(configuration, false);
+      } catch {
+        session.subscribers.delete(subscriber);
+      }
+    }
+  }
+
+  #broadcastVideoPacket(
+    session: ScrcpySession,
+    packet: Extract<ScrcpyMediaStreamPacket, { type: "data" }>,
+  ): void {
+    if (packet.keyframe) {
+      for (const state of session.subscribers.values()) {
+        state.awaitingKeyframe = false;
+      }
+    }
+
+    const data = encodeVideoPacket(packet);
+    for (const [subscriber, state] of session.subscribers) {
+      if (state.awaitingKeyframe) {
+        continue;
+      }
+
+      try {
+        subscriber.send(data, true);
       } catch {
         session.subscribers.delete(subscriber);
       }

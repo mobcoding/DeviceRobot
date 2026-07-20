@@ -66,6 +66,7 @@ Runtime data is stored under `%LOCALAPPDATA%\AIMobileTester` and is not committe
 - Non-loopback hosts and cross-origin browser requests are rejected.
 - AI output must validate against a structured ActionPlan before execution.
 - High-risk ADB actions require approval unless a project is explicitly trusted.
+- AI-requested APK installs can only reference a locally staged artifact and always require explicit approval.
 - Direct device controls use an allowlisted action schema and are persisted to a local audit trail.
 - No telemetry is implemented or enabled.
 

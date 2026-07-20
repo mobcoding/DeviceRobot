@@ -36,6 +36,30 @@ describe("shared contracts", () => {
     expect(result.success).toBe(false);
   });
 
+  it("allows an installation plan to reference only a staged APK artifact", () => {
+    const plan = actionPlanSchema.parse({
+      id: "plan-1",
+      projectId: "project-1",
+      requiresApproval: true,
+      actions: [
+        {
+          action: "app.install",
+          artifactId: "123e4567-e89b-12d3-a456-426614174000",
+          replaceExisting: true,
+          allowTestPackage: true,
+        },
+      ],
+    });
+
+    expect(plan.actions[0]).toMatchObject({ action: "app.install" });
+    expect(
+      actionPlanSchema.safeParse({
+        ...plan,
+        actions: [{ action: "app.install", apkPath: "C:\\untrusted.apk" }],
+      }).success,
+    ).toBe(false);
+  });
+
   it("accepts a real connected-device response", () => {
     const response = deviceListResponseSchema.parse({
       adb: {

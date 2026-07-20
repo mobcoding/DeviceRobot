@@ -22,7 +22,15 @@ export const selectorSchema = z
 const timeoutSchema = z.number().int().positive().max(120_000).optional();
 
 const appActionSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("app.install"), apkPath: z.string().min(1) }),
+  z
+    .object({
+      action: z.literal("app.install"),
+      // The Agent resolves this to a locally staged APK. Models must never provide a file path.
+      artifactId: z.uuid(),
+      replaceExisting: z.boolean().default(true),
+      allowTestPackage: z.boolean().default(true),
+    })
+    .strict(),
   z.object({ action: z.literal("app.launch"), appId: z.string().min(1) }),
   z.object({ action: z.literal("app.stop"), appId: z.string().min(1) }),
 ]);

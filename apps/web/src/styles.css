@@ -53,7 +53,7 @@ summary:focus-visible {
   top: 0;
   display: grid;
   min-height: 54px;
-  grid-template-columns: 348px minmax(0, 1fr);
+  grid-template-columns: minmax(360px, 1fr) minmax(0, 1.618fr);
   align-items: center;
   gap: 0;
   padding: 0;
@@ -1073,6 +1073,41 @@ h3 {
   border-radius: 4px;
   color: #191011;
   background: #e49ca6;
+}
+
+@media (min-width: 901px) and (max-width: 1320px) {
+  .workspace-header {
+    padding-left: 10px;
+  }
+
+  .console-nav > button {
+    min-width: 64px;
+    padding-inline: 8px;
+    font-size: 12px;
+  }
+
+  .console-runtime {
+    gap: 4px;
+    padding-right: 10px;
+  }
+
+  .runtime-indicator {
+    padding-inline: 6px;
+    font-size: 9px;
+  }
+
+  .device-telemetry {
+    font-size: 11px;
+  }
+
+  .appium-compact {
+    gap: 3px;
+  }
+
+  .topbar-action {
+    padding-inline: 8px;
+    font-size: 10px;
+  }
 }
 
 @media (max-width: 1120px) {

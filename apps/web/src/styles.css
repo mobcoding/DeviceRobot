@@ -43,7 +43,7 @@ summary:focus-visible {
 }
 
 .device-console-shell {
-  --device-sidebar-width: clamp(300px, 38.1966%, calc(100% - 360px));
+  --device-sidebar-width: 300px;
   min-height: 100vh;
   background: #080808;
 }

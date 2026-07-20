@@ -76,8 +76,11 @@ summary:focus-visible {
 
 .device-selector > span {
   display: block;
-  flex: 0 0 48px;
-  min-width: 48px;
+  flex: 0 0 60px;
+  min-width: 60px;
+  color: #d8dfe2;
+  font-size: 13px;
+  font-weight: 700;
   line-height: 1;
   word-break: keep-all;
   white-space: nowrap;

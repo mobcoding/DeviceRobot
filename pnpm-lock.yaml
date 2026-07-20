@@ -55,6 +55,21 @@ importers:
       "@fastify/static":
         specifier: 10.1.0
         version: 10.1.0
+      "@fastify/websocket":
+        specifier: 11.3.0
+        version: 11.3.0
+      "@yume-chan/adb":
+        specifier: 2.6.0
+        version: 2.6.0
+      "@yume-chan/adb-scrcpy":
+        specifier: 2.3.2
+        version: 2.3.2
+      "@yume-chan/adb-server-node-tcp":
+        specifier: 2.5.2
+        version: 2.5.2
+      "@yume-chan/scrcpy":
+        specifier: 2.3.0
+        version: 2.3.0
       appium:
         specifier: 3.5.2
         version: 3.5.2
@@ -1216,6 +1231,12 @@ packages:
         integrity: sha512-iK/8TvRM/EgNOyQL+EpWu+x3aR6o4GWt+UI+27zmE7w6t/6d80mXqOtWLdEKQ13vL/g1Jry0ae2icj6GP7tGzA==,
       }
 
+  "@fastify/websocket@11.3.0":
+    resolution:
+      {
+        integrity: sha512-g89ag4BCcD9YP5wBZXixzoLnuf5j89p/sXFcfpCiv2pdEkYYukBEoK3heVzqsp0EAtszVDc2BBZG0KZqeAShIA==,
+      }
+
   "@humanfs/core@0.19.2":
     resolution:
       {
@@ -2067,6 +2088,60 @@ packages:
         integrity: sha512-A9gOqLdi6cV4ibazAjcQufGj0B1y/vDqYrcuP6d/6x8P27gRS8643Dj9o1dEKtB6O7fwxb2FgBmJS2mX7gpvdw==,
       }
     engines: { node: ">=14.6" }
+
+  "@yume-chan/adb-scrcpy@2.3.2":
+    resolution:
+      {
+        integrity: sha512-wg45dep+dYy4MAVMtsooPAo/aXKiGbpGHzcQWoHnl4uE4YJKrZK0sK5L++rPNM0WbwlPdSpZ32jMJT+i0u1Mdw==,
+      }
+
+  "@yume-chan/adb-server-node-tcp@2.5.2":
+    resolution:
+      {
+        integrity: sha512-ga9icFBRUk1n6lO+ymlj83qE+90kMLV8sQA3w9mZAisfdxxEEIq1cvXitFQJvDgL0NuFQruVI4JoZA/wrgpKOw==,
+      }
+
+  "@yume-chan/adb@2.6.0":
+    resolution:
+      {
+        integrity: sha512-1bM4/YwLUr7UHkvC3pe5fIPNNIgOQ97nUIvC4ooPZwRKG9pyHG39EihivZVmu3pm28XwHSGh5PC3sQi4ycoUXA==,
+      }
+
+  "@yume-chan/async@4.1.3":
+    resolution:
+      {
+        integrity: sha512-0vzhNJMkWUPyjKzUK4rqHEeCU6YQtF78RsB1kFRB6Y2BLupmEQNxcSb0mjKabPL9jZpCCiLa5KL8oTOJClUVaw==,
+      }
+
+  "@yume-chan/event@2.0.0":
+    resolution:
+      {
+        integrity: sha512-z56MDOcX1QlgLUCuA6th3r10negVb7A3gzY//TwSC9ZOvzuRlrAqXcxZf1T3hHfNMk/NFO9RIgQgegXYSfaqLw==,
+      }
+
+  "@yume-chan/no-data-view@2.0.0":
+    resolution:
+      {
+        integrity: sha512-0GRJrrt6wtZlbiE92jocHOnaAvjQ+Y7xwwhwOPqLkwf90Kj1JIHJ5Zh4wJVQSQIkzfRSOpM+jeEQdC2K15snlA==,
+      }
+
+  "@yume-chan/scrcpy@2.3.0":
+    resolution:
+      {
+        integrity: sha512-rpsNvy7H8mf6gVsWYRSkIXmk0wVsP3XOdw3kASokwZkSWtygB2Z1wjoPaEAvaayVCjsz+y/YfG35TOcykEihGw==,
+      }
+
+  "@yume-chan/stream-extra@2.6.1":
+    resolution:
+      {
+        integrity: sha512-GQ+Q0SQf9p6Fl7ZK0UO5vHVGBJgkTJm/WXKurUMpjHQV4VUpjZ2hrQ744aCfT7WwSol7Bz/uEiXWmk240Hr/hg==,
+      }
+
+  "@yume-chan/struct@2.3.2":
+    resolution:
+      {
+        integrity: sha512-afoCnSKV+5HRK7e4innVd9YTYDyNWdjA1CVQa1j8rWYnmr7HGZfdkHMQr+AESLk6GxWFMzOIPQIG6nYOTGMFIw==,
+      }
 
   abort-controller@3.0.0:
     resolution:
@@ -3041,6 +3116,12 @@ packages:
     resolution:
       {
         integrity: sha512-jtD6YG370ZCIi/9GTaJKQxWTZD045+4R4hTk/x1UyoqadyJ9x9CgSi1RlVDQF8U2sxLLSnFkCaMihqljHIWgMg==,
+      }
+
+  duplexify@4.1.3:
+    resolution:
+      {
+        integrity: sha512-M3BmBhwJRZsSx38lZyhE53Csddgzl5R7xGJNk7CVddZD6CcmwMCH8J+7AprIrQKH7TonKxaCjcv27Qmf+sQ+oA==,
       }
 
   eastasianwidth@0.2.0:
@@ -5284,6 +5365,12 @@ packages:
         integrity: sha512-6yHMqgLYDzQDcAkL+tjJDC5nSNuNIx0vZtRZeiPh7Saef7VHX9H5Ijn9l2VIol2zaNYlYEX6KyuT/237A58qEQ==,
       }
 
+  stream-shift@1.0.3:
+    resolution:
+      {
+        integrity: sha512-76ORR0DO1o1hlKwTbi/DM3EXWGf3ZJYO8cXX5RJwnul2DEg2oyoZyjLNoQM8WsvZiFKCRfC1O0J7iCvie3RZmQ==,
+      }
+
   streamx@2.28.0:
     resolution:
       {
@@ -6513,6 +6600,15 @@ snapshots:
       fastq: 1.20.1
       glob: 13.0.6
 
+  "@fastify/websocket@11.3.0":
+    dependencies:
+      duplexify: 4.1.3
+      fastify-plugin: 6.0.0
+      ws: 8.21.1
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+
   "@humanfs/core@0.19.2":
     dependencies:
       "@humanfs/types": 0.15.0
@@ -6990,6 +7086,55 @@ snapshots:
       tinyrainbow: 3.1.0
 
   "@xmldom/xmldom@0.9.10": {}
+
+  "@yume-chan/adb-scrcpy@2.3.2":
+    dependencies:
+      "@yume-chan/adb": 2.6.0
+      "@yume-chan/async": 4.1.3
+      "@yume-chan/event": 2.0.0
+      "@yume-chan/scrcpy": 2.3.0
+      "@yume-chan/stream-extra": 2.6.1
+      "@yume-chan/struct": 2.3.2
+
+  "@yume-chan/adb-server-node-tcp@2.5.2":
+    dependencies:
+      "@yume-chan/adb": 2.6.0
+      "@yume-chan/async": 4.1.3
+      "@yume-chan/stream-extra": 2.6.1
+      "@yume-chan/struct": 2.3.2
+
+  "@yume-chan/adb@2.6.0":
+    dependencies:
+      "@yume-chan/async": 4.1.3
+      "@yume-chan/event": 2.0.0
+      "@yume-chan/no-data-view": 2.0.0
+      "@yume-chan/stream-extra": 2.6.1
+      "@yume-chan/struct": 2.3.2
+
+  "@yume-chan/async@4.1.3": {}
+
+  "@yume-chan/event@2.0.0":
+    dependencies:
+      "@yume-chan/async": 4.1.3
+
+  "@yume-chan/no-data-view@2.0.0": {}
+
+  "@yume-chan/scrcpy@2.3.0":
+    dependencies:
+      "@yume-chan/async": 4.1.3
+      "@yume-chan/no-data-view": 2.0.0
+      "@yume-chan/stream-extra": 2.6.1
+      "@yume-chan/struct": 2.3.2
+
+  "@yume-chan/stream-extra@2.6.1":
+    dependencies:
+      "@yume-chan/async": 4.1.3
+      "@yume-chan/struct": 2.3.2
+
+  "@yume-chan/struct@2.3.2":
+    dependencies:
+      "@yume-chan/async": 4.1.3
+      "@yume-chan/no-data-view": 2.0.0
 
   abort-controller@3.0.0:
     dependencies:
@@ -7552,6 +7697,13 @@ snapshots:
       gopd: 1.2.0
 
   duplexer@0.1.2: {}
+
+  duplexify@4.1.3:
+    dependencies:
+      end-of-stream: 1.4.5
+      inherits: 2.0.4
+      readable-stream: 3.6.2
+      stream-shift: 1.0.3
 
   eastasianwidth@0.2.0: {}
 
@@ -8956,6 +9108,8 @@ snapshots:
     dependencies:
       duplexer: 0.1.2
       through: 2.3.8
+
+  stream-shift@1.0.3: {}
 
   streamx@2.28.0:
     dependencies:

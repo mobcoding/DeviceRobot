@@ -1,49 +1,388 @@
-import { useEffect, useState } from "react";
-import type { AndroidDevice } from "@device-robot/contracts";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, LoaderCircle, RefreshCw } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import type { AndroidDevice, DeviceControlAction } from "@device-robot/contracts";
 
-import { deviceScreenshotUrl } from "../api/device-control";
+import { executeDeviceAction } from "../api/device-control";
 
 type DeviceMirrorPanelProps = {
   device: AndroidDevice;
+};
+
+type DevicePoint = {
+  x: number;
+  y: number;
+};
+
+type StreamConfiguration = {
+  type: "configuration";
+  codec: string;
+  description: string;
+  width: number;
+  height: number;
 };
 
 function deviceName(device: AndroidDevice): string {
   return device.model ?? device.deviceName ?? device.serial;
 }
 
+function streamUrl(serial: string): string {
+  const protocol = globalThis.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${globalThis.location.host}/api/v1/devices/${encodeURIComponent(serial)}/scrcpy/stream`;
+}
+
+function decodeBase64(value: string): Uint8Array {
+  const decoded = globalThis.atob(value);
+  const bytes = new Uint8Array(decoded.length);
+  for (let index = 0; index < decoded.length; index += 1) {
+    bytes[index] = decoded.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function parseConfiguration(value: unknown): StreamConfiguration | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+
+  const message = value as Record<string, unknown>;
+  if (
+    message.type !== "configuration" ||
+    typeof message.codec !== "string" ||
+    typeof message.description !== "string" ||
+    typeof message.width !== "number" ||
+    typeof message.height !== "number"
+  ) {
+    return undefined;
+  }
+
+  return {
+    type: "configuration",
+    codec: message.codec,
+    description: message.description,
+    width: message.width,
+    height: message.height,
+  };
+}
+
+function pointFromPointer(
+  event: React.PointerEvent<HTMLCanvasElement>,
+  deviceSize: DevicePoint,
+): DevicePoint | undefined {
+  const canvas = event.currentTarget;
+  const bounds = canvas.getBoundingClientRect();
+  if (bounds.width === 0 || bounds.height === 0) {
+    return undefined;
+  }
+
+  const deviceAspectRatio = deviceSize.x / deviceSize.y;
+  const boundsAspectRatio = bounds.width / bounds.height;
+  const renderedWidth =
+    deviceAspectRatio > boundsAspectRatio ? bounds.width : bounds.height * deviceAspectRatio;
+  const renderedHeight =
+    deviceAspectRatio > boundsAspectRatio ? bounds.width / deviceAspectRatio : bounds.height;
+  const offsetX = (bounds.width - renderedWidth) / 2;
+  const offsetY = (bounds.height - renderedHeight) / 2;
+  const relativeX = event.clientX - bounds.left - offsetX;
+  const relativeY = event.clientY - bounds.top - offsetY;
+
+  if (relativeX < 0 || relativeY < 0 || relativeX > renderedWidth || relativeY > renderedHeight) {
+    return undefined;
+  }
+
+  return {
+    x: Math.round((relativeX / renderedWidth) * deviceSize.x),
+    y: Math.round((relativeY / renderedHeight) * deviceSize.y),
+  };
+}
+
 export function DeviceMirrorPanel({ device }: DeviceMirrorPanelProps): React.JSX.Element {
-  const [revision, setRevision] = useState(0);
-  const [error, setError] = useState<string>();
+  const queryClient = useQueryClient();
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const decoderRef = useRef<VideoDecoder | undefined>(undefined);
+  const pointerStart = useRef<DevicePoint | undefined>(undefined);
+  const [streamAttempt, setStreamAttempt] = useState(0);
+  const [streamState, setStreamState] = useState<"connecting" | "live" | "error">("connecting");
+  const [streamError, setStreamError] = useState<string>();
+  const [controlError, setControlError] = useState<string>();
+  const [screenSize, setScreenSize] = useState<DevicePoint>();
+  const serial = device.serial;
+  const actionMutation = useMutation({
+    mutationFn: async (action: DeviceControlAction) => await executeDeviceAction(serial, action),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["device-action-history", serial] });
+      setControlError(undefined);
+    },
+    onError: (actionError) => setControlError(actionError.message),
+  });
 
   useEffect(() => {
-    setRevision(0);
-    setError(undefined);
-  }, [device.serial]);
+    let disposed = false;
+    let decoder: VideoDecoder | undefined;
+
+    const closeDecoder = (): void => {
+      if (decoder !== undefined && decoder.state !== "closed") {
+        decoder.close();
+      }
+      if (decoderRef.current === decoder) {
+        decoderRef.current = undefined;
+      }
+    };
+
+    const fail = (message: string): void => {
+      if (disposed) {
+        return;
+      }
+
+      setStreamState("error");
+      setStreamError(message);
+    };
+
+    if (!("WebSocket" in globalThis) || !("VideoDecoder" in globalThis)) {
+      fail("当前浏览器不支持实时画面解码");
+      return () => undefined;
+    }
+
+    const drawFrame = (frame: VideoFrame): void => {
+      if (disposed) {
+        frame.close();
+        return;
+      }
+
+      const canvas = canvasRef.current;
+      if (canvas === null) {
+        frame.close();
+        return;
+      }
+
+      const context = canvas.getContext("2d");
+      if (context === null) {
+        frame.close();
+        return;
+      }
+
+      canvas.width = frame.displayWidth;
+      canvas.height = frame.displayHeight;
+      context.drawImage(frame, 0, 0, canvas.width, canvas.height);
+      frame.close();
+      setScreenSize((current) =>
+        current?.x === canvas.width && current.y === canvas.height
+          ? current
+          : { x: canvas.width, y: canvas.height },
+      );
+      setStreamState("live");
+      setStreamError(undefined);
+    };
+
+    const configureDecoder = (configuration: StreamConfiguration): void => {
+      closeDecoder();
+      try {
+        const description = decodeBase64(configuration.description);
+        decoder = new VideoDecoder({
+          output: drawFrame,
+          error: () => fail("实时画面解码失败"),
+        });
+        decoder.configure({
+          codec: configuration.codec,
+          description: description.buffer,
+          codedWidth: configuration.width,
+          codedHeight: configuration.height,
+        });
+        decoderRef.current = decoder;
+        const canvas = canvasRef.current;
+        if (canvas !== null) {
+          canvas.width = configuration.width;
+          canvas.height = configuration.height;
+        }
+        setScreenSize({ x: configuration.width, y: configuration.height });
+      } catch {
+        fail("设备视频格式无法在当前浏览器中解码");
+      }
+    };
+
+    setStreamState("connecting");
+    setStreamError(undefined);
+    setScreenSize(undefined);
+    pointerStart.current = undefined;
+    const socket = new WebSocket(streamUrl(serial));
+    socket.binaryType = "arraybuffer";
+    socket.onmessage = (event) => {
+      if (typeof event.data === "string") {
+        let message: unknown;
+        try {
+          message = JSON.parse(event.data);
+        } catch {
+          fail("实时画面协议返回了无效数据");
+          return;
+        }
+
+        const configuration = parseConfiguration(message);
+        if (configuration !== undefined) {
+          configureDecoder(configuration);
+          return;
+        }
+
+        if (
+          typeof message === "object" &&
+          message !== null &&
+          (message as Record<string, unknown>).type === "error"
+        ) {
+          fail("无法建立设备实时画面");
+        }
+        return;
+      }
+
+      if (!(event.data instanceof ArrayBuffer) || decoder?.state !== "configured") {
+        return;
+      }
+
+      const packet = new Uint8Array(event.data);
+      if (packet.byteLength <= 9) {
+        return;
+      }
+
+      const packetType = packet[0];
+      if (packetType === undefined) {
+        return;
+      }
+
+      const keyframe = (packetType & 1) === 1;
+      if (!keyframe && decoder.decodeQueueSize > 2) {
+        return;
+      }
+
+      try {
+        const timestamp = Number(new DataView(packet.buffer).getBigUint64(1, false));
+        decoder.decode(
+          new EncodedVideoChunk({
+            type: keyframe ? "key" : "delta",
+            timestamp,
+            data: packet.subarray(9),
+          }),
+        );
+      } catch {
+        fail("实时画面解码失败");
+      }
+    };
+    socket.onclose = () => {
+      if (!disposed) {
+        fail("实时画面已断开");
+      }
+    };
+
+    return () => {
+      disposed = true;
+      socket.close();
+      closeDecoder();
+    };
+  }, [serial, streamAttempt]);
+
+  const executeGesture = (action: DeviceControlAction): void => {
+    if (actionMutation.isPending) {
+      return;
+    }
+
+    setControlError(undefined);
+    actionMutation.mutate(action);
+  };
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>): void => {
+    if (actionMutation.isPending || event.button !== 0 || screenSize === undefined) {
+      return;
+    }
+
+    const point = pointFromPointer(event, screenSize);
+    if (point === undefined) {
+      return;
+    }
+
+    pointerStart.current = point;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerUp = (event: React.PointerEvent<HTMLCanvasElement>): void => {
+    const start = pointerStart.current;
+    pointerStart.current = undefined;
+    if (start === undefined || actionMutation.isPending || screenSize === undefined) {
+      return;
+    }
+
+    const end = pointFromPointer(event, screenSize);
+    if (end === undefined) {
+      return;
+    }
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    const distance = Math.hypot(end.x - start.x, end.y - start.y);
+    if (distance < 24) {
+      executeGesture({ action: "ui.tap", x: end.x, y: end.y });
+      return;
+    }
+
+    executeGesture({
+      action: "ui.swipe",
+      startX: start.x,
+      startY: start.y,
+      endX: end.x,
+      endY: end.y,
+    });
+  };
+
+  const error = controlError ?? streamError;
 
   return (
     <section className="device-mirror" aria-label="屏幕镜像">
       <header className="mirror-header">
         <div>
-          <p>屏幕镜像</p>
+          <p>实时画面</p>
           <strong>{deviceName(device)}</strong>
         </div>
-        <button
-          type="button"
-          className="mirror-refresh"
-          onClick={() => {
-            setError(undefined);
-            setRevision((value) => value + 1);
-          }}
-        >
-          刷新
-        </button>
+        <div className="mirror-actions">
+          <button
+            type="button"
+            className="mirror-refresh"
+            aria-label="返回"
+            title="返回"
+            disabled={actionMutation.isPending}
+            onClick={() => executeGesture({ action: "ui.back" })}
+          >
+            <ArrowLeft aria-hidden="true" size={16} strokeWidth={1.8} />
+          </button>
+          <button
+            type="button"
+            className="mirror-refresh"
+            aria-label="重新连接实时画面"
+            title="重新连接实时画面"
+            onClick={() => setStreamAttempt((attempt) => attempt + 1)}
+          >
+            <RefreshCw aria-hidden="true" size={16} strokeWidth={1.8} />
+          </button>
+        </div>
       </header>
       <div className="mirror-screen-frame">
-        <img
-          alt={`设备截图：${deviceName(device)}`}
-          src={deviceScreenshotUrl(device.serial, revision)}
-          onError={() => setError("无法读取设备截图")}
+        <canvas
+          ref={canvasRef}
+          className="interactive-device-screen"
+          role="img"
+          aria-label={`设备实时画面：${deviceName(device)}`}
+          aria-busy={streamState === "connecting"}
+          onPointerCancel={() => {
+            pointerStart.current = undefined;
+          }}
+          onPointerDown={handlePointerDown}
+          onPointerUp={handlePointerUp}
         />
+        {(streamState === "connecting" || actionMutation.isPending) && (
+          <span
+            className="mirror-operation"
+            aria-label={actionMutation.isPending ? "正在操作设备" : "正在连接实时画面"}
+          >
+            <LoaderCircle aria-hidden="true" size={20} strokeWidth={1.8} />
+          </span>
+        )}
       </div>
       {error !== undefined && <p className="mirror-error">{error}</p>}
     </section>

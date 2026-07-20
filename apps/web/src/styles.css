@@ -334,6 +334,12 @@ summary:focus-visible {
   padding: 0 4px 10px;
 }
 
+.mirror-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
 .mirror-header p,
 .mirror-header strong {
   display: block;
@@ -356,7 +362,10 @@ summary:focus-visible {
 
 .mirror-refresh,
 .text-button {
+  display: inline-flex;
   min-height: 28px;
+  align-items: center;
+  justify-content: center;
   padding: 0 7px;
   border: 1px solid #3a3a3a;
   border-radius: 4px;
@@ -374,6 +383,7 @@ summary:focus-visible {
 }
 
 .mirror-screen-frame {
+  position: relative;
   display: grid;
   width: 100%;
   height: auto;
@@ -387,12 +397,44 @@ summary:focus-visible {
   background: #020202;
 }
 
-.mirror-screen-frame img {
+.mirror-screen-frame canvas {
   display: block;
   width: 100%;
   height: 100%;
   max-height: calc(100vh - 150px);
   object-fit: contain;
+}
+
+.interactive-device-screen {
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.mirror-operation {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  transform: translate(-50%, -50%);
+  border: 1px solid #4d5a5e;
+  border-radius: 4px;
+  color: #bfe1e3;
+  background: rgba(12, 18, 20, 0.88);
+  pointer-events: none;
+}
+
+.mirror-operation svg {
+  animation: mirror-spin 800ms linear infinite;
+}
+
+@keyframes mirror-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .mirror-error,
@@ -1046,7 +1088,7 @@ h3 {
     max-height: 640px;
   }
 
-  .mirror-screen-frame img {
+  .mirror-screen-frame canvas {
     max-height: 640px;
   }
 
@@ -1102,7 +1144,7 @@ h3 {
     min-height: 390px;
   }
 
-  .mirror-screen-frame img {
+  .mirror-screen-frame canvas {
     max-height: 520px;
   }
 

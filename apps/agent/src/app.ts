@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import fastifyStatic from "@fastify/static";
+import fastifyWebsocket from "@fastify/websocket";
 import { ensureAgentDirectories, resolveAgentPaths, type AgentPaths } from "@device-robot/config";
 import {
   deviceActionHistoryResponseSchema,
@@ -31,8 +32,13 @@ import {
 } from "./devices/device-action-audit-store.js";
 import { isAllowedOrigin, isLoopbackHost } from "./security/loopback.js";
 import { AppiumRuntimeError, AppiumRuntimeService } from "./appium/appium-runtime-service.js";
+import {
+  AdbScrcpyStreamService,
+  type ScrcpyStreamService,
+} from "./scrcpy/scrcpy-stream-service.js";
 
 export const AGENT_VERSION = "0.1.0";
+const WEBSOCKET_OPEN = 1;
 
 export type CreateAgentAppOptions = {
   paths?: AgentPaths;
@@ -44,6 +50,7 @@ export type CreateAgentAppOptions = {
   deviceControlService?: DeviceControlService;
   deviceActionAuditStore?: DeviceActionAuditStore;
   appiumRuntimeService?: AppiumRuntimeService;
+  scrcpyStreamService?: ScrcpyStreamService;
 };
 
 export type AgentApp = {
@@ -54,6 +61,7 @@ export type AgentApp = {
   deviceControlService: DeviceControlService;
   deviceActionAuditStore: DeviceActionAuditStore;
   appiumRuntimeService: AppiumRuntimeService;
+  scrcpyStreamService: ScrcpyStreamService;
 };
 
 function defaultWebRoot(): string {
@@ -105,10 +113,14 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
   const deviceActionAuditStore =
     options.deviceActionAuditStore ?? new SqliteDeviceActionAuditStore(database.sqlite);
   const appiumRuntimeService = options.appiumRuntimeService ?? new AppiumRuntimeService({ paths });
+  const scrcpyStreamService =
+    options.scrcpyStreamService ?? new AdbScrcpyStreamService({ paths, deviceService });
 
   const app = Fastify({
     logger: options.logger ?? false,
   });
+
+  await app.register(fastifyWebsocket);
 
   app.addHook("onRequest", async (request, reply) => {
     if (!isLoopbackHost(request.headers.host)) {
@@ -218,6 +230,48 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     }
   });
 
+  app.get("/api/v1/devices/:serial/scrcpy/stream", { websocket: true }, (socket, request) => {
+    let unsubscribe: (() => void) | undefined;
+    let closed = false;
+    const dispose = (): void => {
+      closed = true;
+      unsubscribe?.();
+      unsubscribe = undefined;
+    };
+
+    socket.on("close", dispose);
+    socket.on("error", dispose);
+
+    void (async () => {
+      try {
+        const serial = parseSerial(request.params);
+        const release = await scrcpyStreamService.subscribe(serial, {
+          send: (data, binary) => {
+            if (socket.readyState === WEBSOCKET_OPEN) {
+              socket.send(data, { binary });
+            }
+          },
+        });
+
+        if (closed) {
+          release();
+        } else {
+          unsubscribe = release;
+        }
+      } catch (error) {
+        if (socket.readyState === WEBSOCKET_OPEN) {
+          socket.send(
+            JSON.stringify({
+              type: "error",
+              message: error instanceof Error ? error.message : "Unable to start scrcpy streaming",
+            }),
+          );
+          socket.close(1011);
+        }
+      }
+    })();
+  });
+
   if (webAvailable) {
     await app.register(fastifyStatic, {
       root: webRoot,
@@ -234,6 +288,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
   }
 
   app.addHook("onClose", async () => {
+    await scrcpyStreamService.dispose();
     await appiumRuntimeService.dispose();
     database.close();
   });
@@ -246,5 +301,6 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     deviceControlService,
     deviceActionAuditStore,
     appiumRuntimeService,
+    scrcpyStreamService,
   };
 }

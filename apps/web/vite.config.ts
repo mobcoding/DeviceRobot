@@ -8,7 +8,10 @@ export default defineConfig({
     port: 5_173,
     strictPort: true,
     proxy: {
-      "/api": "http://127.0.0.1:43110",
+      "/api": {
+        target: "http://127.0.0.1:43110",
+        ws: true,
+      },
     },
   },
   build: {

@@ -1,17 +1,75 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../src/App";
 
+const scrcpyConfiguration = JSON.stringify({
+  type: "configuration",
+  codec: "avc1.42001e",
+  description: "AA==",
+  width: 1080,
+  height: 2160,
+});
+
+class MockWebSocket {
+  public static readonly instances: MockWebSocket[] = [];
+  public static readonly OPEN = 1;
+  public readonly OPEN = MockWebSocket.OPEN;
+  public readonly url: string;
+  public readyState = MockWebSocket.OPEN;
+  public binaryType = "";
+  public onclose: (() => void) | null = null;
+  public onmessage: ((event: MessageEvent) => void) | null = null;
+
+  public constructor(url: string) {
+    this.url = url;
+    MockWebSocket.instances.push(this);
+    queueMicrotask(() => {
+      this.onmessage?.({ data: scrcpyConfiguration } as MessageEvent);
+    });
+  }
+
+  public close(): void {
+    this.readyState = 3;
+    this.onclose?.();
+  }
+}
+
+class MockVideoDecoder {
+  public state: "unconfigured" | "configured" | "closed" = "unconfigured";
+  public decodeQueueSize = 0;
+
+  public constructor(callbacks: Pick<VideoDecoderInit, "output" | "error">) {
+    void callbacks;
+  }
+
+  public configure(config: VideoDecoderConfig): void {
+    void config;
+    this.state = "configured";
+  }
+
+  public decode(chunk: EncodedVideoChunk): void {
+    void chunk;
+  }
+
+  public close(): void {
+    this.state = "closed";
+  }
+}
+
 beforeEach(() => {
   globalThis.location.hash = "#devices";
+  MockWebSocket.instances.splice(0);
+  vi.stubGlobal("WebSocket", MockWebSocket);
+  vi.stubGlobal("VideoDecoder", MockVideoDecoder);
 });
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 function renderApp(): void {
@@ -87,9 +145,11 @@ const uiTreeResponse = {
 function mockApis(options: { healthError?: Error } = {}): {
   getDeviceRequests: () => number;
   getActionRequests: () => number;
+  getLastAction: () => unknown;
 } {
   let deviceRequests = 0;
   let actionRequests = 0;
+  let lastAction: unknown;
   const actionHistory = {
     serial: "8B3Y0THX0",
     actions: [] as Array<{
@@ -127,6 +187,7 @@ function mockApis(options: { healthError?: Error } = {}): {
       if (url.includes("/actions")) {
         if (method === "POST") {
           actionRequests += 1;
+          lastAction = JSON.parse(String(init?.body ?? "{}"));
           const recordedAction = {
             id: "123e4567-e89b-12d3-a456-426614174000",
             serial: "8B3Y0THX0",
@@ -164,7 +225,11 @@ function mockApis(options: { healthError?: Error } = {}): {
     });
   });
 
-  return { getDeviceRequests: () => deviceRequests, getActionRequests: () => actionRequests };
+  return {
+    getDeviceRequests: () => deviceRequests,
+    getActionRequests: () => actionRequests,
+    getLastAction: () => lastAction,
+  };
 }
 
 describe("DeviceRobot Web UI", () => {
@@ -218,19 +283,17 @@ describe("DeviceRobot Web UI", () => {
     expect(screen.getByText("USB")).toBeInTheDocument();
   });
 
-  it("manually refreshes the selected device mirror", async () => {
+  it("connects the selected device mirror through a scrcpy WebSocket", async () => {
     mockApis();
-    const user = userEvent.setup();
     renderApp();
 
     await screen.findByRole("heading", { level: 1, name: "概览" });
-    const screenshot = screen.getByAltText("设备截图：Pixel 3 XL");
-    expect(screenshot).toHaveAttribute("src", "/api/v1/devices/8B3Y0THX0/screenshot?revision=0");
-    await user.click(screen.getByRole("button", { name: "刷新" }));
-
-    await vi.waitFor(() =>
-      expect(screenshot).toHaveAttribute("src", "/api/v1/devices/8B3Y0THX0/screenshot?revision=1"),
-    );
+    expect(
+      await screen.findByRole("img", { name: "设备实时画面：Pixel 3 XL" }),
+    ).toBeInTheDocument();
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(MockWebSocket.instances[0]?.url).toContain("/api/v1/devices/8B3Y0THX0/scrcpy/stream");
+    expect(screen.queryByAltText("设备截图：Pixel 3 XL")).not.toBeInTheDocument();
   });
 
   it("shows the selected device mirror and collapsed evidence controls", async () => {
@@ -238,9 +301,44 @@ describe("DeviceRobot Web UI", () => {
     renderApp();
 
     expect(await screen.findByRole("region", { name: "屏幕镜像" })).toBeInTheDocument();
-    expect(screen.getByAltText("设备截图：Pixel 3 XL")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "设备实时画面：Pixel 3 XL" })).toBeInTheDocument();
     expect(screen.getByText("设备控制")).toBeInTheDocument();
     expect(screen.getByText("UI 层级与操作审计")).toBeInTheDocument();
+  });
+
+  it("maps a mirror click to one structured device action", async () => {
+    const { getActionRequests, getLastAction } = mockApis();
+    renderApp();
+
+    await screen.findByRole("heading", { level: 1, name: "概览" });
+    const canvas = await screen.findByRole("img", { name: "设备实时画面：Pixel 3 XL" });
+    await vi.waitFor(() => expect(canvas).toHaveProperty("width", 1080));
+    Object.defineProperty(canvas, "setPointerCapture", { configurable: true, value: vi.fn() });
+    Object.defineProperty(canvas, "hasPointerCapture", {
+      configurable: true,
+      value: vi.fn().mockReturnValue(true),
+    });
+    Object.defineProperty(canvas, "releasePointerCapture", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 180,
+      height: 360,
+      top: 0,
+      right: 180,
+      bottom: 360,
+      left: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(canvas, { button: 0, clientX: 90, clientY: 180, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { button: 0, clientX: 90, clientY: 180, pointerId: 1 });
+
+    await vi.waitFor(() => expect(getActionRequests()).toBe(1));
+    expect(getLastAction()).toEqual({ action: "ui.tap", x: 540, y: 1080 });
   });
 
   it("sends a structured back action from the device control accordion", async () => {
@@ -249,8 +347,12 @@ describe("DeviceRobot Web UI", () => {
     renderApp();
 
     await screen.findByRole("heading", { level: 1, name: "概览" });
-    await user.click(screen.getByText("设备控制"));
-    await user.click(screen.getByRole("button", { name: "返回" }));
+    const deviceControl = screen.getByText("设备控制").closest("details");
+    expect(deviceControl).not.toBeNull();
+    await user.click(within(deviceControl as HTMLDetailsElement).getByText("设备控制"));
+    await user.click(
+      within(deviceControl as HTMLDetailsElement).getByRole("button", { name: "返回" }),
+    );
 
     await vi.waitFor(() => expect(getActionRequests()).toBe(1));
     expect(await screen.findByText("完成")).toBeInTheDocument();

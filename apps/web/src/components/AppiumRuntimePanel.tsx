@@ -37,6 +37,7 @@ export function AppiumRuntimePanel(): React.JSX.Element {
     },
   });
   const runtime = runtimeQuery.data;
+  const activeOperation = lifecycleMutation.isPending ? lifecycleMutation.variables : undefined;
   const serverIsRunning =
     runtime?.server.state === "running" || runtime?.server.state === "starting";
   const canStart = runtime?.status === "ready" && !serverIsRunning;
@@ -56,17 +57,19 @@ export function AppiumRuntimePanel(): React.JSX.Element {
             className="compact-button"
             type="button"
             disabled={lifecycleMutation.isPending || !canStart}
+            aria-busy={activeOperation === "start" ? true : undefined}
             onClick={() => lifecycleMutation.mutate("start")}
           >
-            启动服务
+            {activeOperation === "start" ? "启动中..." : "启动服务"}
           </button>
           <button
             className="compact-button subtle-action"
             type="button"
             disabled={lifecycleMutation.isPending || !serverIsRunning}
+            aria-busy={activeOperation === "stop" ? true : undefined}
             onClick={() => lifecycleMutation.mutate("stop")}
           >
-            停止服务
+            {activeOperation === "stop" ? "停止中..." : "停止服务"}
           </button>
         </div>
       </div>

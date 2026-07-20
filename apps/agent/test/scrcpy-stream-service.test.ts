@@ -23,4 +23,32 @@ describe("scrcpy stream protocol", () => {
     expect(new DataView(result.buffer).getBigUint64(1, false)).toBe(123_456n);
     expect([...result.subarray(9)]).toEqual([0, 0, 0, 2, 0x65, 0x88]);
   });
+
+  it("accepts only bounded pointer and back control commands", () => {
+    expect(
+      scrcpyStreamProtocol.parseScrcpyControlCommand({
+        type: "pointer",
+        action: "move",
+        pointerId: 1,
+        x: 540,
+        y: 1_080,
+        videoWidth: 1_080,
+        videoHeight: 2_160,
+      }),
+    ).toMatchObject({ type: "pointer", action: "move", x: 540, y: 1_080 });
+    expect(scrcpyStreamProtocol.parseScrcpyControlCommand({ type: "back" })).toEqual({
+      type: "back",
+    });
+    expect(
+      scrcpyStreamProtocol.parseScrcpyControlCommand({
+        type: "pointer",
+        action: "down",
+        pointerId: -1,
+        x: 0,
+        y: 0,
+        videoWidth: 1,
+        videoHeight: 1,
+      }),
+    ).toBeUndefined();
+  });
 });

@@ -34,6 +34,7 @@ import { isAllowedOrigin, isLoopbackHost } from "./security/loopback.js";
 import { AppiumRuntimeError, AppiumRuntimeService } from "./appium/appium-runtime-service.js";
 import {
   AdbScrcpyStreamService,
+  parseScrcpyControlCommand,
   type ScrcpyStreamService,
 } from "./scrcpy/scrcpy-stream-service.js";
 
@@ -233,6 +234,112 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
   app.get("/api/v1/devices/:serial/scrcpy/stream", { websocket: true }, (socket, request) => {
     let unsubscribe: (() => void) | undefined;
     let closed = false;
+    const pointerStarts = new Map<number, { x: number; y: number; startedAt: string }>();
+    let serial: string;
+    try {
+      serial = parseSerial(request.params);
+    } catch (error) {
+      socket.close(
+        1008,
+        error instanceof Error ? error.message : "A valid device serial is required",
+      );
+      return;
+    }
+
+    const sendControlError = (): void => {
+      if (socket.readyState === WEBSOCKET_OPEN) {
+        socket.send(
+          JSON.stringify({ type: "control-error", message: "Unable to control the device" }),
+        );
+      }
+    };
+
+    const recordControlAudit = (command: ReturnType<typeof parseScrcpyControlCommand>): void => {
+      if (command === undefined) {
+        return;
+      }
+
+      if (command.type === "back") {
+        const finishedAt = new Date().toISOString();
+        deviceActionAuditStore.record({
+          serial,
+          action: { action: "ui.back" },
+          success: true,
+          startedAt: finishedAt,
+          finishedAt,
+        });
+        return;
+      }
+
+      if (command.action === "down") {
+        pointerStarts.set(command.pointerId, {
+          x: command.x,
+          y: command.y,
+          startedAt: new Date().toISOString(),
+        });
+        return;
+      }
+
+      if (command.action === "cancel") {
+        pointerStarts.delete(command.pointerId);
+        return;
+      }
+
+      if (command.action !== "up") {
+        return;
+      }
+
+      const start = pointerStarts.get(command.pointerId);
+      pointerStarts.delete(command.pointerId);
+      if (start === undefined) {
+        return;
+      }
+
+      const distance = Math.hypot(command.x - start.x, command.y - start.y);
+      deviceActionAuditStore.record({
+        serial,
+        action:
+          distance < 24
+            ? { action: "ui.tap", x: command.x, y: command.y }
+            : {
+                action: "ui.swipe",
+                startX: start.x,
+                startY: start.y,
+                endX: command.x,
+                endY: command.y,
+              },
+        success: true,
+        startedAt: start.startedAt,
+        finishedAt: new Date().toISOString(),
+      });
+    };
+
+    socket.on("message", (data: { toString(): string }, isBinary: boolean) => {
+      if (isBinary) {
+        sendControlError();
+        return;
+      }
+
+      let message: unknown;
+      try {
+        message = JSON.parse(data.toString());
+      } catch {
+        sendControlError();
+        return;
+      }
+
+      const command = parseScrcpyControlCommand(message);
+      if (command === undefined) {
+        sendControlError();
+        return;
+      }
+
+      void scrcpyStreamService
+        .control(serial, command)
+        .then(() => recordControlAudit(command))
+        .catch(sendControlError);
+    });
+
     const dispose = (): void => {
       closed = true;
       unsubscribe?.();
@@ -244,7 +351,6 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
 
     void (async () => {
       try {
-        const serial = parseSerial(request.params);
         const release = await scrcpyStreamService.subscribe(serial, {
           send: (data, binary) => {
             if (socket.readyState === WEBSOCKET_OPEN) {

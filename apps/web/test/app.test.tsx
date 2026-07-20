@@ -20,6 +20,7 @@ class MockWebSocket {
   public readonly url: string;
   public readyState = MockWebSocket.OPEN;
   public binaryType = "";
+  public readonly sent: string[] = [];
   public onclose: (() => void) | null = null;
   public onmessage: ((event: MessageEvent) => void) | null = null;
 
@@ -34,6 +35,10 @@ class MockWebSocket {
   public close(): void {
     this.readyState = 3;
     this.onclose?.();
+  }
+
+  public send(data: string): void {
+    this.sent.push(data);
   }
 }
 
@@ -306,8 +311,8 @@ describe("DeviceRobot Web UI", () => {
     expect(screen.getByText("UI 层级与操作审计")).toBeInTheDocument();
   });
 
-  it("maps a mirror click to one structured device action", async () => {
-    const { getActionRequests, getLastAction } = mockApis();
+  it("maps a mirror click to immediate scrcpy pointer messages", async () => {
+    const { getActionRequests } = mockApis();
     renderApp();
 
     await screen.findByRole("heading", { level: 1, name: "概览" });
@@ -337,8 +342,28 @@ describe("DeviceRobot Web UI", () => {
     fireEvent.pointerDown(canvas, { button: 0, clientX: 90, clientY: 180, pointerId: 1 });
     fireEvent.pointerUp(canvas, { button: 0, clientX: 90, clientY: 180, pointerId: 1 });
 
-    await vi.waitFor(() => expect(getActionRequests()).toBe(1));
-    expect(getLastAction()).toEqual({ action: "ui.tap", x: 540, y: 1080 });
+    await vi.waitFor(() => expect(MockWebSocket.instances[0]?.sent).toHaveLength(2));
+    expect(MockWebSocket.instances[0]?.sent.map((message) => JSON.parse(message))).toEqual([
+      {
+        type: "pointer",
+        action: "down",
+        pointerId: 1,
+        x: 540,
+        y: 1080,
+        videoWidth: 1080,
+        videoHeight: 2160,
+      },
+      {
+        type: "pointer",
+        action: "up",
+        pointerId: 1,
+        x: 540,
+        y: 1080,
+        videoWidth: 1080,
+        videoHeight: 2160,
+      },
+    ]);
+    expect(getActionRequests()).toBe(0);
   });
 
   it("sends a structured back action from the device control accordion", async () => {

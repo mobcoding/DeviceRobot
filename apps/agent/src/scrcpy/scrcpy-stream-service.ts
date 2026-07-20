@@ -7,10 +7,14 @@ import { AdbServerClient, type Adb } from "@yume-chan/adb";
 import { AdbScrcpyClient, AdbScrcpyOptionsLatest } from "@yume-chan/adb-scrcpy";
 import { AdbServerNodeTcpConnector } from "@yume-chan/adb-server-node-tcp";
 import {
+  AndroidKeyEventAction,
+  AndroidMotionEventAction,
+  AndroidMotionEventButton,
   ScrcpyVideoCodecId,
   h264ParseConfiguration,
   type ScrcpyMediaStreamPacket,
 } from "@yume-chan/scrcpy";
+import type { ScrcpyControlMessageWriter } from "@yume-chan/scrcpy";
 
 import type { DeviceDiscoveryService } from "../devices/adb-device-service.js";
 
@@ -29,8 +33,21 @@ export type ScrcpyStreamSubscriber = {
   send(data: string | Uint8Array, binary: boolean): void;
 };
 
+export type ScrcpyControlCommand =
+  | {
+      type: "pointer";
+      action: "down" | "move" | "up" | "cancel";
+      pointerId: number;
+      x: number;
+      y: number;
+      videoWidth: number;
+      videoHeight: number;
+    }
+  | { type: "back" };
+
 export interface ScrcpyStreamService {
   subscribe(serial: string, subscriber: ScrcpyStreamSubscriber): Promise<() => void>;
+  control(serial: string, command: ScrcpyControlCommand): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -46,6 +63,7 @@ type ScrcpySession = {
   serial: string;
   adb: Adb;
   client: AdbScrcpyClient<AdbScrcpyOptionsLatest<true>>;
+  controller: ScrcpyControlMessageWriter;
   reader: {
     read(): Promise<{ done: boolean; value?: ScrcpyMediaStreamPacket | undefined }>;
     cancel(): Promise<void>;
@@ -63,6 +81,54 @@ function toErrorMessage(error: unknown): string {
 
 function isReadyState(state: string): boolean {
   return state === "device" || state === "emulator";
+}
+
+function isCoordinate(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 10_000;
+}
+
+function isPointerId(value: unknown): value is number {
+  return (
+    typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 2_147_483_647
+  );
+}
+
+export function parseScrcpyControlCommand(value: unknown): ScrcpyControlCommand | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+
+  const message = value as Record<string, unknown>;
+  if (message.type === "back") {
+    return { type: "back" };
+  }
+
+  if (
+    message.type !== "pointer" ||
+    (message.action !== "down" &&
+      message.action !== "move" &&
+      message.action !== "up" &&
+      message.action !== "cancel") ||
+    !isPointerId(message.pointerId) ||
+    !isCoordinate(message.x) ||
+    !isCoordinate(message.y) ||
+    !isCoordinate(message.videoWidth) ||
+    !isCoordinate(message.videoHeight) ||
+    message.videoWidth === 0 ||
+    message.videoHeight === 0
+  ) {
+    return undefined;
+  }
+
+  return {
+    type: "pointer",
+    action: message.action,
+    pointerId: message.pointerId,
+    x: message.x,
+    y: message.y,
+    videoWidth: message.videoWidth,
+    videoHeight: message.videoHeight,
+  };
 }
 
 function avcConfigurationRecord(configuration: Uint8Array): {
@@ -232,6 +298,38 @@ export class AdbScrcpyStreamService implements ScrcpyStreamService {
     };
   }
 
+  public async control(serial: string, command: ScrcpyControlCommand): Promise<void> {
+    const session = this.#sessions.get(serial);
+    if (session === undefined || session.closed) {
+      throw new ScrcpyStreamError("The scrcpy control channel is not ready");
+    }
+
+    if (command.type === "back") {
+      await session.controller.backOrScreenOn(AndroidKeyEventAction.Down);
+      await session.controller.backOrScreenOn(AndroidKeyEventAction.Up);
+      return;
+    }
+
+    const action = {
+      down: AndroidMotionEventAction.Down,
+      move: AndroidMotionEventAction.Move,
+      up: AndroidMotionEventAction.Up,
+      cancel: AndroidMotionEventAction.Cancel,
+    }[command.action];
+    const pressed = command.action === "down" || command.action === "move";
+    await session.controller.injectTouch({
+      action,
+      pointerId: BigInt(command.pointerId),
+      pointerX: command.x,
+      pointerY: command.y,
+      videoWidth: command.videoWidth,
+      videoHeight: command.videoHeight,
+      pressure: pressed ? 1 : 0,
+      actionButton: command.action === "down" ? AndroidMotionEventButton.Primary : 0,
+      buttons: pressed ? AndroidMotionEventButton.Primary : 0,
+    });
+  }
+
   public async dispose(): Promise<void> {
     await Promise.all(
       [...this.#sessions.values()].map(async (session) => await this.#closeSession(session)),
@@ -271,7 +369,7 @@ export class AdbScrcpyStreamService implements ScrcpyStreamService {
       const options = new AdbScrcpyOptionsLatest(
         {
           audio: false,
-          control: false,
+          control: true,
           maxFps: 60,
           maxSize: 1_080,
           powerOn: false,
@@ -289,10 +387,18 @@ export class AdbScrcpyStreamService implements ScrcpyStreamService {
         throw new ScrcpyStreamError("The connected device did not provide an H.264 scrcpy stream");
       }
 
+      const controller = client.controller;
+      if (controller === undefined) {
+        throw new ScrcpyStreamError(
+          "The connected device did not provide a scrcpy control channel",
+        );
+      }
+
       return {
         serial,
         adb,
         client,
+        controller,
         reader: video.stream.getReader(),
         subscribers: new Set(),
         closed: false,
@@ -418,4 +524,5 @@ export const scrcpyStreamProtocol = {
   annexBToAvc,
   avcConfigurationRecord,
   encodeVideoPacket,
+  parseScrcpyControlCommand,
 };

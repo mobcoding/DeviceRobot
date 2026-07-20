@@ -1,9 +1,6 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, LoaderCircle, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { AndroidDevice, DeviceControlAction } from "@device-robot/contracts";
-
-import { executeDeviceAction } from "../api/device-control";
+import type { AndroidDevice } from "@device-robot/contracts";
 
 type DeviceMirrorPanelProps = {
   device: AndroidDevice;
@@ -20,6 +17,22 @@ type StreamConfiguration = {
   description: string;
   width: number;
   height: number;
+};
+
+type StreamControl =
+  | {
+      type: "pointer";
+      action: "down" | "move" | "up" | "cancel";
+      pointerId: number;
+      x: number;
+      y: number;
+      videoWidth: number;
+      videoHeight: number;
+    }
+  | { type: "back" };
+
+type ActivePointer = DevicePoint & {
+  pointerId: number;
 };
 
 function deviceName(device: AndroidDevice): string {
@@ -97,24 +110,16 @@ function pointFromPointer(
 }
 
 export function DeviceMirrorPanel({ device }: DeviceMirrorPanelProps): React.JSX.Element {
-  const queryClient = useQueryClient();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const decoderRef = useRef<VideoDecoder | undefined>(undefined);
-  const pointerStart = useRef<DevicePoint | undefined>(undefined);
+  const socketRef = useRef<WebSocket | undefined>(undefined);
+  const pointerStart = useRef<ActivePointer | undefined>(undefined);
   const [streamAttempt, setStreamAttempt] = useState(0);
   const [streamState, setStreamState] = useState<"connecting" | "live" | "error">("connecting");
   const [streamError, setStreamError] = useState<string>();
   const [controlError, setControlError] = useState<string>();
   const [screenSize, setScreenSize] = useState<DevicePoint>();
   const serial = device.serial;
-  const actionMutation = useMutation({
-    mutationFn: async (action: DeviceControlAction) => await executeDeviceAction(serial, action),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["device-action-history", serial] });
-      setControlError(undefined);
-    },
-    onError: (actionError) => setControlError(actionError.message),
-  });
 
   useEffect(() => {
     let disposed = false;
@@ -205,6 +210,7 @@ export function DeviceMirrorPanel({ device }: DeviceMirrorPanelProps): React.JSX
     setScreenSize(undefined);
     pointerStart.current = undefined;
     const socket = new WebSocket(streamUrl(serial));
+    socketRef.current = socket;
     socket.binaryType = "arraybuffer";
     socket.onmessage = (event) => {
       if (typeof event.data === "string") {
@@ -228,6 +234,13 @@ export function DeviceMirrorPanel({ device }: DeviceMirrorPanelProps): React.JSX
           (message as Record<string, unknown>).type === "error"
         ) {
           fail("无法建立设备实时画面");
+        }
+        if (
+          typeof message === "object" &&
+          message !== null &&
+          (message as Record<string, unknown>).type === "control-error"
+        ) {
+          setControlError("设备实时控制失败");
         }
         return;
       }
@@ -273,21 +286,27 @@ export function DeviceMirrorPanel({ device }: DeviceMirrorPanelProps): React.JSX
     return () => {
       disposed = true;
       socket.close();
+      if (socketRef.current === socket) {
+        socketRef.current = undefined;
+      }
       closeDecoder();
     };
   }, [serial, streamAttempt]);
 
-  const executeGesture = (action: DeviceControlAction): void => {
-    if (actionMutation.isPending) {
-      return;
+  const sendControl = (command: StreamControl): boolean => {
+    const socket = socketRef.current;
+    if (socket === undefined || socket.readyState !== WebSocket.OPEN) {
+      setControlError("设备实时控制通道尚未就绪");
+      return false;
     }
 
     setControlError(undefined);
-    actionMutation.mutate(action);
+    socket.send(JSON.stringify(command));
+    return true;
   };
 
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>): void => {
-    if (actionMutation.isPending || event.button !== 0 || screenSize === undefined) {
+    if (event.button !== 0 || screenSize === undefined) {
       return;
     }
 
@@ -296,14 +315,51 @@ export function DeviceMirrorPanel({ device }: DeviceMirrorPanelProps): React.JSX
       return;
     }
 
-    pointerStart.current = point;
+    const pointer = { ...point, pointerId: event.pointerId };
+    if (
+      !sendControl({
+        type: "pointer",
+        action: "down",
+        pointerId: pointer.pointerId,
+        x: pointer.x,
+        y: pointer.y,
+        videoWidth: screenSize.x,
+        videoHeight: screenSize.y,
+      })
+    ) {
+      return;
+    }
+
+    pointerStart.current = pointer;
     event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>): void => {
+    const start = pointerStart.current;
+    if (start === undefined || start.pointerId !== event.pointerId || screenSize === undefined) {
+      return;
+    }
+
+    const point = pointFromPointer(event, screenSize);
+    if (point === undefined) {
+      return;
+    }
+
+    sendControl({
+      type: "pointer",
+      action: "move",
+      pointerId: start.pointerId,
+      x: point.x,
+      y: point.y,
+      videoWidth: screenSize.x,
+      videoHeight: screenSize.y,
+    });
   };
 
   const handlePointerUp = (event: React.PointerEvent<HTMLCanvasElement>): void => {
     const start = pointerStart.current;
     pointerStart.current = undefined;
-    if (start === undefined || actionMutation.isPending || screenSize === undefined) {
+    if (start === undefined || start.pointerId !== event.pointerId || screenSize === undefined) {
       return;
     }
 
@@ -316,18 +372,33 @@ export function DeviceMirrorPanel({ device }: DeviceMirrorPanelProps): React.JSX
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
 
-    const distance = Math.hypot(end.x - start.x, end.y - start.y);
-    if (distance < 24) {
-      executeGesture({ action: "ui.tap", x: end.x, y: end.y });
+    sendControl({
+      type: "pointer",
+      action: "up",
+      pointerId: start.pointerId,
+      x: end.x,
+      y: end.y,
+      videoWidth: screenSize.x,
+      videoHeight: screenSize.y,
+    });
+  };
+
+  const handlePointerCancel = (event: React.PointerEvent<HTMLCanvasElement>): void => {
+    const start = pointerStart.current;
+    pointerStart.current = undefined;
+    if (start === undefined || start.pointerId !== event.pointerId || screenSize === undefined) {
       return;
     }
 
-    executeGesture({
-      action: "ui.swipe",
-      startX: start.x,
-      startY: start.y,
-      endX: end.x,
-      endY: end.y,
+    const point = pointFromPointer(event, screenSize) ?? start;
+    sendControl({
+      type: "pointer",
+      action: "cancel",
+      pointerId: start.pointerId,
+      x: point.x,
+      y: point.y,
+      videoWidth: screenSize.x,
+      videoHeight: screenSize.y,
     });
   };
 
@@ -346,8 +417,7 @@ export function DeviceMirrorPanel({ device }: DeviceMirrorPanelProps): React.JSX
             className="mirror-refresh"
             aria-label="返回"
             title="返回"
-            disabled={actionMutation.isPending}
-            onClick={() => executeGesture({ action: "ui.back" })}
+            onClick={() => sendControl({ type: "back" })}
           >
             <ArrowLeft aria-hidden="true" size={16} strokeWidth={1.8} />
           </button>
@@ -369,17 +439,13 @@ export function DeviceMirrorPanel({ device }: DeviceMirrorPanelProps): React.JSX
           role="img"
           aria-label={`设备实时画面：${deviceName(device)}`}
           aria-busy={streamState === "connecting"}
-          onPointerCancel={() => {
-            pointerStart.current = undefined;
-          }}
+          onPointerCancel={handlePointerCancel}
           onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
         />
-        {(streamState === "connecting" || actionMutation.isPending) && (
-          <span
-            className="mirror-operation"
-            aria-label={actionMutation.isPending ? "正在操作设备" : "正在连接实时画面"}
-          >
+        {streamState === "connecting" && (
+          <span className="mirror-operation" aria-label="正在连接实时画面">
             <LoaderCircle aria-hidden="true" size={20} strokeWidth={1.8} />
           </span>
         )}

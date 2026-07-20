@@ -166,6 +166,14 @@ const fileListResponse = {
   readAt: "2026-07-20T10:00:00.000Z",
 };
 
+const fileTransferResponse = {
+  serial: "8B3Y0THX0",
+  fileName: "upload.txt",
+  path: "/storage/emulated/0/upload.txt",
+  sizeBytes: 12,
+  transferredAt: "2026-07-21T10:00:00.000Z",
+};
+
 const applicationsResponse = {
   serial: "8B3Y0THX0",
   filter: "all",
@@ -230,11 +238,13 @@ function mockApis(options: { healthError?: Error } = {}): {
   getActionRequests: () => number;
   getLastAction: () => unknown;
   getInstallRequests: () => number;
+  getFileUploadRequests: () => number;
 } {
   let deviceRequests = 0;
   let actionRequests = 0;
   let lastAction: unknown;
   let installRequests = 0;
+  let fileUploadRequests = 0;
   const actionHistory = {
     serial: "8B3Y0THX0",
     actions: [] as Array<{
@@ -284,6 +294,14 @@ function mockApis(options: { healthError?: Error } = {}): {
 
     if (url.includes("/api/v1/apks/") && method === "DELETE") {
       return new Response(null, { status: 204 });
+    }
+
+    if (url.includes("/files/upload") && method === "POST") {
+      fileUploadRequests += 1;
+      return new Response(JSON.stringify(fileTransferResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     if (url.includes("/files")) {
@@ -363,6 +381,7 @@ function mockApis(options: { healthError?: Error } = {}): {
     getActionRequests: () => actionRequests,
     getLastAction: () => lastAction,
     getInstallRequests: () => installRequests,
+    getFileUploadRequests: () => fileUploadRequests,
   };
 }
 
@@ -417,6 +436,32 @@ describe("DeviceRobot Web UI", () => {
 
     expect(await screen.findByRole("button", { name: /Download/ })).toBeInTheDocument();
     expect(screen.getByText("notes.txt")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载 notes.txt" })).toHaveAttribute(
+      "href",
+      "/api/v1/devices/8B3Y0THX0/files/download?path=%2Fstorage%2Femulated%2F0%2Fnotes.txt",
+    );
+  });
+
+  it("confirms and uploads a file to the current device directory", async () => {
+    const { getFileUploadRequests } = mockApis();
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "文件管理器" }));
+    await user.click(screen.getByRole("button", { name: /内部共享存储空间/ }));
+    await screen.findByText("notes.txt");
+    await user.click(screen.getByRole("button", { name: "上传文件" }));
+    await user.upload(
+      screen.getByLabelText("选择要上传的文件"),
+      new File(["device file"], "upload.txt", { type: "text/plain" }),
+    );
+
+    const dialog = await screen.findByRole("dialog", { name: "上传文件" });
+    expect(within(dialog).getByText("/storage/emulated/0")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "确认上传" }));
+
+    expect(await within(dialog).findByText("上传完成")).toBeInTheDocument();
+    expect(getFileUploadRequests()).toBe(1);
   });
 
   it("adds the device Logcat view and filters actual log entries", async () => {

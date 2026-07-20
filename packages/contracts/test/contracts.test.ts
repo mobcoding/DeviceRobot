@@ -8,6 +8,7 @@ import {
   deviceApplicationListResponseSchema,
   deviceControlActionSchema,
   deviceFileListResponseSchema,
+  deviceFileTransferResponseSchema,
   deviceListResponseSchema,
   deviceLogcatResponseSchema,
   deviceUiTreeResponseSchema,
@@ -158,6 +159,16 @@ describe("shared contracts", () => {
         readAt: "2026-07-21T10:00:00.000Z",
       }),
     ).toMatchObject({ entries: [{ level: "info", tag: "ActivityManager" }] });
+
+    expect(
+      deviceFileTransferResponseSchema.parse({
+        serial: "device-1",
+        fileName: "notes.txt",
+        path: "/storage/emulated/0/Download/notes.txt",
+        sizeBytes: 12,
+        transferredAt: "2026-07-21T10:00:00.000Z",
+      }),
+    ).toMatchObject({ fileName: "notes.txt", sizeBytes: 12 });
   });
 
   it("accepts a local Appium runtime diagnostic", () => {

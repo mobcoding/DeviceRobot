@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { healthResponseSchema } from "@device-robot/contracts";
@@ -199,6 +199,85 @@ describe("DeviceRobot Agent", () => {
       expect(logcat.json()).toMatchObject({
         entries: [{ level: "info", tag: "ActivityManager" }],
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("uploads and downloads device files through bounded routes", async () => {
+    const root = createTemporaryRoot();
+    const downloadedFile = join(root, "downloaded.txt");
+    writeFileSync(downloadedFile, "device file");
+    const upload = vi.fn(
+      async (
+        _serial: string,
+        _directory: string | undefined,
+        _fileName: string,
+        stream: NodeJS.ReadableStream,
+      ) => {
+        for await (const chunk of stream) {
+          void chunk;
+        }
+        return {
+          serial: "device-1",
+          fileName: "notes.txt",
+          path: "/storage/emulated/0/Download/notes.txt",
+          sizeBytes: 11,
+          transferredAt: "2026-07-21T10:00:00.000Z",
+        };
+      },
+    );
+    const download = vi.fn(async () => ({
+      fileName: "notes.txt",
+      filePath: downloadedFile,
+      sizeBytes: 11,
+      dispose: async () => undefined,
+    }));
+    const { app } = await createAgentApp({
+      localAppData: root,
+      deviceFileTransferService: { upload, download },
+    });
+    const boundary = "device-robot-file-transfer-boundary";
+    const payload = Buffer.from(
+      [
+        `--${boundary}`,
+        'Content-Disposition: form-data; name="file"; filename="notes.txt"',
+        "Content-Type: text/plain",
+        "",
+        "device file",
+        `--${boundary}--`,
+        "",
+      ].join("\r\n"),
+    );
+    const headers = { host: "127.0.0.1:43110" };
+
+    try {
+      const uploadResponse = await app.inject({
+        method: "POST",
+        url: "/api/v1/devices/device-1/files/upload?path=%2Fstorage%2Femulated%2F0%2FDownload",
+        headers: { ...headers, "content-type": `multipart/form-data; boundary=${boundary}` },
+        payload,
+      });
+      const downloadResponse = await app.inject({
+        method: "GET",
+        url: "/api/v1/devices/device-1/files/download?path=%2Fstorage%2Femulated%2F0%2FDownload%2Fnotes.txt",
+        headers,
+      });
+
+      expect(uploadResponse.statusCode).toBe(200);
+      expect(uploadResponse.json()).toMatchObject({
+        path: "/storage/emulated/0/Download/notes.txt",
+      });
+      expect(upload).toHaveBeenCalledWith(
+        "device-1",
+        "/storage/emulated/0/Download",
+        "notes.txt",
+        expect.anything(),
+      );
+      expect(downloadResponse.statusCode).toBe(200);
+      expect(downloadResponse.body).toBe("device file");
+      expect(downloadResponse.headers["content-disposition"]).toContain("attachment");
+      expect(download).toHaveBeenCalledWith("device-1", "/storage/emulated/0/Download/notes.txt");
     } finally {
       await app.close();
     }

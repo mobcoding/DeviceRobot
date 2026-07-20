@@ -16,6 +16,14 @@ export const deviceFileListResponseSchema = z.object({
   readAt: z.iso.datetime(),
 });
 
+export const deviceFileTransferResponseSchema = z.object({
+  serial: z.string().min(1),
+  fileName: z.string().min(1),
+  path: z.string().min(1),
+  sizeBytes: z.number().int().nonnegative(),
+  transferredAt: z.iso.datetime(),
+});
+
 export const deviceApplicationSourceSchema = z.enum(["user", "system"]);
 export const deviceApplicationFilterSchema = z.enum(["all", "user", "system"]);
 
@@ -62,6 +70,7 @@ export const deviceLogcatResponseSchema = z.object({
 export type DeviceFileKind = z.infer<typeof deviceFileKindSchema>;
 export type DeviceFileEntry = z.infer<typeof deviceFileEntrySchema>;
 export type DeviceFileListResponse = z.infer<typeof deviceFileListResponseSchema>;
+export type DeviceFileTransferResponse = z.infer<typeof deviceFileTransferResponseSchema>;
 export type DeviceApplicationSource = z.infer<typeof deviceApplicationSourceSchema>;
 export type DeviceApplicationFilter = z.infer<typeof deviceApplicationFilterSchema>;
 export type DeviceApplication = z.infer<typeof deviceApplicationSchema>;

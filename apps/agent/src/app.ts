@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import fastifyStatic from "@fastify/static";
 import fastifyMultipart from "@fastify/multipart";
@@ -14,6 +14,7 @@ import {
   deviceApplicationListResponseSchema,
   deviceControlActionSchema,
   deviceFileListResponseSchema,
+  deviceFileTransferResponseSchema,
   deviceListResponseSchema,
   deviceLogcatResponseSchema,
   deviceUiTreeResponseSchema,
@@ -45,6 +46,11 @@ import {
   type DeviceManagementService,
 } from "./devices/adb-device-management-service.js";
 import {
+  AdbDeviceFileTransferService,
+  FileTransferError,
+  type DeviceFileTransferService,
+} from "./files/adb-device-file-transfer-service.js";
+import {
   createFailedActionAudit,
   SqliteDeviceActionAuditStore,
   type DeviceActionAuditStore,
@@ -69,6 +75,7 @@ export type CreateAgentAppOptions = {
   deviceService?: DeviceDiscoveryService;
   deviceControlService?: DeviceControlService;
   deviceManagementService?: DeviceManagementService;
+  deviceFileTransferService?: DeviceFileTransferService;
   apkArtifactService?: ApkArtifactService;
   deviceActionAuditStore?: DeviceActionAuditStore;
   appiumRuntimeService?: AppiumRuntimeService;
@@ -82,6 +89,7 @@ export type AgentApp = {
   deviceService: DeviceDiscoveryService;
   deviceControlService: DeviceControlService;
   deviceManagementService: DeviceManagementService;
+  deviceFileTransferService: DeviceFileTransferService;
   apkArtifactService: ApkArtifactService;
   deviceActionAuditStore: DeviceActionAuditStore;
   appiumRuntimeService: AppiumRuntimeService;
@@ -146,6 +154,14 @@ function parseFilePath(query: unknown): string | undefined {
   return path;
 }
 
+function parseRequiredFilePath(query: unknown): string {
+  const path = parseFilePath(query);
+  if (path === undefined) {
+    throw new FileTransferError("请选择设备文件。", 400);
+  }
+  return path;
+}
+
 function parseApplicationFilter(
   query: unknown,
 ): ReturnType<typeof deviceApplicationFilterSchema.parse> {
@@ -205,6 +221,15 @@ function apkErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
   return reply.code(500).send({ error: message });
 }
 
+function fileTransferErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
+  if (error instanceof FileTransferError) {
+    return reply.code(error.statusCode).send({ error: error.message });
+  }
+
+  const message = error instanceof Error ? error.message : "设备文件传输失败。";
+  return reply.code(500).send({ error: message });
+}
+
 export async function createAgentApp(options: CreateAgentAppOptions = {}): Promise<AgentApp> {
   const paths = options.paths ?? resolveAgentPaths(options.localAppData);
   ensureAgentDirectories(paths);
@@ -218,6 +243,8 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     options.deviceControlService ?? new AdbDeviceControlService({ deviceService });
   const deviceManagementService =
     options.deviceManagementService ?? new AdbDeviceManagementService({ deviceService });
+  const deviceFileTransferService =
+    options.deviceFileTransferService ?? new AdbDeviceFileTransferService({ paths, deviceService });
   const apkArtifactService =
     options.apkArtifactService ??
     new LocalApkArtifactService({
@@ -313,6 +340,57 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
       return deviceFileListResponseSchema.parse(response);
     } catch (error) {
       return controlErrorReply(reply, error);
+    }
+  });
+
+  app.post("/api/v1/devices/:serial/files/upload", async (request, reply) => {
+    try {
+      const file = await request.file();
+      if (file === undefined) {
+        throw new FileTransferError("请选择要上传的文件。", 400);
+      }
+      return deviceFileTransferResponseSchema.parse(
+        await deviceFileTransferService.upload(
+          parseSerial(request.params),
+          parseFilePath(request.query),
+          file.filename,
+          file.file,
+        ),
+      );
+    } catch (error) {
+      return fileTransferErrorReply(reply, error);
+    }
+  });
+
+  app.get("/api/v1/devices/:serial/files/download", async (request, reply) => {
+    try {
+      const download = await deviceFileTransferService.download(
+        parseSerial(request.params),
+        parseRequiredFilePath(request.query),
+      );
+      const stream = createReadStream(download.filePath);
+      let disposed = false;
+      const dispose = (): void => {
+        if (!disposed) {
+          disposed = true;
+          void download.dispose();
+        }
+      };
+      stream.once("close", dispose);
+      stream.once("error", dispose);
+      reply.raw.once("close", dispose);
+
+      return reply
+        .header("Cache-Control", "no-store")
+        .header(
+          "Content-Disposition",
+          `attachment; filename*=UTF-8''${encodeURIComponent(download.fileName)}`,
+        )
+        .header("Content-Length", String(download.sizeBytes))
+        .type("application/octet-stream")
+        .send(stream);
+    } catch (error) {
+      return fileTransferErrorReply(reply, error);
     }
   });
 
@@ -602,6 +680,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     deviceService,
     deviceControlService,
     deviceManagementService,
+    deviceFileTransferService,
     apkArtifactService,
     deviceActionAuditStore,
     appiumRuntimeService,

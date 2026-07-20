@@ -2,17 +2,20 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ArrowUp,
   ChevronRight,
+  Download,
   File,
   FolderOpen,
   HardDrive,
   House,
   Link2,
   RefreshCw,
+  Upload,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AndroidDevice, DeviceFileEntry } from "@device-robot/contracts";
 
-import { fetchDeviceFiles } from "../api/device-management";
+import { deviceFileDownloadUrl, fetchDeviceFiles } from "../api/device-management";
+import { FileUploadDialog } from "./FileUploadDialog";
 
 type FileManagerPanelProps = {
   device: AndroidDevice;
@@ -46,6 +49,8 @@ function fileKindLabel(entry: DeviceFileEntry): string {
 export function FileManagerPanel({ device }: FileManagerPanelProps): React.JSX.Element {
   const [currentPath, setCurrentPath] = useState<string>();
   const [pathInput, setPathInput] = useState("");
+  const [fileToUpload, setFileToUpload] = useState<File>();
+  const uploadInputRef = useRef<HTMLInputElement>(null);
   const filesQuery = useQuery({
     queryKey: ["device-files", device.serial, currentPath],
     queryFn: ({ signal }) => fetchDeviceFiles(device.serial, currentPath, signal),
@@ -56,6 +61,7 @@ export function FileManagerPanel({ device }: FileManagerPanelProps): React.JSX.E
   useEffect(() => {
     setCurrentPath(undefined);
     setPathInput("");
+    setFileToUpload(undefined);
   }, [device.serial]);
 
   useEffect(() => {
@@ -75,6 +81,7 @@ export function FileManagerPanel({ device }: FileManagerPanelProps): React.JSX.E
   };
 
   const currentDirectory = filesQuery.data?.path ?? currentPath;
+  const uploadDirectory = currentDirectory ?? "/storage/emulated/0";
 
   return (
     <section className="management-workspace file-manager" aria-label="文件管理器">
@@ -83,16 +90,39 @@ export function FileManagerPanel({ device }: FileManagerPanelProps): React.JSX.E
           <FolderOpen aria-hidden="true" size={29} strokeWidth={1.7} />
           <h1>文件管理器</h1>
         </div>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label="刷新文件列表"
-          title="刷新文件列表"
-          disabled={currentPath === undefined || filesQuery.isFetching}
-          onClick={() => void filesQuery.refetch()}
-        >
-          <RefreshCw aria-hidden="true" size={17} strokeWidth={1.8} />
-        </button>
+        <div className="management-heading-actions">
+          <input
+            ref={uploadInputRef}
+            className="visually-hidden"
+            type="file"
+            aria-label="选择要上传的文件"
+            onChange={(event) => {
+              const file = event.currentTarget.files?.item(0);
+              event.currentTarget.value = "";
+              if (file !== null && file !== undefined) {
+                setFileToUpload(file);
+              }
+            }}
+          />
+          <button
+            className="primary-command"
+            type="button"
+            onClick={() => uploadInputRef.current?.click()}
+          >
+            <Upload aria-hidden="true" size={16} strokeWidth={1.8} />
+            <span>上传文件</span>
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="刷新文件列表"
+            title="刷新文件列表"
+            disabled={currentPath === undefined || filesQuery.isFetching}
+            onClick={() => void filesQuery.refetch()}
+          >
+            <RefreshCw aria-hidden="true" size={17} strokeWidth={1.8} />
+          </button>
+        </div>
       </header>
 
       <div className="manager-toolbar">
@@ -168,6 +198,7 @@ export function FileManagerPanel({ device }: FileManagerPanelProps): React.JSX.E
                 <th scope="col">名称</th>
                 <th scope="col">类型</th>
                 <th scope="col">路径</th>
+                <th scope="col" aria-label="操作" />
               </tr>
             </thead>
             <tbody>
@@ -194,11 +225,33 @@ export function FileManagerPanel({ device }: FileManagerPanelProps): React.JSX.E
                   <td>
                     <code>{entry.path}</code>
                   </td>
+                  <td>
+                    {entry.kind === "file" && (
+                      <a
+                        className="icon-button file-download"
+                        href={deviceFileDownloadUrl(device.serial, entry.path)}
+                        download={entry.name}
+                        aria-label={`下载 ${entry.name}`}
+                        title="下载文件"
+                      >
+                        <Download aria-hidden="true" size={16} strokeWidth={1.8} />
+                      </a>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+      {fileToUpload !== undefined && (
+        <FileUploadDialog
+          key={`${device.serial}-${fileToUpload.name}-${fileToUpload.lastModified}`}
+          device={device}
+          directory={uploadDirectory}
+          file={fileToUpload}
+          onClose={() => setFileToUpload(undefined)}
+        />
       )}
     </section>
   );

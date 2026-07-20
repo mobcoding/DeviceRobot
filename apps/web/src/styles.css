@@ -1045,11 +1045,25 @@ summary:focus-visible {
 }
 
 .file-table th:nth-child(1) {
-  width: 42%;
+  width: 34%;
 }
 
 .file-table th:nth-child(2) {
-  width: 15%;
+  width: 13%;
+}
+
+.file-table th:nth-child(4),
+.file-table td:nth-child(4) {
+  width: 46px;
+  padding-inline: 8px;
+  text-align: center;
+}
+
+.file-download {
+  width: 29px;
+  height: 29px;
+  flex-basis: 29px;
+  text-decoration: none;
 }
 
 .file-entry-button,

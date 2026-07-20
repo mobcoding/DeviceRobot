@@ -1,10 +1,12 @@
 import {
   deviceApplicationListResponseSchema,
   deviceFileListResponseSchema,
+  deviceFileTransferResponseSchema,
   deviceLogcatResponseSchema,
   type DeviceApplicationFilter,
   type DeviceApplicationListResponse,
   type DeviceFileListResponse,
+  type DeviceFileTransferResponse,
   type DeviceLogcatResponse,
 } from "@device-robot/contracts";
 
@@ -44,6 +46,43 @@ export async function fetchDeviceFiles(
     deviceFileListResponseSchema,
     signal,
   );
+}
+
+export function deviceFileDownloadUrl(serial: string, path: string): string {
+  return `/api/v1/devices/${encodeURIComponent(serial)}/files/download?path=${encodeURIComponent(path)}`;
+}
+
+export async function uploadDeviceFile(
+  serial: string,
+  directory: string,
+  file: File,
+  signal?: AbortSignal,
+): Promise<DeviceFileTransferResponse> {
+  const body = new FormData();
+  body.append("file", file, file.name);
+
+  let response: Response;
+  try {
+    response = await fetch(
+      `/api/v1/devices/${encodeURIComponent(serial)}/files/upload?path=${encodeURIComponent(directory)}`,
+      {
+        method: "POST",
+        body,
+        ...(signal === undefined ? {} : { signal }),
+      },
+    );
+  } catch {
+    throw new Error("无法连接本地 Agent。请确认 Agent 正在运行。");
+  }
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => undefined)) as
+      { error?: unknown } | undefined;
+    const message = typeof payload?.error === "string" ? payload.error : "设备文件上传失败。";
+    throw new Error(message);
+  }
+
+  return deviceFileTransferResponseSchema.parse(await response.json());
 }
 
 export async function fetchDeviceApplications(

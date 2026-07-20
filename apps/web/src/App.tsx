@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Bot, FileText, FolderGit2, LayoutDashboard, Play, Plus } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AndroidDevice } from "@device-robot/contracts";
 
 import { fetchDevices } from "./api/devices";
@@ -11,6 +11,8 @@ import { DeviceMirrorPanel } from "./components/DeviceMirrorPanel";
 
 const viewIds = ["devices", "projects", "conversations", "runs", "reports"] as const;
 const defaultVisibleViews: ViewId[] = ["devices", "projects", "conversations"];
+const GOLDEN_RATIO = 1.618;
+const MINIMUM_MIRROR_WIDTH = 280;
 
 type ViewId = (typeof viewIds)[number];
 type PlannedViewId = Exclude<ViewId, "devices">;
@@ -21,6 +23,17 @@ type PlannedViewContent = {
   description: string;
   capabilities: readonly string[];
 };
+
+function sidebarWidthBounds(container: HTMLElement | null): { minimum: number; maximum: number } {
+  const width = container?.getBoundingClientRect().width ?? 0;
+
+  if (width <= 0) {
+    return { minimum: MINIMUM_MIRROR_WIDTH, maximum: MINIMUM_MIRROR_WIDTH };
+  }
+
+  const maximum = Math.round(width / (GOLDEN_RATIO + 1));
+  return { minimum: Math.min(MINIMUM_MIRROR_WIDTH, maximum), maximum };
+}
 
 const workspaceTabs: readonly WorkspaceTab[] = [
   { id: "devices", label: "概览" },
@@ -268,6 +281,10 @@ export function App(): React.JSX.Element {
   const [selectedSerial, setSelectedSerial] = useState<string>();
   const [visibleViews, setVisibleViews] = useState<readonly ViewId[]>(defaultVisibleViews);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [mirrorWidth, setMirrorWidth] = useState<number>();
+  const [isResizingLayout, setIsResizingLayout] = useState(false);
+  const layoutRef = useRef<HTMLDivElement>(null);
+  const resizingRef = useRef(false);
   const readyDevices = (deviceQuery.data?.devices ?? []).filter(isReadyDevice);
   const selectedDevice = readyDevices.find((device) => device.serial === selectedSerial);
 
@@ -288,6 +305,22 @@ export function App(): React.JSX.Element {
       current.includes(activeView) ? current : [...current, activeView],
     );
   }, [activeView]);
+
+  useEffect(() => {
+    const constrainMirrorWidth = (): void => {
+      setMirrorWidth((current) => {
+        if (current === undefined) {
+          return current;
+        }
+
+        const { minimum, maximum } = sidebarWidthBounds(layoutRef.current);
+        return Math.min(maximum, Math.max(minimum, current));
+      });
+    };
+
+    globalThis.addEventListener("resize", constrainMirrorWidth);
+    return () => globalThis.removeEventListener("resize", constrainMirrorWidth);
+  }, []);
 
   const agentStatus = healthQuery.isPending
     ? "检查中"
@@ -313,8 +346,77 @@ export function App(): React.JSX.Element {
     navigate("devices");
   };
 
+  const updateMirrorWidth = useCallback((clientX: number): void => {
+    const layout = layoutRef.current;
+    if (layout === null) {
+      return;
+    }
+
+    const bounds = sidebarWidthBounds(layout);
+    const width = clientX - layout.getBoundingClientRect().left;
+    setMirrorWidth(Math.min(bounds.maximum, Math.max(bounds.minimum, Math.round(width))));
+  }, []);
+
+  const finishLayoutResize = useCallback((): void => {
+    resizingRef.current = false;
+    setIsResizingLayout(false);
+  }, []);
+
+  const finishPointerLayoutResize = (event: React.PointerEvent<HTMLDivElement>): void => {
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    finishLayoutResize();
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (event: MouseEvent): void => {
+      if (resizingRef.current) {
+        updateMirrorWidth(event.clientX);
+      }
+    };
+    const handleMouseUp = (): void => {
+      if (resizingRef.current) {
+        finishLayoutResize();
+      }
+    };
+
+    globalThis.addEventListener("mousemove", handleMouseMove);
+    globalThis.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      globalThis.removeEventListener("mousemove", handleMouseMove);
+      globalThis.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [finishLayoutResize, updateMirrorWidth]);
+
+  const adjustMirrorWidthWithKeyboard = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    const { minimum, maximum } = sidebarWidthBounds(layoutRef.current);
+    const current = mirrorWidth ?? maximum;
+    let next: number | undefined;
+
+    if (event.key === "ArrowLeft") {
+      next = current - 16;
+    } else if (event.key === "ArrowRight") {
+      next = current + 16;
+    } else if (event.key === "Home") {
+      next = minimum;
+    } else if (event.key === "End") {
+      next = maximum;
+    }
+
+    if (next !== undefined) {
+      event.preventDefault();
+      setMirrorWidth(Math.min(maximum, Math.max(minimum, next)));
+    }
+  };
+
+  const sidebarBounds = sidebarWidthBounds(layoutRef.current);
+  const sidebarWidth = mirrorWidth ?? sidebarBounds.maximum;
+  const shellStyle =
+    mirrorWidth === undefined
+      ? undefined
+      : ({ "--device-sidebar-width": `${mirrorWidth}px` } as React.CSSProperties);
+
   return (
-    <div className="device-console-shell">
+    <div className="device-console-shell" style={shellStyle}>
       <ConsoleHeader
         activeView={activeView}
         agentStatus={agentStatus}
@@ -329,7 +431,7 @@ export function App(): React.JSX.Element {
         onToggleAddMenu={() => setAddMenuOpen((open) => !open)}
       />
 
-      <div className="device-console-layout">
+      <div ref={layoutRef} className="device-console-layout">
         <aside className="mirror-sidebar">
           {selectedDevice === undefined ? (
             <section className="mirror-empty" aria-label="设备连接状态">
@@ -340,6 +442,56 @@ export function App(): React.JSX.Element {
             <DeviceMirrorPanel device={selectedDevice} />
           )}
         </aside>
+
+        <div
+          role="separator"
+          tabIndex={0}
+          className={`layout-divider${isResizingLayout ? " is-resizing" : ""}`}
+          aria-label="调整左右区域宽度"
+          aria-orientation="vertical"
+          aria-valuemin={sidebarBounds.minimum}
+          aria-valuemax={sidebarBounds.maximum}
+          aria-valuenow={sidebarWidth}
+          aria-valuetext="左侧镜像区域宽度，最大值为黄金比例"
+          onKeyDown={adjustMirrorWidthWithKeyboard}
+          onPointerDown={(event) => {
+            if (event.button !== 0) {
+              return;
+            }
+
+            event.preventDefault();
+            resizingRef.current = true;
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+            setIsResizingLayout(true);
+            updateMirrorWidth(event.clientX);
+          }}
+          onPointerMove={(event) => {
+            if (resizingRef.current) {
+              updateMirrorWidth(event.clientX);
+            }
+          }}
+          onPointerUp={finishPointerLayoutResize}
+          onPointerCancel={finishPointerLayoutResize}
+          onMouseDown={(event) => {
+            if (resizingRef.current || event.button !== 0) {
+              return;
+            }
+
+            event.preventDefault();
+            resizingRef.current = true;
+            setIsResizingLayout(true);
+            updateMirrorWidth(event.clientX);
+          }}
+          onMouseMove={(event) => {
+            if (resizingRef.current) {
+              updateMirrorWidth(event.clientX);
+            }
+          }}
+          onMouseUp={finishLayoutResize}
+          onLostPointerCapture={() => {
+            finishLayoutResize();
+          }}
+        />
 
         <main className="console-main">
           {healthQuery.isError && (

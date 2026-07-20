@@ -43,6 +43,7 @@ summary:focus-visible {
 }
 
 .device-console-shell {
+  --device-sidebar-width: clamp(300px, 38.1966%, calc(100% - 360px));
   min-height: 100vh;
   background: #080808;
 }
@@ -53,7 +54,7 @@ summary:focus-visible {
   top: 0;
   display: grid;
   min-height: 54px;
-  grid-template-columns: minmax(360px, 1fr) minmax(0, 1.618fr);
+  grid-template-columns: var(--device-sidebar-width) minmax(0, 1fr);
   align-items: center;
   gap: 0;
   padding: 0;
@@ -305,8 +306,37 @@ summary:focus-visible {
 
 .device-console-layout {
   display: grid;
-  grid-template-columns: minmax(360px, 1fr) minmax(0, 1.618fr);
+  position: relative;
+  grid-template-columns: var(--device-sidebar-width) minmax(0, 1fr);
   min-height: calc(100vh - 54px);
+}
+
+.layout-divider {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--device-sidebar-width) - 5px);
+  width: 10px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.layout-divider::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 2px;
+  content: "";
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+
+.layout-divider:hover::before,
+.layout-divider.is-resizing::before,
+.layout-divider:focus-visible::before {
+  background: #53c5cc;
 }
 
 .mirror-sidebar {
@@ -1111,6 +1141,10 @@ h3 {
 }
 
 @media (max-width: 1120px) {
+  .layout-divider {
+    display: none;
+  }
+
   .console-topbar {
     grid-template-columns: 300px minmax(0, 1fr);
   }

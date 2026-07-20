@@ -336,6 +336,35 @@ describe("DeviceRobot Web UI", () => {
     expect(within(mirror).getByRole("button", { name: "主页" })).toBeInTheDocument();
   });
 
+  it("resizes the mirror area without exceeding the golden-ratio width", async () => {
+    mockApis();
+    renderApp();
+
+    const divider = await screen.findByRole("separator", { name: "调整左右区域宽度" });
+    const layout = divider.parentElement;
+    expect(layout).not.toBeNull();
+    vi.spyOn(layout as HTMLDivElement, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 1_000,
+      height: 700,
+      top: 0,
+      right: 1_000,
+      bottom: 700,
+      left: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(divider, { button: 0, clientX: 300, pointerId: 1 });
+    fireEvent.pointerMove(divider, { clientX: 800, pointerId: 1 });
+
+    const shell = layout?.parentElement;
+    expect(shell?.style.getPropertyValue("--device-sidebar-width")).toBe("382px");
+
+    fireEvent.keyDown(divider, { key: "ArrowLeft" });
+    expect(shell?.style.getPropertyValue("--device-sidebar-width")).toBe("366px");
+  });
+
   it("maps a mirror click to immediate scrcpy pointer messages", async () => {
     const { getActionRequests } = mockApis();
     renderApp();

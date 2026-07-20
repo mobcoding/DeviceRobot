@@ -285,6 +285,7 @@ export function App(): React.JSX.Element {
   const [isResizingLayout, setIsResizingLayout] = useState(false);
   const layoutRef = useRef<HTMLDivElement>(null);
   const resizingRef = useRef(false);
+  const mirrorWidthAdjustedRef = useRef(false);
   const readyDevices = (deviceQuery.data?.devices ?? []).filter(isReadyDevice);
   const selectedDevice = readyDevices.find((device) => device.serial === selectedSerial);
 
@@ -301,6 +302,7 @@ export function App(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
+    mirrorWidthAdjustedRef.current = false;
     setMirrorWidth(undefined);
   }, [selectedDevice?.serial]);
 
@@ -361,6 +363,15 @@ export function App(): React.JSX.Element {
     setMirrorWidth(Math.min(bounds.maximum, Math.max(bounds.minimum, Math.round(width))));
   }, []);
 
+  const usePreferredMirrorWidth = useCallback((width: number): void => {
+    if (mirrorWidthAdjustedRef.current) {
+      return;
+    }
+
+    const { minimum, maximum } = sidebarWidthBounds(layoutRef.current);
+    setMirrorWidth(Math.min(maximum, Math.max(minimum, Math.round(width))));
+  }, []);
+
   const finishLayoutResize = useCallback((): void => {
     resizingRef.current = false;
     setIsResizingLayout(false);
@@ -408,6 +419,7 @@ export function App(): React.JSX.Element {
 
     if (next !== undefined) {
       event.preventDefault();
+      mirrorWidthAdjustedRef.current = true;
       setMirrorWidth(Math.min(maximum, Math.max(minimum, next)));
     }
   };
@@ -443,7 +455,10 @@ export function App(): React.JSX.Element {
               <strong>{deviceQuery.isPending ? "正在扫描设备" : "未检测到可用设备"}</strong>
             </section>
           ) : (
-            <DeviceMirrorPanel device={selectedDevice} />
+            <DeviceMirrorPanel
+              device={selectedDevice}
+              onPreferredSidebarWidth={usePreferredMirrorWidth}
+            />
           )}
         </aside>
 
@@ -464,6 +479,7 @@ export function App(): React.JSX.Element {
             }
 
             event.preventDefault();
+            mirrorWidthAdjustedRef.current = true;
             resizingRef.current = true;
             event.currentTarget.setPointerCapture?.(event.pointerId);
             setIsResizingLayout(true);
@@ -482,6 +498,7 @@ export function App(): React.JSX.Element {
             }
 
             event.preventDefault();
+            mirrorWidthAdjustedRef.current = true;
             resizingRef.current = true;
             setIsResizingLayout(true);
             updateMirrorWidth(event.clientX);

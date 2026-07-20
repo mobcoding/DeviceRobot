@@ -14,6 +14,7 @@ import type { AndroidDevice } from "@device-robot/contracts";
 
 type DeviceMirrorPanelProps = {
   device: AndroidDevice;
+  onPreferredSidebarWidth?(width: number): void;
 };
 
 type DevicePoint = {
@@ -120,8 +121,12 @@ function pointFromPointer(
   };
 }
 
-export function DeviceMirrorPanel({ device }: DeviceMirrorPanelProps): React.JSX.Element {
+export function DeviceMirrorPanel({
+  device,
+  onPreferredSidebarWidth,
+}: DeviceMirrorPanelProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
   const decoderRef = useRef<VideoDecoder | undefined>(undefined);
   const socketRef = useRef<WebSocket | undefined>(undefined);
   const pointerStart = useRef<ActivePointer | undefined>(undefined);
@@ -303,6 +308,18 @@ export function DeviceMirrorPanel({ device }: DeviceMirrorPanelProps): React.JSX
       closeDecoder();
     };
   }, [serial, streamAttempt]);
+
+  useEffect(() => {
+    if (screenSize === undefined || onPreferredSidebarWidth === undefined) {
+      return;
+    }
+
+    const frameHeight = frameRef.current?.getBoundingClientRect().height ?? 0;
+    const deviceAspectRatio = screenSize.x / screenSize.y;
+    if (frameHeight > 0 && Number.isFinite(deviceAspectRatio)) {
+      onPreferredSidebarWidth(Math.ceil(frameHeight * deviceAspectRatio) + 28);
+    }
+  }, [onPreferredSidebarWidth, screenSize]);
 
   const sendControl = (command: StreamControl): boolean => {
     const socket = socketRef.current;
@@ -506,6 +523,7 @@ export function DeviceMirrorPanel({ device }: DeviceMirrorPanelProps): React.JSX
           </button>
         </aside>
         <div
+          ref={frameRef}
           className="mirror-screen-frame"
           style={
             screenSize === undefined

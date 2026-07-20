@@ -20,7 +20,15 @@ function dependencyLabel(available: boolean): string {
   return available ? "已就绪" : "未就绪";
 }
 
-export function AppiumRuntimePanel(): React.JSX.Element {
+type AppiumRuntimePanelProps = {
+  variant?: "compact" | "details";
+  controls?: boolean;
+};
+
+export function AppiumRuntimePanel({
+  variant = "details",
+  controls = true,
+}: AppiumRuntimePanelProps): React.JSX.Element {
   const queryClient = useQueryClient();
   const runtimeQuery = useQuery({
     queryKey: ["appium-runtime"],
@@ -42,6 +50,35 @@ export function AppiumRuntimePanel(): React.JSX.Element {
     runtime?.server.state === "running" || runtime?.server.state === "starting";
   const canStart = runtime?.status === "ready" && !serverIsRunning;
 
+  if (variant === "compact") {
+    return (
+      <div className="appium-compact" aria-label="Appium 服务状态">
+        <span
+          className={runtime?.status === "ready" ? "status-chip healthy" : "status-chip warning"}
+        >
+          Appium {runtime === undefined ? "检查中" : stateLabel(runtime.server.state)}
+        </span>
+        {controls && (
+          <button
+            className="topbar-action"
+            type="button"
+            disabled={lifecycleMutation.isPending || (!canStart && !serverIsRunning)}
+            aria-busy={activeOperation === "start" || activeOperation === "stop" ? true : undefined}
+            onClick={() => lifecycleMutation.mutate(serverIsRunning ? "stop" : "start")}
+          >
+            {activeOperation === "start"
+              ? "启动中..."
+              : activeOperation === "stop"
+                ? "停止中..."
+                : serverIsRunning
+                  ? "停止"
+                  : "启动"}
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <section className="appium-runtime" aria-label="Appium 运行环境">
       <div className="section-heading">
@@ -53,24 +90,28 @@ export function AppiumRuntimePanel(): React.JSX.Element {
           <span className={`device-state ${runtime?.status === "ready" ? "ready" : "warning"}`}>
             {runtime?.status === "ready" ? "环境已就绪" : "环境待配置"}
           </span>
-          <button
-            className="compact-button"
-            type="button"
-            disabled={lifecycleMutation.isPending || !canStart}
-            aria-busy={activeOperation === "start" ? true : undefined}
-            onClick={() => lifecycleMutation.mutate("start")}
-          >
-            {activeOperation === "start" ? "启动中..." : "启动服务"}
-          </button>
-          <button
-            className="compact-button subtle-action"
-            type="button"
-            disabled={lifecycleMutation.isPending || !serverIsRunning}
-            aria-busy={activeOperation === "stop" ? true : undefined}
-            onClick={() => lifecycleMutation.mutate("stop")}
-          >
-            {activeOperation === "stop" ? "停止中..." : "停止服务"}
-          </button>
+          {controls && (
+            <>
+              <button
+                className="compact-button"
+                type="button"
+                disabled={lifecycleMutation.isPending || !canStart}
+                aria-busy={activeOperation === "start" ? true : undefined}
+                onClick={() => lifecycleMutation.mutate("start")}
+              >
+                {activeOperation === "start" ? "启动中..." : "启动服务"}
+              </button>
+              <button
+                className="compact-button subtle-action"
+                type="button"
+                disabled={lifecycleMutation.isPending || !serverIsRunning}
+                aria-busy={activeOperation === "stop" ? true : undefined}
+                onClick={() => lifecycleMutation.mutate("stop")}
+              >
+                {activeOperation === "stop" ? "停止中..." : "停止服务"}
+              </button>
+            </>
+          )}
         </div>
       </div>
 

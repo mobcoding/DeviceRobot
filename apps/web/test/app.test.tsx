@@ -1,12 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../src/App";
 
 beforeEach(() => {
-  globalThis.location.hash = "#overview";
+  globalThis.location.hash = "#devices";
 });
 
 afterEach(() => {
@@ -31,6 +31,26 @@ const healthResponse = {
   version: "0.1.0",
   startedAt: "2026-07-20T10:00:00.000Z",
   dataDirectory: "C:\\Users\\tester\\AppData\\Local\\AIMobileTester",
+};
+
+const appiumRuntimeResponse = {
+  status: "ready",
+  checkedAt: "2026-07-20T10:00:00.000Z",
+  appium: { available: true, version: "3.5.2" },
+  uiautomator2: {
+    available: true,
+    packageName: "appium-uiautomator2-driver",
+    version: "8.1.0",
+  },
+  java: { available: true, version: "21" },
+  androidSdk: { available: true, path: "D:\\Android\\Sdk" },
+  server: {
+    state: "stopped",
+    host: "127.0.0.1",
+    port: 4723,
+    logFile: "C:\\logs\\appium.log",
+  },
+  issues: [],
 };
 
 const devicesResponse = {
@@ -84,6 +104,13 @@ function mockApis(options: { healthError?: Error } = {}): {
     const url =
       typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+
+    if (url.includes("/api/v1/appium/runtime")) {
+      return new Response(JSON.stringify(appiumRuntimeResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
 
     if (url.includes("/api/v1/devices")) {
       deviceRequests += 1;
@@ -139,19 +166,20 @@ function mockApis(options: { healthError?: Error } = {}): {
 }
 
 describe("DeviceRobot Web UI", () => {
-  it("renders the real Agent health response", async () => {
+  it("opens directly into the selected device workspace", async () => {
     mockApis();
-
     renderApp();
 
-    expect((await screen.findAllByText("已连接")).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("0.1.0")).toBeInTheDocument();
-    expect(screen.getByText(/AIMobileTester/)).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Pixel 3 XL" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "设备工作台" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "启动" })).toBeInTheDocument();
+    expect(screen.getByText("ADB 1 台设备")).toBeInTheDocument();
   });
 
   it("shows an actionable error when the Agent is unavailable", async () => {
     mockApis({ healthError: new Error("Connection refused") });
-
     renderApp();
 
     expect(await screen.findByRole("alert", {}, { timeout: 3_000 })).toHaveTextContent(
@@ -160,77 +188,61 @@ describe("DeviceRobot Web UI", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("无法连接本地 Agent");
   });
 
-  it("navigates to every workspace section", async () => {
+  it("keeps future workspaces inside the more menu", async () => {
     mockApis();
     const user = userEvent.setup();
     renderApp();
 
-    const destinations = [
-      ["项目", "projects", "项目"],
-      ["设备", "devices", "设备"],
-      ["AI 对话", "conversations", "AI 对话"],
-      ["测试运行", "runs", "测试运行"],
-      ["报告", "reports", "报告"],
-      ["概览", "overview", "本地 Android 自动化，随时扩展。"],
-    ] as const;
+    await screen.findByRole("heading", { level: 1, name: "Pixel 3 XL" });
+    await user.click(screen.getByRole("button", { name: "更多工作区" }));
+    await user.click(screen.getByRole("button", { name: "AI 与用例" }));
 
-    for (const [label, hash, heading] of destinations) {
-      await user.click(screen.getByRole("button", { name: new RegExp(label, "i") }));
-      expect(screen.getByRole("heading", { level: 1, name: heading })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: new RegExp(label, "i") })).toHaveAttribute(
-        "aria-current",
-        "page",
-      );
-      expect(globalThis.location.hash).toBe(`#${hash}`);
-    }
+    expect(screen.getByRole("heading", { level: 1, name: "AI 与用例" })).toBeInTheDocument();
+    expect(globalThis.location.hash).toBe("#conversations");
   });
 
-  it("shows a real authorized Android device", async () => {
+  it("shows a real authorized Android device in the device picker", async () => {
     mockApis();
-    globalThis.location.hash = "#devices";
     renderApp();
 
-    expect(
-      await screen.findByRole("heading", { level: 2, name: "Pixel 3 XL" }),
-    ).toBeInTheDocument();
-    expect(screen.getAllByText("8B3Y0THX0")).toHaveLength(2);
-    expect(screen.getByText("37.0.0-14910828")).toBeInTheDocument();
-    expect(screen.getAllByText("可用")).toHaveLength(2);
+    const picker = screen.getByRole("region", { name: "我的设备" });
+    expect(await within(picker).findByText("Pixel 3 XL")).toBeInTheDocument();
+    expect(screen.getAllByText("8B3Y0THX0")).toHaveLength(1);
+    expect(screen.getByText("USB 连接")).toBeInTheDocument();
   });
 
   it("manually refreshes the device list", async () => {
     const { getDeviceRequests } = mockApis();
     const user = userEvent.setup();
-    globalThis.location.hash = "#devices";
     renderApp();
 
-    await screen.findByRole("heading", { level: 2, name: "Pixel 3 XL" });
+    await screen.findByRole("heading", { level: 1, name: "Pixel 3 XL" });
     const initialRequests = getDeviceRequests();
     await user.click(screen.getByRole("button", { name: "刷新" }));
 
     await vi.waitFor(() => expect(getDeviceRequests()).toBeGreaterThan(initialRequests));
   });
 
-  it("shows the selected device screenshot and UI hierarchy", async () => {
+  it("shows the selected device screenshot and collapsed evidence drawers", async () => {
     mockApis();
-    globalThis.location.hash = "#devices";
     renderApp();
 
-    expect(await screen.findByRole("region", { name: "设备控制台" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "设备工作台" })).toBeInTheDocument();
     expect(screen.getByAltText("设备截图：Pixel 3 XL")).toBeInTheDocument();
-    expect(await screen.findByText(/hierarchy rotation/)).toBeInTheDocument();
+    expect(screen.getByText("UI 层级")).toBeInTheDocument();
+    expect(screen.getByText("操作审计")).toBeInTheDocument();
   });
 
-  it("sends a structured back action from the control console", async () => {
+  it("sends a structured back action from the control tab", async () => {
     const { getActionRequests } = mockApis();
     const user = userEvent.setup();
-    globalThis.location.hash = "#devices";
     renderApp();
 
-    await screen.findByRole("region", { name: "设备控制台" });
+    await screen.findByRole("region", { name: "设备工作台" });
+    await user.click(screen.getByRole("tab", { name: "控制" }));
     await user.click(screen.getByRole("button", { name: "返回" }));
 
     await vi.waitFor(() => expect(getActionRequests()).toBe(1));
-    expect(await screen.findByText("已完成")).toBeInTheDocument();
+    expect(await screen.findByText("完成")).toBeInTheDocument();
   });
 });

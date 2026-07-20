@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import type { AndroidDevice, DeviceControlAction } from "@device-robot/contracts";
 
 import {
-  deviceScreenshotUrl,
   executeDeviceAction,
   fetchDeviceActionHistory,
   fetchDeviceUiTree,
@@ -13,8 +12,6 @@ import { AppiumRuntimePanel } from "./AppiumRuntimePanel";
 type DeviceControlPanelProps = {
   device: AndroidDevice;
 };
-
-type WorkspaceTab = "inspect" | "control" | "app";
 
 function formatAction(action: DeviceControlAction): string {
   switch (action.action) {
@@ -47,12 +44,12 @@ function deviceName(device: AndroidDevice): string {
   return device.model ?? device.deviceName ?? device.serial;
 }
 
-function deviceConnectionLabel(device: AndroidDevice): string {
-  switch (device.connection) {
+function connectionLabel(connection: AndroidDevice["connection"]): string {
+  switch (connection) {
     case "usb":
-      return "USB 连接";
+      return "USB";
     case "tcp":
-      return "TCP 连接";
+      return "TCP";
     default:
       return "模拟器";
   }
@@ -61,9 +58,6 @@ function deviceConnectionLabel(device: AndroidDevice): string {
 export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.JSX.Element {
   const queryClient = useQueryClient();
   const serial = device.serial;
-  const [activeTab, setActiveTab] = useState<WorkspaceTab>("inspect");
-  const [screenshotRevision, setScreenshotRevision] = useState(0);
-  const [screenshotError, setScreenshotError] = useState<string>();
   const [tapX, setTapX] = useState("");
   const [tapY, setTapY] = useState("");
   const [inputValue, setInputValue] = useState("");
@@ -75,9 +69,6 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
   const [validationError, setValidationError] = useState<string>();
 
   useEffect(() => {
-    setActiveTab("inspect");
-    setScreenshotRevision(0);
-    setScreenshotError(undefined);
     setValidationError(undefined);
   }, [serial]);
 
@@ -95,8 +86,6 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
     mutationFn: async (action: DeviceControlAction) => await executeDeviceAction(serial, action),
     onSuccess: async () => {
       setValidationError(undefined);
-      setScreenshotError(undefined);
-      setScreenshotRevision((revision) => revision + 1);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["device-action-history", serial] }),
         queryClient.invalidateQueries({ queryKey: ["device-ui-tree", serial] }),
@@ -155,325 +144,266 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
     validationError ?? (actionMutation.isError ? actionMutation.error.message : undefined);
 
   return (
-    <section className="device-workbench" aria-label="设备工作台">
-      <header className="device-workbench-bar">
+    <section className="device-overview" aria-label="设备工作台">
+      <header className="overview-heading">
         <div>
-          <h2>{deviceName(device)}</h2>
-          <code>{serial}</code>
+          <p className="eyebrow">设备</p>
+          <h1>概览</h1>
         </div>
-        <span className="device-connection">{deviceConnectionLabel(device)}</span>
+        <span className="overview-device-name">{deviceName(device)}</span>
       </header>
 
-      <div className="device-workbench-grid">
-        <section className="device-screen-column" aria-label="设备屏幕与证据">
-          <div className="screen-heading">
-            <div>
-              <p className="eyebrow">当前屏幕</p>
-              <h3>实时截图</h3>
-            </div>
-            <button
-              className="compact-button"
-              type="button"
-              onClick={() => {
-                setScreenshotError(undefined);
-                setScreenshotRevision((revision) => revision + 1);
-              }}
-            >
-              刷新屏幕
-            </button>
-          </div>
-          <div className="device-screen-frame">
-            <img
-              alt={`设备截图：${deviceName(device)}`}
-              src={deviceScreenshotUrl(serial, screenshotRevision)}
-              onError={() => setScreenshotError("截图获取失败，请检查设备连接。")}
-            />
-          </div>
-          {screenshotError !== undefined && <p className="control-error">{screenshotError}</p>}
+      <dl className="overview-grid">
+        <div>
+          <dt>制造商</dt>
+          <dd>{device.manufacturer ?? "未上报"}</dd>
+        </div>
+        <div>
+          <dt>型号</dt>
+          <dd>{deviceName(device)}</dd>
+        </div>
+        <div>
+          <dt>Android 版本</dt>
+          <dd>{device.androidVersion ?? "未上报"}</dd>
+        </div>
+        <div>
+          <dt>API 级别</dt>
+          <dd>{device.apiLevel ?? "未上报"}</dd>
+        </div>
+        <div>
+          <dt>传输连接</dt>
+          <dd>{connectionLabel(device.connection)}</dd>
+        </div>
+        <div>
+          <dt>设备序列号</dt>
+          <dd className="serial-value">{serial}</dd>
+        </div>
+      </dl>
 
-          <div className="evidence-drawers">
-            <details className="evidence-drawer">
-              <summary>UI 层级</summary>
-              <div className="evidence-drawer-content">
-                <button
-                  className="text-button"
-                  type="button"
-                  disabled={uiTreeQuery.isFetching}
-                  onClick={() => void uiTreeQuery.refetch()}
-                >
-                  {uiTreeQuery.isFetching ? "读取中" : "刷新 XML"}
-                </button>
-                {uiTreeQuery.isError ? (
-                  <p className="control-error">{uiTreeQuery.error.message}</p>
-                ) : uiTreeQuery.data === undefined ? (
-                  <p className="control-empty">正在读取 UI 层级...</p>
-                ) : (
-                  <pre className="ui-tree-code">{uiTreeQuery.data.xml}</pre>
-                )}
-              </div>
-            </details>
+      <details className="console-accordion">
+        <summary>测试运行环境</summary>
+        <div className="console-accordion-content">
+          <AppiumRuntimePanel controls={false} />
+        </div>
+      </details>
 
-            <details className="evidence-drawer">
-              <summary>操作审计</summary>
-              <div className="evidence-drawer-content">
-                {actionHistoryQuery.isError ? (
-                  <p className="control-error">{actionHistoryQuery.error.message}</p>
-                ) : actionHistoryQuery.data === undefined ? (
-                  <p className="control-empty">正在加载操作记录...</p>
-                ) : actionHistoryQuery.data.actions.length === 0 ? (
-                  <p className="control-empty">尚未记录设备操作。</p>
-                ) : (
-                  <ol className="action-history-list">
-                    {actionHistoryQuery.data.actions.map((audit) => (
-                      <li key={audit.id}>
-                        <span
-                          className={audit.success ? "audit-result success" : "audit-result failed"}
-                        >
-                          {audit.success ? "完成" : "失败"}
-                        </span>
-                        <strong>{formatAction(audit.action)}</strong>
-                        <time dateTime={audit.finishedAt}>{formatTime(audit.finishedAt)}</time>
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </div>
-            </details>
-          </div>
-        </section>
-
-        <aside className="device-toolbox" aria-label="设备操作">
-          <div className="workspace-tabs" role="tablist" aria-label="设备操作标签">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === "inspect"}
-              onClick={() => setActiveTab("inspect")}
-            >
-              检查
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === "control"}
-              onClick={() => setActiveTab("control")}
-            >
-              控制
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === "app"}
-              onClick={() => setActiveTab("app")}
-            >
-              应用
-            </button>
-          </div>
-
-          {activeTab === "inspect" && (
-            <div className="tool-panel" role="tabpanel">
-              <div className="tool-panel-heading">
-                <p className="eyebrow">设备信息</p>
-                <h3>连接与运行环境</h3>
-              </div>
-              <dl className="device-detail-list">
-                <div>
-                  <dt>厂商</dt>
-                  <dd>{device.manufacturer ?? "未上报"}</dd>
-                </div>
-                <div>
-                  <dt>Android</dt>
-                  <dd>{device.androidVersion ?? "未上报"}</dd>
-                </div>
-                <div>
-                  <dt>API</dt>
-                  <dd>{device.apiLevel ?? "未上报"}</dd>
-                </div>
-                <div>
-                  <dt>产品代号</dt>
-                  <dd>{device.product ?? "未上报"}</dd>
-                </div>
-              </dl>
-              <AppiumRuntimePanel controls={false} />
-            </div>
+      <details className="console-accordion">
+        <summary>设备控制</summary>
+        <div className="console-accordion-content">
+          {errorMessage !== undefined && (
+            <p className="control-error" role="alert">
+              {errorMessage}
+            </p>
           )}
-
-          {activeTab === "control" && (
-            <div className="tool-panel" role="tabpanel">
-              <div className="tool-panel-heading">
-                <p className="eyebrow">直接 ADB 控制</p>
-                <h3>触控与输入</h3>
-              </div>
-              {errorMessage !== undefined && (
-                <p className="control-error" role="alert">
-                  {errorMessage}
-                </p>
-              )}
-              {actionMutation.isPending && <p className="action-progress">正在发送操作...</p>}
-
-              <section className="tool-group">
-                <h4>触控</h4>
-                <div className="coordinate-fields">
-                  <label>
-                    X
-                    <input
-                      aria-label="点击 X 坐标"
-                      inputMode="numeric"
-                      value={tapX}
-                      onChange={(event) => setTapX(event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Y
-                    <input
-                      aria-label="点击 Y 坐标"
-                      inputMode="numeric"
-                      value={tapY}
-                      onChange={(event) => setTapY(event.target.value)}
-                    />
-                  </label>
-                </div>
-                <div className="action-button-row">
-                  <button
-                    type="button"
-                    onClick={() => submitTap(false)}
-                    disabled={actionMutation.isPending}
-                  >
-                    点击
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => submitTap(true)}
-                    disabled={actionMutation.isPending}
-                  >
-                    长按
-                  </button>
-                  <button
-                    className="subtle-action"
-                    type="button"
-                    onClick={() => submitAction({ action: "ui.back" })}
-                    disabled={actionMutation.isPending}
-                  >
-                    返回
-                  </button>
-                </div>
-              </section>
-
-              <section className="tool-group">
-                <h4>文本输入</h4>
+          {actionMutation.isPending && <p className="action-progress">正在发送操作...</p>}
+          <div className="control-sections">
+            <section>
+              <h2>触控</h2>
+              <div className="coordinate-fields">
                 <label>
-                  文本
+                  X
                   <input
-                    aria-label="待输入文本"
-                    value={inputValue}
-                    onChange={(event) => setInputValue(event.target.value)}
+                    aria-label="点击 X 坐标"
+                    inputMode="numeric"
+                    value={tapX}
+                    onChange={(event) => setTapX(event.target.value)}
                   />
                 </label>
+                <label>
+                  Y
+                  <input
+                    aria-label="点击 Y 坐标"
+                    inputMode="numeric"
+                    value={tapY}
+                    onChange={(event) => setTapY(event.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="action-button-row">
                 <button
-                  className="wide-action"
                   type="button"
-                  disabled={actionMutation.isPending || inputValue.trim().length === 0}
-                  onClick={() => submitAction({ action: "ui.input", value: inputValue })}
-                >
-                  发送文本
-                </button>
-              </section>
-
-              <section className="tool-group">
-                <h4>滑动</h4>
-                <div className="coordinate-fields swipe-fields">
-                  <label>
-                    起点 X
-                    <input
-                      aria-label="滑动起点 X 坐标"
-                      inputMode="numeric"
-                      value={startX}
-                      onChange={(event) => setStartX(event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    起点 Y
-                    <input
-                      aria-label="滑动起点 Y 坐标"
-                      inputMode="numeric"
-                      value={startY}
-                      onChange={(event) => setStartY(event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    终点 X
-                    <input
-                      aria-label="滑动终点 X 坐标"
-                      inputMode="numeric"
-                      value={endX}
-                      onChange={(event) => setEndX(event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    终点 Y
-                    <input
-                      aria-label="滑动终点 Y 坐标"
-                      inputMode="numeric"
-                      value={endY}
-                      onChange={(event) => setEndY(event.target.value)}
-                    />
-                  </label>
-                </div>
-                <button
-                  className="wide-action"
-                  type="button"
+                  onClick={() => submitTap(false)}
                   disabled={actionMutation.isPending}
-                  onClick={submitSwipe}
                 >
-                  执行滑动
+                  点击
                 </button>
-              </section>
-            </div>
-          )}
-
-          {activeTab === "app" && (
-            <div className="tool-panel" role="tabpanel">
-              <div className="tool-panel-heading">
-                <p className="eyebrow">应用控制</p>
-                <h3>启动与停止</h3>
+                <button
+                  type="button"
+                  onClick={() => submitTap(true)}
+                  disabled={actionMutation.isPending}
+                >
+                  长按
+                </button>
+                <button
+                  type="button"
+                  className="subtle-action"
+                  onClick={() => submitAction({ action: "ui.back" })}
+                  disabled={actionMutation.isPending}
+                >
+                  返回
+                </button>
               </div>
-              {errorMessage !== undefined && (
-                <p className="control-error" role="alert">
-                  {errorMessage}
-                </p>
-              )}
-              <section className="tool-group app-control-group">
+            </section>
+
+            <section>
+              <h2>文本输入</h2>
+              <label>
+                文本
+                <input
+                  aria-label="待输入文本"
+                  value={inputValue}
+                  onChange={(event) => setInputValue(event.target.value)}
+                />
+              </label>
+              <button
+                className="wide-action"
+                type="button"
+                disabled={actionMutation.isPending || inputValue.trim().length === 0}
+                onClick={() => submitAction({ action: "ui.input", value: inputValue })}
+              >
+                发送文本
+              </button>
+            </section>
+
+            <section>
+              <h2>滑动</h2>
+              <div className="coordinate-fields swipe-fields">
                 <label>
-                  Android 包名
+                  起点 X
                   <input
-                    aria-label="Android 包名"
-                    placeholder="com.example.app"
-                    value={appId}
-                    onChange={(event) => setAppId(event.target.value)}
+                    aria-label="滑动起点 X 坐标"
+                    inputMode="numeric"
+                    value={startX}
+                    onChange={(event) => setStartX(event.target.value)}
                   />
                 </label>
-                <div className="action-button-row">
-                  <button
-                    type="button"
-                    disabled={actionMutation.isPending}
-                    onClick={() => submitAppAction("app.launch")}
-                  >
-                    启动应用
-                  </button>
-                  <button
-                    className="subtle-action"
-                    type="button"
-                    disabled={actionMutation.isPending}
-                    onClick={() => submitAppAction("app.stop")}
-                  >
-                    停止应用
-                  </button>
-                </div>
-              </section>
-            </div>
+                <label>
+                  起点 Y
+                  <input
+                    aria-label="滑动起点 Y 坐标"
+                    inputMode="numeric"
+                    value={startY}
+                    onChange={(event) => setStartY(event.target.value)}
+                  />
+                </label>
+                <label>
+                  终点 X
+                  <input
+                    aria-label="滑动终点 X 坐标"
+                    inputMode="numeric"
+                    value={endX}
+                    onChange={(event) => setEndX(event.target.value)}
+                  />
+                </label>
+                <label>
+                  终点 Y
+                  <input
+                    aria-label="滑动终点 Y 坐标"
+                    inputMode="numeric"
+                    value={endY}
+                    onChange={(event) => setEndY(event.target.value)}
+                  />
+                </label>
+              </div>
+              <button
+                className="wide-action"
+                type="button"
+                disabled={actionMutation.isPending}
+                onClick={submitSwipe}
+              >
+                执行滑动
+              </button>
+            </section>
+          </div>
+        </div>
+      </details>
+
+      <details className="console-accordion">
+        <summary>应用控制</summary>
+        <div className="console-accordion-content application-control">
+          {errorMessage !== undefined && (
+            <p className="control-error" role="alert">
+              {errorMessage}
+            </p>
           )}
-        </aside>
-      </div>
+          <label>
+            Android 包名
+            <input
+              aria-label="Android 包名"
+              placeholder="com.example.app"
+              value={appId}
+              onChange={(event) => setAppId(event.target.value)}
+            />
+          </label>
+          <div className="action-button-row">
+            <button
+              type="button"
+              disabled={actionMutation.isPending}
+              onClick={() => submitAppAction("app.launch")}
+            >
+              启动应用
+            </button>
+            <button
+              type="button"
+              className="subtle-action"
+              disabled={actionMutation.isPending}
+              onClick={() => submitAppAction("app.stop")}
+            >
+              停止应用
+            </button>
+          </div>
+        </div>
+      </details>
+
+      <details className="console-accordion">
+        <summary>UI 层级与操作审计</summary>
+        <div className="console-accordion-content evidence-content">
+          <section>
+            <div className="evidence-heading">
+              <h2>UI 层级</h2>
+              <button
+                className="text-button"
+                type="button"
+                disabled={uiTreeQuery.isFetching}
+                onClick={() => void uiTreeQuery.refetch()}
+              >
+                {uiTreeQuery.isFetching ? "读取中" : "刷新 XML"}
+              </button>
+            </div>
+            {uiTreeQuery.isError ? (
+              <p className="control-error">{uiTreeQuery.error.message}</p>
+            ) : uiTreeQuery.data === undefined ? (
+              <p className="control-empty">正在读取 UI 层级...</p>
+            ) : (
+              <pre className="ui-tree-code">{uiTreeQuery.data.xml}</pre>
+            )}
+          </section>
+          <section>
+            <h2>操作审计</h2>
+            {actionHistoryQuery.isError ? (
+              <p className="control-error">{actionHistoryQuery.error.message}</p>
+            ) : actionHistoryQuery.data === undefined ? (
+              <p className="control-empty">正在加载操作记录...</p>
+            ) : actionHistoryQuery.data.actions.length === 0 ? (
+              <p className="control-empty">尚未记录设备操作。</p>
+            ) : (
+              <ol className="action-history-list">
+                {actionHistoryQuery.data.actions.map((audit) => (
+                  <li key={audit.id}>
+                    <span
+                      className={audit.success ? "audit-result success" : "audit-result failed"}
+                    >
+                      {audit.success ? "完成" : "失败"}
+                    </span>
+                    <strong>{formatAction(audit.action)}</strong>
+                    <time dateTime={audit.finishedAt}>{formatTime(audit.finishedAt)}</time>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+        </div>
+      </details>
     </section>
   );
 }

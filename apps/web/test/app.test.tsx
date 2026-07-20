@@ -166,16 +166,14 @@ function mockApis(options: { healthError?: Error } = {}): {
 }
 
 describe("DeviceRobot Web UI", () => {
-  it("opens directly into the selected device workspace", async () => {
+  it("opens directly into the selected device overview", async () => {
     mockApis();
     renderApp();
 
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Pixel 3 XL" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "概览" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "设备工作台" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "启动" })).toBeInTheDocument();
-    expect(screen.getByText("ADB 1 台设备")).toBeInTheDocument();
+    expect(screen.getByText("ADB 就绪")).toBeInTheDocument();
   });
 
   it("shows an actionable error when the Agent is unavailable", async () => {
@@ -193,53 +191,57 @@ describe("DeviceRobot Web UI", () => {
     const user = userEvent.setup();
     renderApp();
 
-    await screen.findByRole("heading", { level: 1, name: "Pixel 3 XL" });
-    await user.click(screen.getByRole("button", { name: "更多工作区" }));
+    await screen.findByRole("heading", { level: 1, name: "概览" });
+    await user.click(screen.getByRole("button", { name: "更多" }));
     await user.click(screen.getByRole("button", { name: "AI 与用例" }));
 
     expect(screen.getByRole("heading", { level: 1, name: "AI 与用例" })).toBeInTheDocument();
     expect(globalThis.location.hash).toBe("#conversations");
   });
 
-  it("shows a real authorized Android device in the device picker", async () => {
+  it("shows a real authorized Android device in the selector", async () => {
     mockApis();
     renderApp();
 
-    const picker = screen.getByRole("region", { name: "我的设备" });
-    expect(await within(picker).findByText("Pixel 3 XL")).toBeInTheDocument();
+    const selector = await screen.findByRole("combobox", { name: "当前设备" });
+    await vi.waitFor(() => expect(selector).toHaveValue("8B3Y0THX0"));
+    expect(within(selector).getByRole("option", { name: "Pixel 3 XL" })).toBeInTheDocument();
     expect(screen.getAllByText("8B3Y0THX0")).toHaveLength(1);
-    expect(screen.getByText("USB 连接")).toBeInTheDocument();
+    expect(screen.getByText("USB")).toBeInTheDocument();
   });
 
-  it("manually refreshes the device list", async () => {
-    const { getDeviceRequests } = mockApis();
+  it("manually refreshes the selected device mirror", async () => {
+    mockApis();
     const user = userEvent.setup();
     renderApp();
 
-    await screen.findByRole("heading", { level: 1, name: "Pixel 3 XL" });
-    const initialRequests = getDeviceRequests();
+    await screen.findByRole("heading", { level: 1, name: "概览" });
+    const screenshot = screen.getByAltText("设备截图：Pixel 3 XL");
+    expect(screenshot).toHaveAttribute("src", "/api/v1/devices/8B3Y0THX0/screenshot?revision=0");
     await user.click(screen.getByRole("button", { name: "刷新" }));
 
-    await vi.waitFor(() => expect(getDeviceRequests()).toBeGreaterThan(initialRequests));
+    await vi.waitFor(() =>
+      expect(screenshot).toHaveAttribute("src", "/api/v1/devices/8B3Y0THX0/screenshot?revision=1"),
+    );
   });
 
-  it("shows the selected device screenshot and collapsed evidence drawers", async () => {
+  it("shows the selected device mirror and collapsed evidence controls", async () => {
     mockApis();
     renderApp();
 
-    expect(await screen.findByRole("region", { name: "设备工作台" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "屏幕镜像" })).toBeInTheDocument();
     expect(screen.getByAltText("设备截图：Pixel 3 XL")).toBeInTheDocument();
-    expect(screen.getByText("UI 层级")).toBeInTheDocument();
-    expect(screen.getByText("操作审计")).toBeInTheDocument();
+    expect(screen.getByText("设备控制")).toBeInTheDocument();
+    expect(screen.getByText("UI 层级与操作审计")).toBeInTheDocument();
   });
 
-  it("sends a structured back action from the control tab", async () => {
+  it("sends a structured back action from the device control accordion", async () => {
     const { getActionRequests } = mockApis();
     const user = userEvent.setup();
     renderApp();
 
-    await screen.findByRole("region", { name: "设备工作台" });
-    await user.click(screen.getByRole("tab", { name: "控制" }));
+    await screen.findByRole("heading", { level: 1, name: "概览" });
+    await user.click(screen.getByText("设备控制"));
     await user.click(screen.getByRole("button", { name: "返回" }));
 
     await vi.waitFor(() => expect(getActionRequests()).toBe(1));

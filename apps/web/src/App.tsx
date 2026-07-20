@@ -6,13 +6,13 @@ import { fetchDevices } from "./api/devices";
 import { fetchHealth } from "./api/health";
 import { AppiumRuntimePanel } from "./components/AppiumRuntimePanel";
 import { DeviceControlPanel } from "./components/DeviceControlPanel";
+import { DeviceMirrorPanel } from "./components/DeviceMirrorPanel";
 
 const viewIds = ["devices", "projects", "conversations", "runs", "reports"] as const;
 type ViewId = (typeof viewIds)[number];
 type PlannedViewId = Exclude<ViewId, "devices">;
 
 type PlannedViewContent = {
-  eyebrow: string;
   title: string;
   description: string;
   capabilities: readonly string[];
@@ -20,25 +20,21 @@ type PlannedViewContent = {
 
 const plannedViews: Record<PlannedViewId, PlannedViewContent> = {
   projects: {
-    eyebrow: "代码仓库分析",
     title: "项目",
     description: "尚未接入 Android 项目。",
     capabilities: ["本地与 Git 仓库", "Gradle 构建变体", "XML View 与 Compose 索引"],
   },
   conversations: {
-    eyebrow: "Agent 工作区",
     title: "AI 与用例",
     description: "尚未创建 AI 对话或测试用例。",
     capabilities: ["源码感知规划", "结构化操作", "审批与信任策略"],
   },
   runs: {
-    eyebrow: "确定性执行",
     title: "运行",
     description: "尚未启动测试运行。",
     capabilities: ["Appium 工作进程", "定位器修复", "设备矩阵与分片"],
   },
   reports: {
-    eyebrow: "本地证据",
     title: "报告",
     description: "尚未生成测试报告。",
     capabilities: ["离线 HTML", "截图与 UI 树", "ADB 与 Appium 审计"],
@@ -58,21 +54,6 @@ function isReadyDevice(device: AndroidDevice): boolean {
   return device.state === "device" || device.state === "emulator";
 }
 
-function deviceStateLabel(device: AndroidDevice): string {
-  switch (device.state) {
-    case "device":
-      return "可用";
-    case "emulator":
-      return "模拟器";
-    case "unauthorized":
-      return "待授权";
-    case "offline":
-      return "离线";
-    default:
-      return "未知";
-  }
-}
-
 function deviceName(device: AndroidDevice): string {
   return device.model ?? device.deviceName ?? device.serial;
 }
@@ -80,9 +61,9 @@ function deviceName(device: AndroidDevice): string {
 function PlannedView({ content }: { content: PlannedViewContent }): React.JSX.Element {
   return (
     <section className="planned-workspace" aria-label={`${content.title} 工作区`}>
-      <p className="eyebrow">{content.eyebrow}</p>
+      <p className="eyebrow">规划中</p>
       <h1>{content.title}</h1>
-      <p className="subtitle">{content.description}</p>
+      <p>{content.description}</p>
       <div className="planned-capabilities">
         {content.capabilities.map((capability) => (
           <span key={capability}>{capability}</span>
@@ -92,127 +73,100 @@ function PlannedView({ content }: { content: PlannedViewContent }): React.JSX.El
   );
 }
 
-type DeviceSidebarProps = {
-  devices: readonly AndroidDevice[];
-  selectedSerial: string | undefined;
-  isFetching: boolean;
-  moreOpen: boolean;
-  onRefresh(): void;
-  onSelectDevice(serial: string): void;
-  onToggleMore(): void;
-  onNavigate(viewId: PlannedViewId): void;
-};
-
-function DeviceSidebar({
-  devices,
-  selectedSerial,
-  isFetching,
-  moreOpen,
-  onRefresh,
-  onSelectDevice,
-  onToggleMore,
-  onNavigate,
-}: DeviceSidebarProps): React.JSX.Element {
-  return (
-    <aside className="device-sidebar">
-      <div className="brand">
-        <span className="brand-mark" aria-hidden="true">
-          DR
-        </span>
-        <div>
-          <strong>DeviceRobot</strong>
-          <span>本地 AI 测试</span>
-        </div>
-      </div>
-
-      <section className="device-picker" aria-label="我的设备">
-        <div className="device-picker-heading">
-          <p>我的设备</p>
-          <button type="button" className="text-button" onClick={onRefresh} disabled={isFetching}>
-            {isFetching ? "刷新中" : "刷新"}
-          </button>
-        </div>
-        {devices.length === 0 ? (
-          <p className="sidebar-empty">未发现设备</p>
-        ) : (
-          <div className="device-picker-list">
-            {devices.map((device) => {
-              const ready = isReadyDevice(device);
-              const selected = device.serial === selectedSerial;
-              return (
-                <button
-                  key={device.serial}
-                  type="button"
-                  className={selected ? "device-picker-item selected" : "device-picker-item"}
-                  disabled={!ready}
-                  aria-pressed={selected}
-                  onClick={() => onSelectDevice(device.serial)}
-                >
-                  <span className={ready ? "device-picker-state ready" : "device-picker-state"} />
-                  <span className="device-picker-name">{deviceName(device)}</span>
-                  <small>{deviceStateLabel(device)}</small>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      <div className="sidebar-bottom">
-        <button
-          type="button"
-          className={moreOpen ? "more-button active" : "more-button"}
-          aria-expanded={moreOpen}
-          onClick={onToggleMore}
-        >
-          更多工作区
-        </button>
-        {moreOpen && (
-          <div className="more-menu">
-            <button type="button" onClick={() => onNavigate("projects")}>
-              项目
-            </button>
-            <button type="button" onClick={() => onNavigate("conversations")}>
-              AI 与用例
-            </button>
-            <button type="button" onClick={() => onNavigate("runs")}>
-              运行
-            </button>
-            <button type="button" onClick={() => onNavigate("reports")}>
-              报告
-            </button>
-          </div>
-        )}
-      </div>
-    </aside>
-  );
-}
-
-type WorkspaceHeaderProps = {
+type ConsoleHeaderProps = {
+  activeView: ViewId;
   agentStatus: string;
   adbAvailable: boolean | undefined;
-  readyDeviceCount: number;
-  selectedDevice: AndroidDevice | undefined;
+  devices: readonly AndroidDevice[];
+  selectedSerial: string | undefined;
+  moreOpen: boolean;
+  onNavigate(viewId: ViewId): void;
+  onSelectDevice(serial: string): void;
+  onToggleMore(): void;
 };
 
-function WorkspaceHeader({
+function ConsoleHeader({
+  activeView,
   agentStatus,
   adbAvailable,
-  readyDeviceCount,
-  selectedDevice,
-}: WorkspaceHeaderProps): React.JSX.Element {
+  devices,
+  selectedSerial,
+  moreOpen,
+  onNavigate,
+  onSelectDevice,
+  onToggleMore,
+}: ConsoleHeaderProps): React.JSX.Element {
   return (
-    <header className="workspace-header">
-      <div>
-        <p className="eyebrow">设备工作台</p>
-        <h1>{selectedDevice === undefined ? "连接 Android 设备" : deviceName(selectedDevice)}</h1>
+    <header className="console-topbar">
+      <div className="console-brand" aria-label="DeviceRobot">
+        <span aria-hidden="true">DR</span>
+        <strong>DeviceRobot</strong>
       </div>
-      <div className="workspace-statuses" aria-label="本地运行状态">
-        <span className={agentStatus === "已连接" ? "status-chip healthy" : "status-chip warning"}>
+
+      <label className="device-selector">
+        <span>当前设备</span>
+        <select
+          aria-label="当前设备"
+          value={selectedSerial ?? ""}
+          disabled={devices.length === 0}
+          onChange={(event) => onSelectDevice(event.target.value)}
+        >
+          {devices.length === 0 ? (
+            <option value="">未发现可用设备</option>
+          ) : (
+            devices.map((device) => (
+              <option key={device.serial} value={device.serial}>
+                {deviceName(device)}
+              </option>
+            ))
+          )}
+        </select>
+      </label>
+
+      <nav className="console-nav" aria-label="设备导航">
+        <button
+          type="button"
+          aria-current={activeView === "devices" ? "page" : undefined}
+          onClick={() => onNavigate("devices")}
+        >
+          概览
+        </button>
+        <div className="more-workspaces">
+          <button
+            type="button"
+            aria-expanded={moreOpen}
+            className={moreOpen ? "more-workspaces-trigger active" : "more-workspaces-trigger"}
+            onClick={onToggleMore}
+          >
+            更多
+          </button>
+          {moreOpen && (
+            <div className="more-workspaces-menu">
+              <button type="button" onClick={() => onNavigate("projects")}>
+                项目
+              </button>
+              <button type="button" onClick={() => onNavigate("conversations")}>
+                AI 与用例
+              </button>
+              <button type="button" onClick={() => onNavigate("runs")}>
+                运行
+              </button>
+              <button type="button" onClick={() => onNavigate("reports")}>
+                报告
+              </button>
+            </div>
+          )}
+        </div>
+      </nav>
+
+      <div className="console-runtime" aria-label="本地运行状态">
+        <span
+          className={agentStatus === "已连接" ? "runtime-indicator healthy" : "runtime-indicator"}
+        >
           Agent {agentStatus}
         </span>
-        <span className={adbAvailable ? "status-chip healthy" : "status-chip warning"}>
-          ADB {adbAvailable ? `${readyDeviceCount} 台设备` : "不可用"}
+        <span className={adbAvailable ? "runtime-indicator healthy" : "runtime-indicator"}>
+          ADB {adbAvailable ? "就绪" : "不可用"}
         </span>
         <AppiumRuntimePanel variant="compact" />
       </div>
@@ -244,8 +198,7 @@ export function App(): React.JSX.Element {
   const [activeView, setActiveView] = useState<ViewId>(readViewFromHash);
   const [selectedSerial, setSelectedSerial] = useState<string>();
   const [moreOpen, setMoreOpen] = useState(false);
-  const devices = deviceQuery.data?.devices ?? [];
-  const readyDevices = devices.filter(isReadyDevice);
+  const readyDevices = (deviceQuery.data?.devices ?? []).filter(isReadyDevice);
   const selectedDevice = readyDevices.find((device) => device.serial === selectedSerial);
 
   useEffect(() => {
@@ -271,9 +224,7 @@ export function App(): React.JSX.Element {
   const navigate = (viewId: ViewId): void => {
     setActiveView(viewId);
     globalThis.location.hash = viewId;
-    if (viewId !== "devices") {
-      setMoreOpen(false);
-    }
+    setMoreOpen(false);
   };
 
   const selectDevice = (serial: string): void => {
@@ -282,62 +233,65 @@ export function App(): React.JSX.Element {
   };
 
   return (
-    <div className="app-shell">
-      <DeviceSidebar
-        devices={devices}
+    <div className="device-console-shell">
+      <ConsoleHeader
+        activeView={activeView}
+        agentStatus={agentStatus}
+        adbAvailable={deviceQuery.data?.adb.available}
+        devices={readyDevices}
         selectedSerial={selectedSerial}
-        isFetching={deviceQuery.isFetching}
         moreOpen={moreOpen}
-        onRefresh={() => void deviceQuery.refetch()}
+        onNavigate={navigate}
         onSelectDevice={selectDevice}
         onToggleMore={() => setMoreOpen((open) => !open)}
-        onNavigate={navigate}
       />
 
-      <main className="workspace-content">
-        {healthQuery.isError && (
-          <section className="notice error-notice" role="alert">
-            <strong>本地 Agent 不可用。</strong>
-            <span>{healthQuery.error.message}</span>
-          </section>
-        )}
+      <div className="device-console-layout">
+        <aside className="mirror-sidebar">
+          {selectedDevice === undefined ? (
+            <section className="mirror-empty" aria-label="设备连接状态">
+              <p>屏幕镜像</p>
+              <strong>{deviceQuery.isPending ? "正在扫描设备" : "未检测到可用设备"}</strong>
+            </section>
+          ) : (
+            <DeviceMirrorPanel device={selectedDevice} />
+          )}
+        </aside>
 
-        {activeView === "devices" ? (
-          <>
-            <WorkspaceHeader
-              agentStatus={agentStatus}
-              adbAvailable={deviceQuery.data?.adb.available}
-              readyDeviceCount={readyDevices.length}
-              selectedDevice={selectedDevice}
-            />
-            {deviceQuery.isError && (
-              <section className="notice error-notice" role="alert">
-                <strong>设备发现失败。</strong>
-                <span>{deviceQuery.error.message}</span>
-              </section>
-            )}
-            {deviceQuery.data?.error !== undefined && (
-              <section className="notice error-notice" role="alert">
-                <strong>
-                  {deviceQuery.data.adb.available ? "ADB 请求失败。" : "ADB 不可用。"}
-                </strong>
-                <span>{deviceQuery.data.error}</span>
-              </section>
-            )}
-            {selectedDevice === undefined ? (
-              <section className="device-workspace-empty" aria-label="设备连接状态">
-                <p className="eyebrow">设备连接</p>
-                <h2>{deviceQuery.isPending ? "正在扫描设备" : "未检测到可用设备"}</h2>
-                <p>连接设备并完成 USB 调试授权后，它会出现在左侧列表中。</p>
+        <main className="console-main">
+          {healthQuery.isError && (
+            <section className="notice" role="alert">
+              <strong>本地 Agent 不可用。</strong>
+              <span>{healthQuery.error.message}</span>
+            </section>
+          )}
+          {deviceQuery.isError && (
+            <section className="notice" role="alert">
+              <strong>设备发现失败。</strong>
+              <span>{deviceQuery.error.message}</span>
+            </section>
+          )}
+          {deviceQuery.data?.error !== undefined && (
+            <section className="notice" role="alert">
+              <strong>{deviceQuery.data.adb.available ? "ADB 请求失败。" : "ADB 不可用。"}</strong>
+              <span>{deviceQuery.data.error}</span>
+            </section>
+          )}
+
+          {activeView === "devices" ? (
+            selectedDevice === undefined ? (
+              <section className="main-empty-state" aria-label="设备工作台">
+                <h1>连接 Android 设备</h1>
+                <p>连接设备并完成 USB 调试授权后，即可在这里查看概览和执行受控操作。</p>
               </section>
             ) : (
               <DeviceControlPanel device={selectedDevice} />
-            )}
-          </>
-        ) : (
-          <PlannedView content={plannedViews[activeView]} />
-        )}
-      </main>
+            )
+          ) : (
+            <PlannedView content={plannedViews[activeView]} />
+          )}
+        </main>
+      </div>
     </div>
   );
 }

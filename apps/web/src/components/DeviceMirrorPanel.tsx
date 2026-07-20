@@ -1,10 +1,10 @@
 import {
   ArrowLeft,
+  ChevronDown,
+  ChevronUp,
   House,
   ListVideo,
   LoaderCircle,
-  PanelLeftClose,
-  PanelLeftOpen,
   RefreshCw,
   Volume1,
   Volume2,
@@ -500,9 +500,9 @@ export function DeviceMirrorPanel({ device }: DeviceMirrorPanelProps): React.JSX
             onClick={() => setQuickControlsCollapsed((collapsed) => !collapsed)}
           >
             {quickControlsCollapsed ? (
-              <PanelLeftOpen aria-hidden="true" size={18} strokeWidth={1.8} />
+              <ChevronUp aria-hidden="true" size={18} strokeWidth={1.8} />
             ) : (
-              <PanelLeftClose aria-hidden="true" size={18} strokeWidth={1.8} />
+              <ChevronDown aria-hidden="true" size={18} strokeWidth={1.8} />
             )}
           </button>
         </aside>

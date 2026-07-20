@@ -1,0 +1,27 @@
+node_modules/
+dist/
+coverage/
+.vite/
+.turbo/
+*.tsbuildinfo
+*.log
+.env
+.env.*
+!.env.example
+
+# Local Agent runtime data
+.data/
+artifacts/
+reports/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Android fixture build outputs
+**/.gradle/
+**/build/
+local.properties
+

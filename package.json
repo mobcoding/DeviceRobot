@@ -1,0 +1,40 @@
+{
+  "name": "device-robot",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=11.0.0"
+  },
+  "scripts": {
+    "predev": "pnpm run build:packages",
+    "dev": "pnpm --parallel --filter @device-robot/agent --filter @device-robot/web run dev",
+    "build:packages": "pnpm --filter @device-robot/contracts --filter @device-robot/config --filter @device-robot/device-core --filter @device-robot/ai-core --filter @device-robot/test-dsl run build",
+    "build": "pnpm -r --if-present run build",
+    "lint": "eslint .",
+    "typecheck": "pnpm -r --if-present run typecheck",
+    "pretest": "pnpm run build:packages",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "smoke:agent": "node scripts/smoke-agent.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm smoke:agent"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.1.1",
+    "@vitest/coverage-v8": "4.1.10",
+    "eslint": "10.7.0",
+    "globals": "17.7.0",
+    "jsdom": "29.1.1",
+    "prettier": "3.9.5",
+    "tsx": "4.23.1",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.64.0",
+    "vitest": "4.1.10"
+  }
+}

@@ -71,6 +71,8 @@ const devicesResponse = {
       androidVersion: "12",
       apiLevel: 31,
       transportId: "1",
+      network: { transport: "wifi", connected: true },
+      battery: { level: 86, state: "charging" },
     },
   ],
   refreshedAt: "2026-07-20T10:00:00.000Z",
@@ -174,6 +176,8 @@ describe("DeviceRobot Web UI", () => {
     expect(screen.getByRole("region", { name: "设备工作台" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "启动" })).toBeInTheDocument();
     expect(screen.getByText("ADB 就绪")).toBeInTheDocument();
+    expect(screen.getByText("Wi-Fi 已连接")).toBeInTheDocument();
+    expect(screen.getByText("电量 86% 充电中")).toBeInTheDocument();
   });
 
   it("shows an actionable error when the Agent is unavailable", async () => {
@@ -186,17 +190,21 @@ describe("DeviceRobot Web UI", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("无法连接本地 Agent");
   });
 
-  it("keeps future workspaces inside the more menu", async () => {
+  it("adds a hidden workspace tab from the add-tab menu", async () => {
     mockApis();
     const user = userEvent.setup();
     renderApp();
 
     await screen.findByRole("heading", { level: 1, name: "概览" });
-    await user.click(screen.getByRole("button", { name: "更多" }));
-    await user.click(screen.getByRole("button", { name: "AI 与用例" }));
+    expect(screen.getByRole("button", { name: "项目" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "AI 与用例" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "测试运行" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "添加工作页签" }));
+    await user.click(screen.getByRole("button", { name: "测试运行" }));
 
-    expect(screen.getByRole("heading", { level: 1, name: "AI 与用例" })).toBeInTheDocument();
-    expect(globalThis.location.hash).toBe("#conversations");
+    expect(screen.getByRole("heading", { level: 1, name: "测试运行" })).toBeInTheDocument();
+    expect(globalThis.location.hash).toBe("#runs");
+    expect(screen.getByRole("button", { name: "测试运行" })).toBeInTheDocument();
   });
 
   it("shows a real authorized Android device in the selector", async () => {

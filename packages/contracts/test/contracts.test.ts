@@ -48,6 +48,8 @@ describe("shared contracts", () => {
           model: "Pixel 3 XL",
           androidVersion: "12",
           apiLevel: 31,
+          network: { transport: "wifi", connected: true },
+          battery: { level: 86, state: "charging" },
         },
       ],
       refreshedAt: "2026-07-20T10:00:00.000Z",

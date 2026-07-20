@@ -53,7 +53,7 @@ summary:focus-visible {
   top: 0;
   display: grid;
   min-height: 58px;
-  grid-template-columns: auto minmax(160px, 220px) auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(160px, 220px) minmax(0, 1fr) auto;
   align-items: center;
   gap: 18px;
   padding: 0 18px;
@@ -104,13 +104,16 @@ summary:focus-visible {
 
 .console-nav {
   display: flex;
+  min-width: 0;
   height: 58px;
   align-items: stretch;
   gap: 2px;
+  overflow-x: auto;
 }
 
 .console-nav > button,
-.more-workspaces-trigger {
+.workspace-add-trigger {
+  flex: 0 0 auto;
   min-width: 58px;
   padding: 0 9px;
   border: 0;
@@ -121,8 +124,8 @@ summary:focus-visible {
 }
 
 .console-nav > button:hover,
-.more-workspaces-trigger:hover,
-.more-workspaces-trigger.active {
+.workspace-add-trigger:hover:not(:disabled),
+.workspace-add-trigger[aria-expanded="true"] {
   color: #e8eaec;
   background: #202020;
 }
@@ -132,11 +135,26 @@ summary:focus-visible {
   color: #ffffff;
 }
 
-.more-workspaces {
+.workspace-add {
   position: relative;
+  display: flex;
+  align-items: stretch;
 }
 
-.more-workspaces-menu {
+.workspace-add-trigger {
+  min-width: 42px;
+  padding: 0;
+  font-size: 21px;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.workspace-add-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.workspace-add-menu {
   position: absolute;
   top: 52px;
   left: 0;
@@ -150,7 +168,7 @@ summary:focus-visible {
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42);
 }
 
-.more-workspaces-menu button {
+.workspace-add-menu button {
   min-height: 32px;
   padding: 0 8px;
   border: 0;
@@ -161,7 +179,7 @@ summary:focus-visible {
   font-size: 12px;
 }
 
-.more-workspaces-menu button:hover {
+.workspace-add-menu button:hover {
   color: #ffffff;
   background: #2a2a2a;
 }
@@ -177,7 +195,8 @@ summary:focus-visible {
 
 .runtime-indicator,
 .status-chip,
-.overview-device-name {
+.overview-device-name,
+.device-telemetry {
   display: inline-flex;
   min-height: 28px;
   align-items: center;
@@ -196,6 +215,12 @@ summary:focus-visible {
   border-color: #285f55;
   color: #8ad8b2;
   background: #152a25;
+}
+
+.device-telemetry {
+  border-color: #3e5255;
+  color: #a9dadd;
+  background: #17272a;
 }
 
 .status-chip.warning {
@@ -872,7 +897,7 @@ h3 {
 
 @media (max-width: 1120px) {
   .console-topbar {
-    grid-template-columns: auto minmax(140px, 190px) auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(140px, 190px) minmax(0, 1fr) auto;
     gap: 10px;
   }
 
@@ -964,6 +989,10 @@ h3 {
   }
 
   .console-runtime .runtime-indicator {
+    display: none;
+  }
+
+  .console-runtime .device-telemetry {
     display: none;
   }
 

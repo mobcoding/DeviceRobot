@@ -8,6 +8,16 @@ export const adbEnvironmentSchema = z.object({
   error: z.string().min(1).optional(),
 });
 
+export const deviceNetworkSchema = z.object({
+  transport: z.enum(["wifi", "mobile", "ethernet", "none", "unknown"]),
+  connected: z.boolean(),
+});
+
+export const deviceBatterySchema = z.object({
+  level: z.number().int().min(0).max(100),
+  state: z.enum(["charging", "full", "discharging", "not-charging", "unknown"]),
+});
+
 export const androidDeviceSchema = z.object({
   serial: z.string().min(1),
   state: z.enum(["device", "emulator", "offline", "unauthorized", "unknown"]),
@@ -20,6 +30,8 @@ export const androidDeviceSchema = z.object({
   androidVersion: z.string().min(1).optional(),
   apiLevel: z.number().int().positive().optional(),
   transportId: z.string().min(1).optional(),
+  network: deviceNetworkSchema.optional(),
+  battery: deviceBatterySchema.optional(),
   detailsError: z.string().min(1).optional(),
 });
 
@@ -32,4 +44,6 @@ export const deviceListResponseSchema = z.object({
 
 export type AdbEnvironment = z.infer<typeof adbEnvironmentSchema>;
 export type AndroidDevice = z.infer<typeof androidDeviceSchema>;
+export type DeviceNetwork = z.infer<typeof deviceNetworkSchema>;
+export type DeviceBattery = z.infer<typeof deviceBatterySchema>;
 export type DeviceListResponse = z.infer<typeof deviceListResponseSchema>;

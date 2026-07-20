@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { AdbDeviceService, type AdbClientAdapter } from "../src/devices/adb-device-service.js";
+import {
+  AdbDeviceService,
+  parseDeviceRuntimeStatus,
+  type AdbClientAdapter,
+} from "../src/devices/adb-device-service.js";
 
 function createClient(overrides: Partial<AdbClientAdapter> = {}): AdbClientAdapter {
   return {
     listDevicesWithPaths: vi.fn().mockResolvedValue([]),
     getProperties: vi.fn().mockResolvedValue({}),
+    getRuntimeStatus: vi.fn().mockResolvedValue({}),
     ...overrides,
   };
 }
@@ -49,6 +54,10 @@ describe("ADB device discovery", () => {
           "ro.build.version.release": "12",
           "ro.build.version.sdk": "31",
         }),
+        getRuntimeStatus: vi.fn().mockResolvedValue({
+          network: { transport: "wifi", connected: true },
+          battery: { level: 86, state: "charging" },
+        }),
       }),
       probe: vi.fn().mockResolvedValue({
         available: true,
@@ -71,6 +80,8 @@ describe("ADB device discovery", () => {
         manufacturer: "Google",
         androidVersion: "12",
         apiLevel: 31,
+        network: { transport: "wifi", connected: true },
+        battery: { level: 86, state: "charging" },
       },
     ]);
   });
@@ -97,5 +108,35 @@ describe("ADB device discovery", () => {
       transportId: "2",
     });
     expect(client.getProperties).not.toHaveBeenCalled();
+    expect(client.getRuntimeStatus).not.toHaveBeenCalled();
+  });
+
+  it("parses read-only battery and active-route diagnostics", () => {
+    expect(
+      parseDeviceRuntimeStatus(`
+        Current Battery Service state:
+          status: 2
+          level: 86
+        __DEVICE_ROBOT_ROUTE__
+        1.1.1.1 via 192.168.1.1 dev wlan0 src 192.168.1.8
+      `),
+    ).toEqual({
+      network: { transport: "wifi", connected: true },
+      battery: { level: 86, state: "charging" },
+    });
+  });
+
+  it("keeps the battery result when the device has no default route", () => {
+    expect(
+      parseDeviceRuntimeStatus(`
+        status: 3
+        level: 64
+        __DEVICE_ROBOT_ROUTE__
+        RTNETLINK answers: Network is unreachable
+      `),
+    ).toEqual({
+      network: { transport: "none", connected: false },
+      battery: { level: 64, state: "discharging" },
+    });
   });
 });

@@ -9,14 +9,25 @@ import { DeviceControlPanel } from "./components/DeviceControlPanel";
 import { DeviceMirrorPanel } from "./components/DeviceMirrorPanel";
 
 const viewIds = ["devices", "projects", "conversations", "runs", "reports"] as const;
+const defaultVisibleViews: ViewId[] = ["devices", "projects", "conversations"];
+
 type ViewId = (typeof viewIds)[number];
 type PlannedViewId = Exclude<ViewId, "devices">;
+type WorkspaceTab = { id: ViewId; label: string };
 
 type PlannedViewContent = {
   title: string;
   description: string;
   capabilities: readonly string[];
 };
+
+const workspaceTabs: readonly WorkspaceTab[] = [
+  { id: "devices", label: "概览" },
+  { id: "projects", label: "项目" },
+  { id: "conversations", label: "AI 与用例" },
+  { id: "runs", label: "测试运行" },
+  { id: "reports", label: "报告" },
+];
 
 const plannedViews: Record<PlannedViewId, PlannedViewContent> = {
   projects: {
@@ -30,9 +41,9 @@ const plannedViews: Record<PlannedViewId, PlannedViewContent> = {
     capabilities: ["源码感知规划", "结构化操作", "审批与信任策略"],
   },
   runs: {
-    title: "运行",
+    title: "测试运行",
     description: "尚未启动测试运行。",
-    capabilities: ["Appium 工作进程", "定位器修复", "设备矩阵与分片"],
+    capabilities: ["Appium 工作进程", "定位器自愈", "设备矩阵与分片"],
   },
   reports: {
     title: "报告",
@@ -58,6 +69,39 @@ function deviceName(device: AndroidDevice): string {
   return device.model ?? device.deviceName ?? device.serial;
 }
 
+function networkLabel(device: AndroidDevice | undefined): string {
+  const network = device?.network;
+  if (network === undefined) {
+    return "网络未知";
+  }
+
+  if (!network.connected) {
+    return "网络未连接";
+  }
+
+  switch (network.transport) {
+    case "wifi":
+      return "Wi-Fi 已连接";
+    case "mobile":
+      return "移动网络";
+    case "ethernet":
+      return "以太网";
+    default:
+      return "网络已连接";
+  }
+}
+
+function batteryLabel(device: AndroidDevice | undefined): string {
+  const battery = device?.battery;
+  if (battery === undefined) {
+    return "电量未知";
+  }
+
+  const suffix =
+    battery.state === "charging" ? " 充电中" : battery.state === "full" ? " 已充满" : "";
+  return `电量 ${battery.level}%${suffix}`;
+}
+
 function PlannedView({ content }: { content: PlannedViewContent }): React.JSX.Element {
   return (
     <section className="planned-workspace" aria-label={`${content.title} 工作区`}>
@@ -78,11 +122,13 @@ type ConsoleHeaderProps = {
   agentStatus: string;
   adbAvailable: boolean | undefined;
   devices: readonly AndroidDevice[];
-  selectedSerial: string | undefined;
-  moreOpen: boolean;
+  selectedDevice: AndroidDevice | undefined;
+  visibleViews: readonly ViewId[];
+  addMenuOpen: boolean;
   onNavigate(viewId: ViewId): void;
+  onAddView(viewId: ViewId): void;
   onSelectDevice(serial: string): void;
-  onToggleMore(): void;
+  onToggleAddMenu(): void;
 };
 
 function ConsoleHeader({
@@ -90,12 +136,17 @@ function ConsoleHeader({
   agentStatus,
   adbAvailable,
   devices,
-  selectedSerial,
-  moreOpen,
+  selectedDevice,
+  visibleViews,
+  addMenuOpen,
   onNavigate,
+  onAddView,
   onSelectDevice,
-  onToggleMore,
+  onToggleAddMenu,
 }: ConsoleHeaderProps): React.JSX.Element {
+  const visibleTabs = workspaceTabs.filter((tab) => visibleViews.includes(tab.id));
+  const addableTabs = workspaceTabs.filter((tab) => !visibleViews.includes(tab.id));
+
   return (
     <header className="console-topbar">
       <div className="console-brand" aria-label="DeviceRobot">
@@ -107,7 +158,7 @@ function ConsoleHeader({
         <span>当前设备</span>
         <select
           aria-label="当前设备"
-          value={selectedSerial ?? ""}
+          value={selectedDevice?.serial ?? ""}
           disabled={devices.length === 0}
           onChange={(event) => onSelectDevice(event.target.value)}
         >
@@ -123,43 +174,43 @@ function ConsoleHeader({
         </select>
       </label>
 
-      <nav className="console-nav" aria-label="设备导航">
-        <button
-          type="button"
-          aria-current={activeView === "devices" ? "page" : undefined}
-          onClick={() => onNavigate("devices")}
-        >
-          概览
-        </button>
-        <div className="more-workspaces">
+      <nav className="console-nav" aria-label="设备工作页签">
+        {visibleTabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            aria-current={activeView === tab.id ? "page" : undefined}
+            onClick={() => onNavigate(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+        <div className="workspace-add">
           <button
             type="button"
-            aria-expanded={moreOpen}
-            className={moreOpen ? "more-workspaces-trigger active" : "more-workspaces-trigger"}
-            onClick={onToggleMore}
+            className="workspace-add-trigger"
+            aria-label="添加工作页签"
+            aria-expanded={addMenuOpen}
+            disabled={addableTabs.length === 0}
+            onClick={onToggleAddMenu}
           >
-            更多
+            +
           </button>
-          {moreOpen && (
-            <div className="more-workspaces-menu">
-              <button type="button" onClick={() => onNavigate("projects")}>
-                项目
-              </button>
-              <button type="button" onClick={() => onNavigate("conversations")}>
-                AI 与用例
-              </button>
-              <button type="button" onClick={() => onNavigate("runs")}>
-                运行
-              </button>
-              <button type="button" onClick={() => onNavigate("reports")}>
-                报告
-              </button>
+          {addMenuOpen && (
+            <div className="workspace-add-menu" aria-label="可添加的工作页签">
+              {addableTabs.map((tab) => (
+                <button key={tab.id} type="button" onClick={() => onAddView(tab.id)}>
+                  {tab.label}
+                </button>
+              ))}
             </div>
           )}
         </div>
       </nav>
 
       <div className="console-runtime" aria-label="本地运行状态">
+        <span className="device-telemetry">{networkLabel(selectedDevice)}</span>
+        <span className="device-telemetry">{batteryLabel(selectedDevice)}</span>
         <span
           className={agentStatus === "已连接" ? "runtime-indicator healthy" : "runtime-indicator"}
         >
@@ -197,7 +248,8 @@ export function App(): React.JSX.Element {
   const deviceQuery = useDevicesQuery();
   const [activeView, setActiveView] = useState<ViewId>(readViewFromHash);
   const [selectedSerial, setSelectedSerial] = useState<string>();
-  const [moreOpen, setMoreOpen] = useState(false);
+  const [visibleViews, setVisibleViews] = useState<readonly ViewId[]>(defaultVisibleViews);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
   const readyDevices = (deviceQuery.data?.devices ?? []).filter(isReadyDevice);
   const selectedDevice = readyDevices.find((device) => device.serial === selectedSerial);
 
@@ -213,6 +265,12 @@ export function App(): React.JSX.Element {
     return () => globalThis.removeEventListener("hashchange", handleHashChange);
   }, []);
 
+  useEffect(() => {
+    setVisibleViews((current) =>
+      current.includes(activeView) ? current : [...current, activeView],
+    );
+  }, [activeView]);
+
   const agentStatus = healthQuery.isPending
     ? "检查中"
     : healthQuery.isError
@@ -224,7 +282,12 @@ export function App(): React.JSX.Element {
   const navigate = (viewId: ViewId): void => {
     setActiveView(viewId);
     globalThis.location.hash = viewId;
-    setMoreOpen(false);
+    setAddMenuOpen(false);
+  };
+
+  const addView = (viewId: ViewId): void => {
+    setVisibleViews((current) => (current.includes(viewId) ? current : [...current, viewId]));
+    navigate(viewId);
   };
 
   const selectDevice = (serial: string): void => {
@@ -239,11 +302,13 @@ export function App(): React.JSX.Element {
         agentStatus={agentStatus}
         adbAvailable={deviceQuery.data?.adb.available}
         devices={readyDevices}
-        selectedSerial={selectedSerial}
-        moreOpen={moreOpen}
+        selectedDevice={selectedDevice}
+        visibleViews={visibleViews}
+        addMenuOpen={addMenuOpen}
         onNavigate={navigate}
+        onAddView={addView}
         onSelectDevice={selectDevice}
-        onToggleMore={() => setMoreOpen((open) => !open)}
+        onToggleAddMenu={() => setAddMenuOpen((open) => !open)}
       />
 
       <div className="device-console-layout">

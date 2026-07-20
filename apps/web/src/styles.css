@@ -99,7 +99,16 @@ nav {
   border-radius: 10px;
   color: #8299b5;
   background: transparent;
+  cursor: pointer;
   text-align: left;
+}
+
+.nav-item:hover,
+.nav-item:focus-visible {
+  border-color: rgba(74, 164, 255, 0.16);
+  color: #d7e9fc;
+  background: rgba(40, 125, 216, 0.08);
+  outline: none;
 }
 
 .nav-item.active {
@@ -209,6 +218,12 @@ h1 {
   background: rgba(255, 113, 133, 0.07);
 }
 
+.connection-badge.planned {
+  border-color: rgba(255, 193, 92, 0.22);
+  color: #f2c66f;
+  background: rgba(255, 193, 92, 0.07);
+}
+
 .notice {
   display: flex;
   gap: 12px;
@@ -276,6 +291,74 @@ h1 {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
   gap: 18px;
+}
+
+.planned-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+  gap: 18px;
+}
+
+.empty-state {
+  display: flex;
+  min-height: 360px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.empty-state-mark {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 26px;
+  place-items: center;
+  border: 1px solid rgba(101, 173, 244, 0.24);
+  border-radius: 12px;
+  color: #86c4ff;
+  background: rgba(28, 91, 150, 0.16);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.empty-state h2 {
+  max-width: 520px;
+  margin-bottom: 12px;
+  color: #eaf3ff;
+  font-size: 22px;
+}
+
+.empty-state > p:last-child {
+  max-width: 540px;
+  margin-bottom: 0;
+  color: #7189a6;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.capability-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.capability-list li {
+  position: relative;
+  padding: 16px 8px 16px 26px;
+  border-top: 1px solid rgba(139, 168, 205, 0.1);
+  color: #aebfd2;
+  font-size: 12px;
+}
+
+.capability-list li::before {
+  position: absolute;
+  top: 21px;
+  left: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4b95da;
+  content: "";
 }
 
 .panel {
@@ -420,6 +503,10 @@ h1 {
   .detail-grid {
     grid-template-columns: 1fr;
   }
+
+  .planned-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 680px) {
@@ -447,7 +534,15 @@ h1 {
   }
 
   .sidebar nav {
-    display: none;
+    display: flex;
+    margin-top: 14px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .nav-item {
+    min-width: 48px;
+    flex: none;
   }
 
   .content {

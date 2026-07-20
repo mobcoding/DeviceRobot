@@ -23,11 +23,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     if (this.state.error !== undefined) {
       return (
         <main className="fatal-error">
-          <p className="eyebrow">UI failure</p>
-          <h1>DeviceRobot could not render this page.</h1>
-          <p>{this.state.error.message}</p>
+          <p className="eyebrow">界面错误</p>
+          <h1>DeviceRobot 无法渲染此页面。</h1>
+          <p>请刷新页面后重试。如问题持续出现，请查看本地 Agent 日志。</p>
           <button type="button" onClick={() => globalThis.location.reload()}>
-            Reload application
+            重新加载应用
           </button>
         </main>
       );

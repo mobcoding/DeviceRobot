@@ -13,15 +13,20 @@ function deviceEndpoint(serial: string, path: string): string {
 }
 
 async function responseError(response: Response): Promise<Error> {
-  const payload: unknown = await response.json().catch(() => undefined);
-  const message =
-    typeof payload === "object" &&
-    payload !== null &&
-    "error" in payload &&
-    typeof payload.error === "string"
-      ? payload.error
-      : `Device request failed with status ${response.status}`;
-  return new Error(message);
+  await response.json().catch(() => undefined);
+  return new Error(`设备请求失败（HTTP ${response.status}）`);
+}
+
+async function requestDeviceEndpoint(
+  serial: string,
+  path: string,
+  options: RequestInit,
+): Promise<Response> {
+  try {
+    return await fetch(deviceEndpoint(serial, path), options);
+  } catch {
+    throw new Error("无法连接本地 Agent，请检查设备连接和服务状态。");
+  }
 }
 
 export function deviceScreenshotUrl(serial: string, revision: number): string {
@@ -32,7 +37,7 @@ export async function fetchDeviceUiTree(
   serial: string,
   signal?: AbortSignal,
 ): Promise<DeviceUiTreeResponse> {
-  const response = await fetch(deviceEndpoint(serial, "ui-tree"), {
+  const response = await requestDeviceEndpoint(serial, "ui-tree", {
     headers: { Accept: "application/json" },
     ...(signal === undefined ? {} : { signal }),
   });
@@ -48,7 +53,7 @@ export async function fetchDeviceActionHistory(
   serial: string,
   signal?: AbortSignal,
 ): Promise<DeviceActionHistoryResponse> {
-  const response = await fetch(deviceEndpoint(serial, "actions"), {
+  const response = await requestDeviceEndpoint(serial, "actions", {
     headers: { Accept: "application/json" },
     ...(signal === undefined ? {} : { signal }),
   });
@@ -64,7 +69,7 @@ export async function executeDeviceAction(
   serial: string,
   action: DeviceControlAction,
 ): Promise<DeviceActionResult> {
-  const response = await fetch(deviceEndpoint(serial, "actions"), {
+  const response = await requestDeviceEndpoint(serial, "actions", {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify(action),

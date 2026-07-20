@@ -16,24 +16,24 @@ type DeviceControlPanelProps = {
 function formatAction(action: DeviceControlAction): string {
   switch (action.action) {
     case "ui.tap":
-      return `Tap ${action.x}, ${action.y}`;
+      return `点击 ${action.x}, ${action.y}`;
     case "ui.longPress":
-      return `Long press ${action.x}, ${action.y}`;
+      return `长按 ${action.x}, ${action.y}`;
     case "ui.input":
-      return "Input text";
+      return "输入文本";
     case "ui.swipe":
-      return `Swipe ${action.startX}, ${action.startY} to ${action.endX}, ${action.endY}`;
+      return `从 ${action.startX}, ${action.startY} 滑动到 ${action.endX}, ${action.endY}`;
     case "ui.back":
-      return "Back";
+      return "返回";
     case "app.launch":
-      return `Launch ${action.appId}`;
+      return `启动 ${action.appId}`;
     case "app.stop":
-      return `Stop ${action.appId}`;
+      return `停止 ${action.appId}`;
   }
 }
 
 function formatTime(value: string): string {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat("zh-CN", {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -76,7 +76,7 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
   const actionMutation = useMutation({
     mutationFn: async (action: DeviceControlAction) => {
       if (serial.length === 0) {
-        throw new Error("Select a ready device before sending an action");
+        throw new Error("请先选择一台可用设备再发送操作");
       }
 
       return executeDeviceAction(serial, action);
@@ -105,7 +105,7 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
     const x = Number(tapX);
     const y = Number(tapY);
     if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0) {
-      setValidationError("Tap coordinates must be non-negative integers.");
+      setValidationError("点击坐标必须为非负整数。");
       return;
     }
 
@@ -115,7 +115,7 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
   const submitSwipe = (): void => {
     const values = [startX, startY, endX, endY].map((value) => Number(value));
     if (values.some((value) => !Number.isInteger(value) || value < 0)) {
-      setValidationError("Swipe coordinates must be non-negative integers.");
+      setValidationError("滑动坐标必须为非负整数。");
       return;
     }
 
@@ -136,7 +136,7 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
 
   const submitAppAction = (action: "app.launch" | "app.stop"): void => {
     if (appId.trim().length === 0) {
-      setValidationError("An Android package name is required.");
+      setValidationError("请输入 Android 包名。");
       return;
     }
 
@@ -147,22 +147,22 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
     validationError ?? (actionMutation.isError ? actionMutation.error.message : undefined);
 
   return (
-    <section className="device-console" aria-label="Device control console">
+    <section className="device-console" aria-label="设备控制台">
       <header className="device-console-heading">
         <div>
-          <p className="eyebrow">Active device</p>
+          <p className="eyebrow">当前设备</p>
           <h2>{device.model ?? device.deviceName ?? device.serial}</h2>
           <code>{device.serial}</code>
         </div>
-        <span className="panel-chip">ADB controls</span>
+        <span className="panel-chip">ADB 控制</span>
       </header>
 
       <div className="device-console-layout">
-        <section className="device-screen-surface" aria-label="Current device screenshot">
+        <section className="device-screen-surface" aria-label="当前设备截图">
           <div className="surface-heading">
             <div>
-              <p className="eyebrow">Screen</p>
-              <h3>Current screenshot</h3>
+              <p className="eyebrow">屏幕</p>
+              <h3>当前截图</h3>
             </div>
             <button
               className="compact-button"
@@ -172,26 +172,24 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
                 setScreenshotRevision((revision) => revision + 1);
               }}
             >
-              Capture
+              获取截图
             </button>
           </div>
           <div className="screenshot-frame">
             <img
-              alt={`Device screenshot for ${device.model ?? device.serial}`}
+              alt={`设备截图：${device.model ?? device.serial}`}
               src={deviceScreenshotUrl(serial, screenshotRevision)}
-              onError={() =>
-                setScreenshotError("Screenshot capture failed. Check the device connection.")
-              }
+              onError={() => setScreenshotError("截图获取失败，请检查设备连接。")}
             />
           </div>
           {screenshotError !== undefined && <p className="control-error">{screenshotError}</p>}
         </section>
 
-        <section className="ui-tree-surface" aria-label="Current Android UI hierarchy">
+        <section className="ui-tree-surface" aria-label="当前 Android UI 层级">
           <div className="surface-heading">
             <div>
-              <p className="eyebrow">UI hierarchy</p>
-              <h3>Accessibility snapshot</h3>
+              <p className="eyebrow">UI 层级</p>
+              <h3>无障碍快照</h3>
             </div>
             <button
               className="compact-button"
@@ -199,26 +197,26 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
               disabled={uiTreeQuery.isFetching}
               onClick={() => void uiTreeQuery.refetch()}
             >
-              {uiTreeQuery.isFetching ? "Reading" : "Refresh XML"}
+              {uiTreeQuery.isFetching ? "读取中" : "刷新 XML"}
             </button>
           </div>
           {uiTreeQuery.isError ? (
             <p className="control-error">{uiTreeQuery.error.message}</p>
           ) : uiTreeQuery.data === undefined ? (
-            <p className="control-empty">Reading UI hierarchy...</p>
+            <p className="control-empty">正在读取 UI 层级...</p>
           ) : (
             <pre className="ui-tree-code">{uiTreeQuery.data.xml}</pre>
           )}
         </section>
       </div>
 
-      <section className="device-actions" aria-label="Device actions">
+      <section className="device-actions" aria-label="设备操作">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Safe actions</p>
-            <h3>Direct ADB controls</h3>
+            <p className="eyebrow">安全操作</p>
+            <h3>直接 ADB 控制</h3>
           </div>
-          {actionMutation.isPending && <span className="action-progress">Sending action</span>}
+          {actionMutation.isPending && <span className="action-progress">正在发送操作</span>}
         </div>
 
         {errorMessage !== undefined && (
@@ -229,12 +227,12 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
 
         <div className="action-grid">
           <section className="action-card">
-            <h4>Touch</h4>
+            <h4>触控</h4>
             <div className="coordinate-fields">
               <label>
                 X
                 <input
-                  aria-label="Tap X coordinate"
+                  aria-label="点击 X 坐标"
                   inputMode="numeric"
                   value={tapX}
                   onChange={(event) => setTapX(event.target.value)}
@@ -243,7 +241,7 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
               <label>
                 Y
                 <input
-                  aria-label="Tap Y coordinate"
+                  aria-label="点击 Y 坐标"
                   inputMode="numeric"
                   value={tapY}
                   onChange={(event) => setTapY(event.target.value)}
@@ -256,14 +254,14 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
                 onClick={() => submitTap(false)}
                 disabled={actionMutation.isPending}
               >
-                Tap
+                点击
               </button>
               <button
                 type="button"
                 onClick={() => submitTap(true)}
                 disabled={actionMutation.isPending}
               >
-                Long press
+                长按
               </button>
               <button
                 className="subtle-action"
@@ -271,17 +269,17 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
                 onClick={() => submitAction({ action: "ui.back" })}
                 disabled={actionMutation.isPending}
               >
-                Back
+                返回
               </button>
             </div>
           </section>
 
           <section className="action-card">
-            <h4>Text input</h4>
+            <h4>文本输入</h4>
             <label>
-              Text
+              文本
               <input
-                aria-label="Text to input"
+                aria-label="待输入文本"
                 value={inputValue}
                 onChange={(event) => setInputValue(event.target.value)}
               />
@@ -291,44 +289,44 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
               disabled={actionMutation.isPending || inputValue.trim().length === 0}
               onClick={() => submitAction({ action: "ui.input", value: inputValue })}
             >
-              Send text
+              发送文本
             </button>
           </section>
 
           <section className="action-card">
-            <h4>Swipe</h4>
+            <h4>滑动</h4>
             <div className="coordinate-fields swipe-fields">
               <label>
-                Start X
+                起点 X
                 <input
-                  aria-label="Swipe start X coordinate"
+                  aria-label="滑动起点 X 坐标"
                   inputMode="numeric"
                   value={startX}
                   onChange={(event) => setStartX(event.target.value)}
                 />
               </label>
               <label>
-                Start Y
+                起点 Y
                 <input
-                  aria-label="Swipe start Y coordinate"
+                  aria-label="滑动起点 Y 坐标"
                   inputMode="numeric"
                   value={startY}
                   onChange={(event) => setStartY(event.target.value)}
                 />
               </label>
               <label>
-                End X
+                终点 X
                 <input
-                  aria-label="Swipe end X coordinate"
+                  aria-label="滑动终点 X 坐标"
                   inputMode="numeric"
                   value={endX}
                   onChange={(event) => setEndX(event.target.value)}
                 />
               </label>
               <label>
-                End Y
+                终点 Y
                 <input
-                  aria-label="Swipe end Y coordinate"
+                  aria-label="滑动终点 Y 坐标"
                   inputMode="numeric"
                   value={endY}
                   onChange={(event) => setEndY(event.target.value)}
@@ -336,16 +334,16 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
               </label>
             </div>
             <button type="button" disabled={actionMutation.isPending} onClick={submitSwipe}>
-              Swipe
+              滑动
             </button>
           </section>
 
           <section className="action-card">
-            <h4>Application</h4>
+            <h4>应用</h4>
             <label>
-              Package
+              包名
               <input
-                aria-label="Android package name"
+                aria-label="Android 包名"
                 placeholder="com.example.app"
                 value={appId}
                 onChange={(event) => setAppId(event.target.value)}
@@ -357,7 +355,7 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
                 disabled={actionMutation.isPending}
                 onClick={() => submitAppAction("app.launch")}
               >
-                Launch
+                启动
               </button>
               <button
                 className="subtle-action"
@@ -365,18 +363,18 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
                 disabled={actionMutation.isPending}
                 onClick={() => submitAppAction("app.stop")}
               >
-                Stop
+                停止
               </button>
             </div>
           </section>
         </div>
       </section>
 
-      <section className="device-action-history" aria-label="Device action history">
+      <section className="device-action-history" aria-label="设备操作历史">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Audit trail</p>
-            <h3>Recent device actions</h3>
+            <p className="eyebrow">操作审计</p>
+            <h3>最近设备操作</h3>
           </div>
           <button
             className="compact-button"
@@ -384,25 +382,31 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
             disabled={actionHistoryQuery.isFetching}
             onClick={() => void actionHistoryQuery.refetch()}
           >
-            {actionHistoryQuery.isFetching ? "Loading" : "Refresh history"}
+            {actionHistoryQuery.isFetching ? "加载中" : "刷新历史"}
           </button>
         </div>
         {actionHistoryQuery.isError ? (
           <p className="control-error">{actionHistoryQuery.error.message}</p>
         ) : actionHistoryQuery.data === undefined ? (
-          <p className="control-empty">Loading action history...</p>
+          <p className="control-empty">正在加载操作历史...</p>
         ) : actionHistoryQuery.data.actions.length === 0 ? (
-          <p className="control-empty">No device actions have been recorded yet.</p>
+          <p className="control-empty">尚未记录任何设备操作。</p>
         ) : (
           <ol className="action-history-list">
             {actionHistoryQuery.data.actions.map((audit) => (
               <li key={audit.id}>
                 <span className={audit.success ? "audit-result success" : "audit-result failed"}>
-                  {audit.success ? "Completed" : "Failed"}
+                  {audit.success ? "已完成" : "失败"}
                 </span>
                 <strong>{formatAction(audit.action)}</strong>
                 <time dateTime={audit.finishedAt}>{formatTime(audit.finishedAt)}</time>
-                {audit.message !== undefined && <p>{audit.message}</p>}
+                {audit.message !== undefined && (
+                  <p>
+                    {audit.success
+                      ? "设备已返回执行结果。"
+                      : "设备操作失败，请查看本地 Agent 日志。"}
+                  </p>
+                )}
               </li>
             ))}
           </ol>

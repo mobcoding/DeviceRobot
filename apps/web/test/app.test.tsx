@@ -144,7 +144,7 @@ describe("DeviceRobot Web UI", () => {
 
     renderApp();
 
-    expect((await screen.findAllByText("Connected")).length).toBeGreaterThanOrEqual(1);
+    expect((await screen.findAllByText("已连接")).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("0.1.0")).toBeInTheDocument();
     expect(screen.getByText(/AIMobileTester/)).toBeInTheDocument();
   });
@@ -155,9 +155,9 @@ describe("DeviceRobot Web UI", () => {
     renderApp();
 
     expect(await screen.findByRole("alert", {}, { timeout: 3_000 })).toHaveTextContent(
-      "Local Agent is unavailable",
+      "本地 Agent 不可用",
     );
-    expect(screen.getByRole("alert")).toHaveTextContent("Connection refused");
+    expect(screen.getByRole("alert")).toHaveTextContent("无法连接本地 Agent");
   });
 
   it("navigates to every workspace section", async () => {
@@ -166,12 +166,12 @@ describe("DeviceRobot Web UI", () => {
     renderApp();
 
     const destinations = [
-      ["Projects", "projects", "Projects"],
-      ["Devices", "devices", "Devices"],
-      ["AI conversations", "conversations", "AI conversations"],
-      ["Test runs", "runs", "Test runs"],
-      ["Reports", "reports", "Reports"],
-      ["Overview", "overview", "Local Android automation, ready to grow."],
+      ["项目", "projects", "项目"],
+      ["设备", "devices", "设备"],
+      ["AI 对话", "conversations", "AI 对话"],
+      ["测试运行", "runs", "测试运行"],
+      ["报告", "reports", "报告"],
+      ["概览", "overview", "本地 Android 自动化，随时扩展。"],
     ] as const;
 
     for (const [label, hash, heading] of destinations) {
@@ -195,7 +195,7 @@ describe("DeviceRobot Web UI", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByText("8B3Y0THX0")).toHaveLength(2);
     expect(screen.getByText("37.0.0-14910828")).toBeInTheDocument();
-    expect(screen.getByText("Ready")).toBeInTheDocument();
+    expect(screen.getAllByText("可用")).toHaveLength(2);
   });
 
   it("manually refreshes the device list", async () => {
@@ -206,7 +206,7 @@ describe("DeviceRobot Web UI", () => {
 
     await screen.findByRole("heading", { level: 2, name: "Pixel 3 XL" });
     const initialRequests = getDeviceRequests();
-    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    await user.click(screen.getByRole("button", { name: "刷新" }));
 
     await vi.waitFor(() => expect(getDeviceRequests()).toBeGreaterThan(initialRequests));
   });
@@ -216,10 +216,8 @@ describe("DeviceRobot Web UI", () => {
     globalThis.location.hash = "#devices";
     renderApp();
 
-    expect(
-      await screen.findByRole("region", { name: "Device control console" }),
-    ).toBeInTheDocument();
-    expect(screen.getByAltText("Device screenshot for Pixel 3 XL")).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "设备控制台" })).toBeInTheDocument();
+    expect(screen.getByAltText("设备截图：Pixel 3 XL")).toBeInTheDocument();
     expect(await screen.findByText(/hierarchy rotation/)).toBeInTheDocument();
   });
 
@@ -229,10 +227,10 @@ describe("DeviceRobot Web UI", () => {
     globalThis.location.hash = "#devices";
     renderApp();
 
-    await screen.findByRole("region", { name: "Device control console" });
-    await user.click(screen.getByRole("button", { name: "Back" }));
+    await screen.findByRole("region", { name: "设备控制台" });
+    await user.click(screen.getByRole("button", { name: "返回" }));
 
     await vi.waitFor(() => expect(getActionRequests()).toBe(1));
-    expect(await screen.findByText("Completed")).toBeInTheDocument();
+    expect(await screen.findByText("已完成")).toBeInTheDocument();
   });
 });

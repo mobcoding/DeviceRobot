@@ -167,11 +167,6 @@ function ConsoleHeader({
 
   return (
     <header className="console-topbar">
-      <div className="console-brand" aria-label="DeviceRobot">
-        <span aria-hidden="true">DR</span>
-        <strong>DeviceRobot</strong>
-      </div>
-
       <label className="device-selector">
         <span>当前设备</span>
         <select

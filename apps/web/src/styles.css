@@ -53,33 +53,13 @@ summary:focus-visible {
   top: 0;
   display: grid;
   min-height: 54px;
-  grid-template-columns: auto minmax(160px, 220px) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(200px, 260px) minmax(0, 1fr) auto;
   align-items: center;
   gap: 18px;
   padding: 0 18px;
   border-bottom: 1px solid #2b2b2b;
   background: #151515;
   overflow: visible;
-}
-
-.console-brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #f5f5f5;
-  font-size: 14px;
-}
-
-.console-brand > span {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border-radius: 5px;
-  color: #081416;
-  background: #53c5cc;
-  font-size: 9px;
-  font-weight: 900;
 }
 
 .device-selector {
@@ -916,7 +896,7 @@ h3 {
 
 @media (max-width: 1120px) {
   .console-topbar {
-    grid-template-columns: auto minmax(140px, 190px) minmax(0, 1fr) auto;
+    grid-template-columns: minmax(180px, 220px) minmax(0, 1fr) auto;
     gap: 10px;
   }
 
@@ -942,7 +922,7 @@ h3 {
 @media (max-width: 900px) {
   .console-topbar {
     position: static;
-    grid-template-columns: auto minmax(150px, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     padding: 10px 14px;
   }
 
@@ -989,17 +969,13 @@ h3 {
     grid-template-columns: 1fr auto;
   }
 
-  .console-brand strong {
-    display: none;
-  }
-
   .device-selector {
-    grid-column: 1 / -1;
-    grid-row: 2;
+    grid-column: 1;
+    grid-row: 1;
   }
 
   .console-nav {
-    grid-row: 3;
+    grid-row: 2;
     height: 38px;
     min-height: 38px;
     gap: 0;

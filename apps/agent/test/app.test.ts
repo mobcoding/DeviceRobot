@@ -70,4 +70,39 @@ describe("DeviceRobot Agent", () => {
     expect(response.statusCode).toBe(403);
     await app.close();
   });
+
+  it("returns devices from the injected discovery service", async () => {
+    const { app } = await createAgentApp({
+      localAppData: createTemporaryRoot(),
+      deviceService: {
+        listDevices: async () => ({
+          adb: { available: true, executable: "adb", version: "37.0.0" },
+          devices: [
+            {
+              serial: "device-1",
+              state: "device",
+              connection: "usb",
+              model: "Pixel 3 XL",
+              androidVersion: "12",
+              apiLevel: 31,
+            },
+          ],
+          refreshedAt: "2026-07-20T10:00:00.000Z",
+        }),
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/devices",
+      headers: { host: "127.0.0.1:43110" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      adb: { available: true },
+      devices: [{ serial: "device-1", model: "Pixel 3 XL" }],
+    });
+    await app.close();
+  });
 });

@@ -1,10 +1,10 @@
 # DeviceRobot
 
-DeviceRobot is a Windows-first, local Android AI testing workspace. The initial scaffold provides a localhost-only Agent, a React status UI, shared action contracts, a deterministic test DSL, SQLite migrations, and the boundaries required for future ADB, Appium, scrcpy, and source-aware AI integrations.
+DeviceRobot is a Windows-first, local Android AI testing workspace. The current foundation provides a localhost-only Agent, real ADB device discovery, a React operator UI, shared action contracts, a deterministic test DSL, SQLite migrations, and the boundaries required for future Appium, scrcpy, and source-aware AI integrations.
 
 ## Current status
 
-The repository currently implements the workspace foundation only. Device discovery, screen control, source analysis, AI execution, and test reporting are represented by typed interfaces and are intentionally not simulated.
+The repository currently discovers locally connected Android devices through ADB and reports authorized, unauthorized, offline, USB, TCP, and emulator states using real device data. Screen control, source analysis, AI execution, and test reporting remain typed boundaries and are intentionally not simulated.
 
 ## Requirements
 
@@ -25,6 +25,8 @@ Development starts:
 - Vite Web UI: `http://127.0.0.1:5173`
 
 The Vite server proxies `/api` to the Local Agent. A production build is served by the Agent from its localhost endpoint.
+
+Connect an Android phone with USB debugging enabled, accept the authorization prompt on the phone, and open the **Devices** workspace. DeviceRobot refreshes the device list every three seconds and also supports manual refresh. The Agent uses `ADB_PATH` when set; otherwise it resolves `adb` from `PATH`.
 
 ## Verification
 

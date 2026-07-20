@@ -22,6 +22,8 @@ try {
 
   const healthResponse = await fetch(`http://${AGENT_HOST}:${AGENT_PORT}/api/v1/system/health`);
   const health = await healthResponse.json();
+  const devicesResponse = await fetch(`http://${AGENT_HOST}:${AGENT_PORT}/api/v1/devices`);
+  const deviceList = await devicesResponse.json();
   const webResponse = await fetch(`http://${AGENT_HOST}:${AGENT_PORT}/`);
   const html = await webResponse.text();
 
@@ -29,11 +31,21 @@ try {
     throw new Error(`Health smoke test failed: ${JSON.stringify(health)}`);
   }
 
+  if (
+    !devicesResponse.ok ||
+    typeof deviceList.adb?.available !== "boolean" ||
+    !Array.isArray(deviceList.devices)
+  ) {
+    throw new Error(`Device discovery smoke test failed: ${JSON.stringify(deviceList)}`);
+  }
+
   if (!webResponse.ok || !html.includes("<title>DeviceRobot</title>")) {
     throw new Error("Production Web UI smoke test failed");
   }
 
-  process.stdout.write(`${JSON.stringify({ health, webStatus: webResponse.status })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ health, deviceList, webStatus: webResponse.status })}\n`,
+  );
 } finally {
   await app.close();
 }

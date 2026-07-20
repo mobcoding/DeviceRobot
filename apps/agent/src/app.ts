@@ -2,10 +2,11 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import fastifyStatic from "@fastify/static";
 import { ensureAgentDirectories, resolveAgentPaths, type AgentPaths } from "@device-robot/config";
-import { healthResponseSchema } from "@device-robot/contracts";
+import { deviceListResponseSchema, healthResponseSchema } from "@device-robot/contracts";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 
 import { openDatabase, type DatabaseHandle } from "./db/database.js";
+import { AdbDeviceService, type DeviceDiscoveryService } from "./devices/adb-device-service.js";
 import { isAllowedOrigin, isLoopbackHost } from "./security/loopback.js";
 
 export const AGENT_VERSION = "0.1.0";
@@ -16,12 +17,14 @@ export type CreateAgentAppOptions = {
   logger?: FastifyServerOptions["logger"];
   serveWeb?: boolean;
   webRoot?: string;
+  deviceService?: DeviceDiscoveryService;
 };
 
 export type AgentApp = {
   app: FastifyInstance;
   database: DatabaseHandle;
   paths: AgentPaths;
+  deviceService: DeviceDiscoveryService;
 };
 
 function defaultWebRoot(): string {
@@ -36,6 +39,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
   const webRoot = options.webRoot ?? defaultWebRoot();
   const shouldServeWeb = options.serveWeb ?? false;
   const webAvailable = shouldServeWeb && existsSync(webRoot);
+  const deviceService = options.deviceService ?? new AdbDeviceService();
 
   const app = Fastify({
     logger: options.logger ?? false,
@@ -62,6 +66,10 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     });
   });
 
+  app.get("/api/v1/devices", async () => {
+    return deviceListResponseSchema.parse(await deviceService.listDevices());
+  });
+
   if (webAvailable) {
     await app.register(fastifyStatic, {
       root: webRoot,
@@ -81,5 +89,5 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     database.close();
   });
 
-  return { app, database, paths };
+  return { app, database, paths, deviceService };
 }

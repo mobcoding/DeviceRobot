@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { fetchDevices } from "./api/devices";
 import { fetchHealth } from "./api/health";
 
 const viewIds = ["overview", "projects", "devices", "conversations", "runs", "reports"] as const;
@@ -16,7 +17,7 @@ type NavigationItem = {
 const navigationItems: readonly NavigationItem[] = [
   { id: "overview", label: "Overview", icon: "OV" },
   { id: "projects", label: "Projects", icon: "PR", status: "Planned" },
-  { id: "devices", label: "Devices", icon: "DV", status: "Planned" },
+  { id: "devices", label: "Devices", icon: "DV" },
   { id: "conversations", label: "AI conversations", icon: "AI", status: "Planned" },
   { id: "runs", label: "Test runs", icon: "TR", status: "Planned" },
   { id: "reports", label: "Reports", icon: "RP", status: "Planned" },
@@ -24,11 +25,12 @@ const navigationItems: readonly NavigationItem[] = [
 
 const roadmap = [
   { label: "Workspace foundation", status: "Ready" },
-  { label: "ADB and screen control", status: "Planned" },
+  { label: "ADB device discovery", status: "Ready" },
+  { label: "Screen control", status: "Planned" },
   { label: "Source-aware AI testing", status: "Planned" },
 ] as const;
 
-const plannedViews: Record<Exclude<ViewId, "overview">, PlannedViewContent> = {
+const plannedViews: Record<Exclude<ViewId, "overview" | "devices">, PlannedViewContent> = {
   projects: {
     eyebrow: "Repository intelligence",
     title: "Projects",
@@ -39,13 +41,6 @@ const plannedViews: Record<Exclude<ViewId, "overview">, PlannedViewContent> = {
       "Gradle variants",
       "XML View and Compose indexing",
     ],
-  },
-  devices: {
-    eyebrow: "Local hardware",
-    title: "Devices",
-    description: "ADB device discovery is not connected yet.",
-    milestone: "Device control",
-    capabilities: ["USB authorization", "Live screen control", "APK, files, and logcat"],
   },
   conversations: {
     eyebrow: "Agent workspace",
@@ -141,7 +136,164 @@ function PlannedView({ content }: { content: PlannedViewContent }): React.JSX.El
   );
 }
 
-function Overview({ agentStatus, healthQuery }: OverviewProps): React.JSX.Element {
+function deviceStateLabel(state: string): string {
+  switch (state) {
+    case "device":
+      return "Ready";
+    case "emulator":
+      return "Emulator";
+    case "unauthorized":
+      return "Authorization required";
+    case "offline":
+      return "Offline";
+    default:
+      return "Unknown";
+  }
+}
+
+function DevicesView({ deviceQuery }: { deviceQuery: DevicesQuery }): React.JSX.Element {
+  const response = deviceQuery.data;
+  const readyDevices = response?.devices.filter(
+    (device) => device.state === "device" || device.state === "emulator",
+  );
+  const statusText = deviceQuery.isPending
+    ? "Scanning"
+    : deviceQuery.isError || response?.adb.available === false
+      ? "ADB unavailable"
+      : `${readyDevices?.length ?? 0} ready`;
+
+  return (
+    <>
+      <header className="page-header">
+        <div>
+          <p className="eyebrow">Local hardware</p>
+          <h1>Devices</h1>
+          <p className="subtitle">Android devices visible to the local ADB server.</p>
+        </div>
+        <div className="header-actions">
+          <span
+            className={`connection-badge ${deviceQuery.isError || response?.adb.available === false ? "error" : ""}`}
+          >
+            {statusText}
+          </span>
+          <button
+            className="refresh-button"
+            type="button"
+            disabled={deviceQuery.isFetching}
+            onClick={() => void deviceQuery.refetch()}
+          >
+            {deviceQuery.isFetching ? "Refreshing" : "Refresh"}
+          </button>
+        </div>
+      </header>
+
+      {deviceQuery.isError && (
+        <section className="notice error-notice" role="alert">
+          <strong>Device discovery failed.</strong>
+          <span>{deviceQuery.error.message}</span>
+        </section>
+      )}
+
+      {response?.error !== undefined && (
+        <section className="notice error-notice" role="alert">
+          <strong>{response.adb.available ? "ADB request failed." : "ADB is unavailable."}</strong>
+          <span>{response.error}</span>
+        </section>
+      )}
+
+      <section className="device-summary" aria-label="ADB environment">
+        <article className="metric-card featured">
+          <span>ADB state</span>
+          <strong>{response?.adb.available === true ? "Available" : "--"}</strong>
+          <small>
+            {response?.adb.installedPath ?? response?.adb.executable ?? "Detecting ADB"}
+          </small>
+        </article>
+        <article className="metric-card">
+          <span>ADB version</span>
+          <strong>{response?.adb.version ?? "--"}</strong>
+          <small>Local platform tools</small>
+        </article>
+        <article className="metric-card">
+          <span>Detected</span>
+          <strong>{response?.devices.length ?? "--"}</strong>
+          <small>{readyDevices?.length ?? 0} available for automation</small>
+        </article>
+      </section>
+
+      {response !== undefined && response.adb.available && response.devices.length === 0 && (
+        <section className="panel device-empty-state">
+          <span className="empty-state-mark" aria-hidden="true">
+            DV
+          </span>
+          <p className="eyebrow">No devices</p>
+          <h2>No ADB devices detected.</h2>
+        </section>
+      )}
+
+      {response !== undefined && response.devices.length > 0 && (
+        <section className="device-grid" aria-label="Detected Android devices">
+          {response.devices.map((device) => {
+            const isReady = device.state === "device" || device.state === "emulator";
+            return (
+              <article className="device-card" key={device.serial}>
+                <div className="device-card-heading">
+                  <div>
+                    <p className="eyebrow">{device.connection} connection</p>
+                    <h2>{device.model ?? device.deviceName ?? device.serial}</h2>
+                    <code>{device.serial}</code>
+                  </div>
+                  <span className={isReady ? "device-state ready" : "device-state warning"}>
+                    {deviceStateLabel(device.state)}
+                  </span>
+                </div>
+
+                {device.state === "unauthorized" && (
+                  <p className="device-diagnostic">Unlock the device and approve USB debugging.</p>
+                )}
+                {device.state === "offline" && (
+                  <p className="device-diagnostic">The ADB transport is currently offline.</p>
+                )}
+                {device.detailsError !== undefined && (
+                  <p className="device-diagnostic">{device.detailsError}</p>
+                )}
+
+                <dl className="device-meta">
+                  <div>
+                    <dt>Manufacturer</dt>
+                    <dd>{device.manufacturer ?? "Not reported"}</dd>
+                  </div>
+                  <div>
+                    <dt>Android</dt>
+                    <dd>{device.androidVersion ?? "Not reported"}</dd>
+                  </div>
+                  <div>
+                    <dt>API level</dt>
+                    <dd>{device.apiLevel ?? "Not reported"}</dd>
+                  </div>
+                  <div>
+                    <dt>Product</dt>
+                    <dd>{device.product ?? "Not reported"}</dd>
+                  </div>
+                  <div>
+                    <dt>Transport</dt>
+                    <dd>{device.transportId ?? device.path ?? device.connection}</dd>
+                  </div>
+                </dl>
+              </article>
+            );
+          })}
+        </section>
+      )}
+    </>
+  );
+}
+
+function Overview({ agentStatus, healthQuery, deviceQuery }: OverviewProps): React.JSX.Element {
+  const readyDeviceCount =
+    deviceQuery.data?.devices.filter(
+      (device) => device.state === "device" || device.state === "emulator",
+    ).length ?? 0;
   return (
     <>
       <header className="page-header">
@@ -171,8 +323,12 @@ function Overview({ agentStatus, healthQuery }: OverviewProps): React.JSX.Elemen
         </article>
         <article className="metric-card">
           <span>Devices</span>
-          <strong>--</strong>
-          <small>ADB integration is planned</small>
+          <strong>{deviceQuery.data?.devices.length ?? "--"}</strong>
+          <small>
+            {deviceQuery.isError
+              ? "Device discovery unavailable"
+              : `${readyDeviceCount} available for automation`}
+          </small>
         </article>
         <article className="metric-card">
           <span>Test runs</span>
@@ -233,9 +389,11 @@ function Overview({ agentStatus, healthQuery }: OverviewProps): React.JSX.Elemen
 }
 
 type HealthQuery = ReturnType<typeof useHealthQuery>;
+type DevicesQuery = ReturnType<typeof useDevicesQuery>;
 type OverviewProps = {
   agentStatus: string;
   healthQuery: HealthQuery;
+  deviceQuery: DevicesQuery;
 };
 
 function useHealthQuery() {
@@ -247,8 +405,18 @@ function useHealthQuery() {
   });
 }
 
+function useDevicesQuery() {
+  return useQuery({
+    queryKey: ["devices"],
+    queryFn: ({ signal }) => fetchDevices(signal),
+    retry: 1,
+    refetchInterval: 3_000,
+  });
+}
+
 export function App(): React.JSX.Element {
   const healthQuery = useHealthQuery();
+  const deviceQuery = useDevicesQuery();
   const [activeView, setActiveView] = useState<ViewId>(readViewFromHash);
 
   useEffect(() => {
@@ -319,7 +487,9 @@ export function App(): React.JSX.Element {
         )}
 
         {activeView === "overview" ? (
-          <Overview agentStatus={agentStatus} healthQuery={healthQuery} />
+          <Overview agentStatus={agentStatus} healthQuery={healthQuery} deviceQuery={deviceQuery} />
+        ) : activeView === "devices" ? (
+          <DevicesView deviceQuery={deviceQuery} />
         ) : (
           <PlannedView content={plannedViews[activeView]} />
         )}

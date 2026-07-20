@@ -121,6 +121,66 @@ describe("DeviceRobot Agent", () => {
     await app.close();
   });
 
+  it("serves read-only file and application management data", async () => {
+    const { app } = await createAgentApp({
+      localAppData: createTemporaryRoot(),
+      deviceManagementService: {
+        listFiles: async (serial, path) => ({
+          serial,
+          path: path ?? "/storage/emulated/0",
+          entries: [
+            {
+              name: "Download",
+              path: "/storage/emulated/0/Download",
+              kind: "directory" as const,
+            },
+          ],
+          readAt: "2026-07-20T10:00:00.000Z",
+        }),
+        listApplications: async (serial, filter = "all") => ({
+          serial,
+          filter,
+          applications: [
+            {
+              packageName: "com.example.app",
+              source: "user" as const,
+              apkPath: "/data/app/com.example.app/base.apk",
+              versionCode: "42",
+            },
+          ],
+          readAt: "2026-07-20T10:00:00.000Z",
+        }),
+      },
+    });
+    const headers = { host: "127.0.0.1:43110" };
+
+    try {
+      const files = await app.inject({
+        method: "GET",
+        url: "/api/v1/devices/device-1/files?path=%2Fstorage%2Femulated%2F0",
+        headers,
+      });
+      const applications = await app.inject({
+        method: "GET",
+        url: "/api/v1/devices/device-1/applications?filter=user",
+        headers,
+      });
+
+      expect(files.statusCode).toBe(200);
+      expect(files.json()).toMatchObject({
+        path: "/storage/emulated/0",
+        entries: [{ kind: "directory" }],
+      });
+      expect(applications.statusCode).toBe(200);
+      expect(applications.json()).toMatchObject({
+        filter: "user",
+        applications: [{ packageName: "com.example.app", source: "user" }],
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it("serves device control data and records action audits", async () => {
     const { app } = await createAgentApp({
       localAppData: createTemporaryRoot(),

@@ -147,6 +147,45 @@ const uiTreeResponse = {
   capturedAt: "2026-07-20T10:00:00.000Z",
 };
 
+const fileListResponse = {
+  serial: "8B3Y0THX0",
+  path: "/storage/emulated/0",
+  parentPath: "/storage/emulated",
+  entries: [
+    {
+      name: "Download",
+      path: "/storage/emulated/0/Download",
+      kind: "directory",
+    },
+    {
+      name: "notes.txt",
+      path: "/storage/emulated/0/notes.txt",
+      kind: "file",
+    },
+  ],
+  readAt: "2026-07-20T10:00:00.000Z",
+};
+
+const applicationsResponse = {
+  serial: "8B3Y0THX0",
+  filter: "all",
+  applications: [
+    {
+      packageName: "com.example.app",
+      source: "user",
+      apkPath: "/data/app/com.example.app/base.apk",
+      versionCode: "42",
+    },
+    {
+      packageName: "com.android.settings",
+      source: "system",
+      apkPath: "/system/priv-app/Settings/Settings.apk",
+      versionCode: "33",
+    },
+  ],
+  readAt: "2026-07-20T10:00:00.000Z",
+};
+
 function mockApis(options: { healthError?: Error } = {}): {
   getDeviceRequests: () => number;
   getActionRequests: () => number;
@@ -174,6 +213,20 @@ function mockApis(options: { healthError?: Error } = {}): {
 
     if (url.includes("/api/v1/appium/runtime")) {
       return new Response(JSON.stringify(appiumRuntimeResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (url.includes("/files")) {
+      return new Response(JSON.stringify(fileListResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (url.includes("/applications")) {
+      return new Response(JSON.stringify(applicationsResponse), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -266,15 +319,43 @@ describe("DeviceRobot Web UI", () => {
     renderApp();
 
     await screen.findByRole("heading", { level: 1, name: "概览" });
-    expect(screen.getByRole("button", { name: "项目" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "AI 与用例" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "测试运行" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "文件管理器" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "应用管理器" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "项目" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "添加工作页签" }));
-    await user.click(screen.getByRole("button", { name: "测试运行" }));
+    await user.click(screen.getByRole("button", { name: "项目" }));
 
-    expect(screen.getByRole("heading", { level: 1, name: "测试运行" })).toBeInTheDocument();
-    expect(globalThis.location.hash).toBe("#runs");
-    expect(screen.getByRole("button", { name: "测试运行" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "项目" })).toBeInTheDocument();
+    expect(globalThis.location.hash).toBe("#projects");
+    expect(screen.getByRole("button", { name: "项目" })).toBeInTheDocument();
+  });
+
+  it("opens device files from the default file manager tab", async () => {
+    mockApis();
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "文件管理器" }));
+    expect(screen.getByRole("heading", { level: 1, name: "文件管理器" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /内部共享存储空间/ }));
+
+    expect(await screen.findByRole("button", { name: /Download/ })).toBeInTheDocument();
+    expect(screen.getByText("notes.txt")).toBeInTheDocument();
+  });
+
+  it("filters applications and sends only structured app actions", async () => {
+    const { getActionRequests, getLastAction } = mockApis();
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "应用管理器" }));
+    expect(await screen.findByText("com.example.app")).toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: "搜索应用包名" }), "settings");
+    expect(screen.queryByText("com.example.app")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "启动 com.android.settings" }));
+    await vi.waitFor(() => expect(getActionRequests()).toBe(1));
+    expect(getLastAction()).toEqual({ action: "app.launch", appId: "com.android.settings" });
   });
 
   it("shows a real authorized Android device in the selector", async () => {
@@ -372,6 +453,7 @@ describe("DeviceRobot Web UI", () => {
     await screen.findByRole("heading", { level: 1, name: "概览" });
     const canvas = await screen.findByRole("img", { name: "设备实时画面：Pixel 3 XL" });
     await vi.waitFor(() => expect(canvas).toHaveProperty("width", 1080));
+    await vi.waitFor(() => expect(canvas).toHaveAttribute("aria-busy", "false"));
     Object.defineProperty(canvas, "setPointerCapture", { configurable: true, value: vi.fn() });
     Object.defineProperty(canvas, "hasPointerCapture", {
       configurable: true,

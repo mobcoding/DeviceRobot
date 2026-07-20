@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   actionPlanSchema,
   appiumRuntimeSchema,
+  deviceApplicationListResponseSchema,
   deviceControlActionSchema,
+  deviceFileListResponseSchema,
   deviceListResponseSchema,
   deviceUiTreeResponseSchema,
   healthResponseSchema,
@@ -78,6 +80,40 @@ describe("shared contracts", () => {
         capturedAt: "2026-07-20T10:00:00.000Z",
       }),
     ).toMatchObject({ serial: "device-1" });
+  });
+
+  it("accepts read-only file and application management responses", () => {
+    expect(
+      deviceFileListResponseSchema.parse({
+        serial: "device-1",
+        path: "/storage/emulated/0",
+        parentPath: "/storage/emulated",
+        entries: [
+          {
+            name: "Download",
+            path: "/storage/emulated/0/Download",
+            kind: "directory",
+          },
+        ],
+        readAt: "2026-07-20T10:00:00.000Z",
+      }),
+    ).toMatchObject({ entries: [{ kind: "directory" }] });
+
+    expect(
+      deviceApplicationListResponseSchema.parse({
+        serial: "device-1",
+        filter: "user",
+        applications: [
+          {
+            packageName: "com.example.app",
+            source: "user",
+            apkPath: "/data/app/com.example.app/base.apk",
+            versionCode: "42",
+          },
+        ],
+        readAt: "2026-07-20T10:00:00.000Z",
+      }),
+    ).toMatchObject({ applications: [{ packageName: "com.example.app" }] });
   });
 
   it("accepts a local Appium runtime diagnostic", () => {

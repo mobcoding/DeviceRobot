@@ -32,3 +32,19 @@ export {
   type DeviceControlAction,
   type DeviceUiTreeResponse,
 } from "./device-control.js";
+export {
+  deviceApplicationFilterSchema,
+  deviceApplicationListResponseSchema,
+  deviceApplicationSchema,
+  deviceApplicationSourceSchema,
+  deviceFileEntrySchema,
+  deviceFileKindSchema,
+  deviceFileListResponseSchema,
+  type DeviceApplication,
+  type DeviceApplicationFilter,
+  type DeviceApplicationListResponse,
+  type DeviceApplicationSource,
+  type DeviceFileEntry,
+  type DeviceFileKind,
+  type DeviceFileListResponse,
+} from "./device-management.js";

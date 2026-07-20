@@ -582,6 +582,7 @@ summary:focus-visible {
 }
 
 .device-overview,
+.management-workspace,
 .planned-workspace,
 .main-empty-state {
   width: 100%;
@@ -594,6 +595,455 @@ summary:focus-visible {
   min-height: 52px;
   align-items: center;
   margin-bottom: 20px;
+}
+
+.management-heading {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.management-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  color: #f1f3f4;
+}
+
+.management-title-row h1 {
+  margin: 0;
+}
+
+.icon-button {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #c2c9cc;
+  background: #202020;
+}
+
+.icon-button:hover:not(:disabled) {
+  border-color: #596469;
+  color: #ffffff;
+  background: #2a2a2a;
+}
+
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.manager-toolbar,
+.application-toolbar {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.manager-path-home {
+  display: inline-flex;
+  min-height: 32px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  color: #b9c2c5;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.manager-path-home:hover,
+.manager-path-home[aria-current="page"] {
+  border-bottom-color: #53c5cc;
+  color: #ffffff;
+}
+
+.manager-path-form {
+  display: flex;
+  min-width: 0;
+  max-width: 580px;
+  flex: 1 1 auto;
+  gap: 6px;
+}
+
+.manager-path-form input,
+.application-search input,
+.application-filter select {
+  min-width: 0;
+  height: 32px;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #edf0f1;
+  background: #151515;
+  font-size: 12px;
+}
+
+.manager-path-form input {
+  width: 100%;
+  padding: 0 9px;
+  font-family: "Cascadia Code", Consolas, monospace;
+}
+
+.manager-path-form button {
+  flex: 0 0 auto;
+  min-width: 46px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #4a5053;
+  border-radius: 4px;
+  color: #d9dfe1;
+  background: #292929;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.manager-path-form button:hover:not(:disabled) {
+  border-color: #69767a;
+  color: #ffffff;
+  background: #343434;
+}
+
+.manager-path-form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.manager-home-list {
+  overflow: hidden;
+  border: 1px solid #303030;
+  border-radius: 6px;
+  background: #171717;
+}
+
+.manager-home-list button {
+  display: grid;
+  width: 100%;
+  min-height: 76px;
+  grid-template-columns: 30px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  border: 0;
+  border-bottom: 1px solid #303030;
+  color: #cbd2d5;
+  background: transparent;
+  text-align: left;
+}
+
+.manager-home-list button:last-child {
+  border-bottom: 0;
+}
+
+.manager-home-list button:hover {
+  color: #ffffff;
+  background: #202020;
+}
+
+.manager-home-list button > svg:first-child,
+.manager-home-list button > svg:last-child {
+  color: #aeb9be;
+}
+
+.manager-home-list button > span:not(.filesystem-root) {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.manager-home-list strong {
+  color: inherit;
+  font-size: 13px;
+}
+
+.manager-home-list small {
+  color: #a0abb0;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+}
+
+.filesystem-root {
+  width: 30px;
+  color: #dbe2e4;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 23px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.management-error,
+.management-empty {
+  margin: 0;
+  padding: 18px 0;
+  font-size: 12px;
+}
+
+.management-error {
+  color: #e6a0a9;
+}
+
+.management-empty {
+  color: #aab3b7;
+}
+
+.manager-table-wrap {
+  overflow: auto;
+  border: 1px solid #303030;
+  border-radius: 6px;
+  background: #171717;
+}
+
+.manager-table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.manager-table th,
+.manager-table td {
+  min-width: 0;
+  padding: 11px 14px;
+  border-bottom: 1px solid #2d2d2d;
+  color: #b9c1c5;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.manager-table th {
+  color: #d9e0e3;
+  background: #1e1e1e;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.manager-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.manager-table tbody tr:hover td {
+  background: #1d1d1d;
+}
+
+.manager-table code {
+  display: block;
+  overflow: hidden;
+  color: #aebbc0;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-table th:nth-child(1) {
+  width: 42%;
+}
+
+.file-table th:nth-child(2) {
+  width: 15%;
+}
+
+.file-entry-button,
+.file-entry-label,
+.application-name {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-entry-button {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  color: #dbe1e3;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.file-entry-button:hover {
+  color: #6ed2d7;
+}
+
+.file-entry-button svg,
+.file-entry-label svg {
+  flex: 0 0 auto;
+  color: #8fbfc2;
+}
+
+.file-entry-button span,
+.file-entry-label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.application-toolbar {
+  justify-content: space-between;
+}
+
+.application-search {
+  display: flex;
+  min-width: min(100%, 600px);
+  height: 36px;
+  flex: 1 1 420px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #aeb9be;
+  background: #151515;
+}
+
+.application-search:focus-within {
+  border-color: #53c5cc;
+}
+
+.application-search input {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+}
+
+.application-filter {
+  display: inline-flex;
+  height: 36px;
+  align-items: center;
+  gap: 7px;
+  color: #aeb8bc;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.application-filter select {
+  min-width: 108px;
+  padding: 0 7px;
+}
+
+.applications-table th:nth-child(1) {
+  width: 28%;
+}
+
+.applications-table th:nth-child(2) {
+  width: 12%;
+}
+
+.applications-table th:nth-child(3) {
+  width: 12%;
+}
+
+.applications-table th:nth-child(4) {
+  width: 38%;
+}
+
+.applications-table th:nth-child(5) {
+  width: 10%;
+}
+
+.application-name {
+  max-width: 100%;
+}
+
+.application-name svg {
+  flex: 0 0 auto;
+  color: #91c8cc;
+}
+
+.application-name code {
+  color: #e2e8e9;
+  font-size: 11px;
+}
+
+.application-source {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  padding: 0 6px;
+  border: 1px solid #405b61;
+  border-radius: 3px;
+  color: #9ed1d4;
+  background: #17282a;
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.application-source.system {
+  border-color: #514c69;
+  color: #c6bcea;
+  background: #242133;
+}
+
+.application-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.application-actions .icon-button {
+  width: 29px;
+  height: 29px;
+  flex-basis: 29px;
+}
+
+.manager-pagination {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #9ea9ae;
+  font-size: 11px;
+}
+
+.manager-pagination > div {
+  display: flex;
+  gap: 6px;
+}
+
+.manager-pagination button {
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid #414141;
+  border-radius: 4px;
+  color: #d0d6d8;
+  background: #202020;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.manager-pagination button:hover:not(:disabled) {
+  border-color: #5e6b70;
+  color: #ffffff;
+  background: #2a2a2a;
+}
+
+.manager-pagination button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
 .overview-title-row {
@@ -1163,6 +1613,15 @@ h3 {
     grid-template-columns: 1fr;
   }
 
+  .application-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .application-filter {
+    justify-content: flex-end;
+  }
+
   .control-sections > section + section {
     padding: 16px 0 0;
     border-top: 1px solid #303030;
@@ -1296,6 +1755,31 @@ h3 {
 
   .evidence-content {
     grid-template-columns: 1fr;
+  }
+
+  .management-heading {
+    margin-bottom: 14px;
+  }
+
+  .manager-toolbar {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .manager-path-form {
+    order: 2;
+    width: 100%;
+    max-width: none;
+    flex-basis: 100%;
+  }
+
+  .manager-home-list button {
+    min-height: 70px;
+    padding-inline: 14px;
+  }
+
+  .manager-table {
+    min-width: 620px;
   }
 
   .evidence-content > section + section {

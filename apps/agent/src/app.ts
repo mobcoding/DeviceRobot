@@ -6,7 +6,10 @@ import { ensureAgentDirectories, resolveAgentPaths, type AgentPaths } from "@dev
 import {
   deviceActionHistoryResponseSchema,
   deviceActionResultSchema,
+  deviceApplicationFilterSchema,
+  deviceApplicationListResponseSchema,
   deviceControlActionSchema,
+  deviceFileListResponseSchema,
   deviceListResponseSchema,
   deviceUiTreeResponseSchema,
   healthResponseSchema,
@@ -25,6 +28,10 @@ import {
   type DeviceControlService,
 } from "./devices/adb-device-control-service.js";
 import { AdbDeviceService, type DeviceDiscoveryService } from "./devices/adb-device-service.js";
+import {
+  AdbDeviceManagementService,
+  type DeviceManagementService,
+} from "./devices/adb-device-management-service.js";
 import {
   createFailedActionAudit,
   SqliteDeviceActionAuditStore,
@@ -49,6 +56,7 @@ export type CreateAgentAppOptions = {
   webRoot?: string;
   deviceService?: DeviceDiscoveryService;
   deviceControlService?: DeviceControlService;
+  deviceManagementService?: DeviceManagementService;
   deviceActionAuditStore?: DeviceActionAuditStore;
   appiumRuntimeService?: AppiumRuntimeService;
   scrcpyStreamService?: ScrcpyStreamService;
@@ -60,6 +68,7 @@ export type AgentApp = {
   paths: AgentPaths;
   deviceService: DeviceDiscoveryService;
   deviceControlService: DeviceControlService;
+  deviceManagementService: DeviceManagementService;
   deviceActionAuditStore: DeviceActionAuditStore;
   appiumRuntimeService: AppiumRuntimeService;
   scrcpyStreamService: ScrcpyStreamService;
@@ -91,6 +100,42 @@ function controlErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
   return reply.code(500).send({ error: message });
 }
 
+function parseFilePath(query: unknown): string | undefined {
+  if (typeof query !== "object" || query === null) {
+    return undefined;
+  }
+
+  const path = (query as Record<string, unknown>).path;
+  if (path === undefined) {
+    return undefined;
+  }
+
+  if (typeof path !== "string") {
+    throw new DeviceControlError("A valid device path is required", 400);
+  }
+
+  return path;
+}
+
+function parseApplicationFilter(
+  query: unknown,
+): ReturnType<typeof deviceApplicationFilterSchema.parse> {
+  if (typeof query !== "object" || query === null) {
+    return "all";
+  }
+
+  const filter = (query as Record<string, unknown>).filter;
+  if (filter === undefined) {
+    return "all";
+  }
+
+  try {
+    return deviceApplicationFilterSchema.parse(filter);
+  } catch {
+    throw new DeviceControlError("The application filter is invalid", 400);
+  }
+}
+
 function appiumErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
   if (error instanceof AppiumRuntimeError) {
     return reply.code(error.statusCode).send({ error: error.message });
@@ -111,6 +156,8 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
   const deviceService = options.deviceService ?? new AdbDeviceService();
   const deviceControlService =
     options.deviceControlService ?? new AdbDeviceControlService({ deviceService });
+  const deviceManagementService =
+    options.deviceManagementService ?? new AdbDeviceManagementService({ deviceService });
   const deviceActionAuditStore =
     options.deviceActionAuditStore ?? new SqliteDeviceActionAuditStore(database.sqlite);
   const appiumRuntimeService = options.appiumRuntimeService ?? new AppiumRuntimeService({ paths });
@@ -146,6 +193,30 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
 
   app.get("/api/v1/devices", async () => {
     return deviceListResponseSchema.parse(await deviceService.listDevices());
+  });
+
+  app.get("/api/v1/devices/:serial/files", async (request, reply) => {
+    try {
+      const response = await deviceManagementService.listFiles(
+        parseSerial(request.params),
+        parseFilePath(request.query),
+      );
+      return deviceFileListResponseSchema.parse(response);
+    } catch (error) {
+      return controlErrorReply(reply, error);
+    }
+  });
+
+  app.get("/api/v1/devices/:serial/applications", async (request, reply) => {
+    try {
+      const response = await deviceManagementService.listApplications(
+        parseSerial(request.params),
+        parseApplicationFilter(request.query),
+      );
+      return deviceApplicationListResponseSchema.parse(response);
+    } catch (error) {
+      return controlErrorReply(reply, error);
+    }
   });
 
   app.get("/api/v1/appium/runtime", async () => {
@@ -409,6 +480,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     paths,
     deviceService,
     deviceControlService,
+    deviceManagementService,
     deviceActionAuditStore,
     appiumRuntimeService,
     scrcpyStreamService,

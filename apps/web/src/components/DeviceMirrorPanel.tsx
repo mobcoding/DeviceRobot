@@ -536,7 +536,7 @@ export function DeviceMirrorPanel({
             className="interactive-device-screen"
             role="img"
             aria-label={`设备实时画面：${deviceName(device)}`}
-            aria-busy={streamState === "connecting"}
+            aria-busy={screenSize === undefined}
             onPointerCancel={handlePointerCancel}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}

@@ -1,0 +1,57 @@
+import {
+  deviceApplicationListResponseSchema,
+  deviceFileListResponseSchema,
+  type DeviceApplicationFilter,
+  type DeviceApplicationListResponse,
+  type DeviceFileListResponse,
+} from "@device-robot/contracts";
+
+async function fetchManagementResponse<T>(
+  url: string,
+  schema: { parse(value: unknown): T },
+  signal?: AbortSignal,
+): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: { Accept: "application/json" },
+      ...(signal === undefined ? {} : { signal }),
+    });
+  } catch {
+    throw new Error("无法连接本地 Agent。请确认 Agent 正在运行。");
+  }
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => undefined)) as
+      { error?: unknown } | undefined;
+    const message = typeof payload?.error === "string" ? payload.error : "设备管理请求失败";
+    throw new Error(message);
+  }
+
+  return schema.parse(await response.json());
+}
+
+export async function fetchDeviceFiles(
+  serial: string,
+  path?: string,
+  signal?: AbortSignal,
+): Promise<DeviceFileListResponse> {
+  const query = path === undefined ? "" : `?path=${encodeURIComponent(path)}`;
+  return await fetchManagementResponse(
+    `/api/v1/devices/${encodeURIComponent(serial)}/files${query}`,
+    deviceFileListResponseSchema,
+    signal,
+  );
+}
+
+export async function fetchDeviceApplications(
+  serial: string,
+  filter: DeviceApplicationFilter,
+  signal?: AbortSignal,
+): Promise<DeviceApplicationListResponse> {
+  return await fetchManagementResponse(
+    `/api/v1/devices/${encodeURIComponent(serial)}/applications?filter=${filter}`,
+    deviceApplicationListResponseSchema,
+    signal,
+  );
+}

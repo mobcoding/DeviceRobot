@@ -388,10 +388,12 @@ summary:focus-visible {
   flex: 1 1 auto;
   width: auto;
   min-width: 0;
+  max-width: 100%;
   height: auto;
   max-height: calc(100vh - 196px);
   aspect-ratio: 9 / 19;
   margin-block: auto;
+  box-sizing: border-box;
   place-items: center;
   overflow: hidden;
   border: 1px solid #303030;

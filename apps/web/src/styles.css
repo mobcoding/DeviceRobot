@@ -52,7 +52,7 @@ summary:focus-visible {
   z-index: 10;
   top: 0;
   display: grid;
-  min-height: 58px;
+  min-height: 54px;
   grid-template-columns: auto minmax(160px, 220px) minmax(0, 1fr) auto;
   align-items: center;
   gap: 18px;
@@ -105,7 +105,7 @@ summary:focus-visible {
 .console-nav {
   display: flex;
   min-width: 0;
-  height: 58px;
+  height: 54px;
   align-items: stretch;
   gap: 2px;
   overflow-x: auto;
@@ -114,13 +114,14 @@ summary:focus-visible {
 .console-nav > button,
 .workspace-add-trigger {
   flex: 0 0 auto;
-  min-width: 58px;
-  padding: 0 9px;
+  min-width: 72px;
+  padding: 0 12px;
   border: 0;
   border-bottom: 2px solid transparent;
   color: #9ba1a5;
   background: transparent;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .console-nav > button:hover,
@@ -142,7 +143,7 @@ summary:focus-visible {
 }
 
 .workspace-add-trigger {
-  min-width: 42px;
+  min-width: 38px;
   padding: 0;
   font-size: 21px;
   font-weight: 300;
@@ -156,7 +157,7 @@ summary:focus-visible {
 
 .workspace-add-menu {
   position: absolute;
-  top: 52px;
+  top: 48px;
   left: 0;
   display: grid;
   min-width: 130px;
@@ -218,9 +219,13 @@ summary:focus-visible {
 }
 
 .device-telemetry {
-  border-color: #3e5255;
-  color: #a9dadd;
-  background: #17272a;
+  min-height: 0;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 0;
+  color: #d3dcde;
+  background: transparent;
+  font-size: 12px;
 }
 
 .status-chip.warning {
@@ -274,7 +279,7 @@ summary:focus-visible {
 .device-console-layout {
   display: grid;
   grid-template-columns: 348px minmax(0, 1fr);
-  min-height: calc(100vh - 58px);
+  min-height: calc(100vh - 54px);
 }
 
 .mirror-sidebar {
@@ -286,7 +291,7 @@ summary:focus-visible {
 
 .device-mirror {
   position: sticky;
-  top: 72px;
+  top: 68px;
 }
 
 .mirror-header {
@@ -386,7 +391,7 @@ summary:focus-visible {
 
 .console-main {
   min-width: 0;
-  padding: 34px clamp(28px, 7vw, 120px) 56px;
+  padding: 38px clamp(32px, 5vw, 100px) 64px;
   background: #080808;
 }
 
@@ -410,23 +415,24 @@ summary:focus-visible {
 .device-overview,
 .planned-workspace,
 .main-empty-state {
-  width: min(920px, 100%);
-  margin: 0 auto;
+  width: 100%;
+  max-width: 1110px;
+  margin: 0;
 }
 
 .overview-heading {
   display: flex;
-  min-height: 48px;
+  min-height: 56px;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 18px;
+  margin-bottom: 22px;
 }
 
 .eyebrow {
-  margin: 0 0 4px;
+  margin: 0 0 5px;
   color: #61c9cf;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0;
   text-transform: uppercase;
@@ -448,7 +454,7 @@ h3 {
 
 h1 {
   margin-bottom: 0;
-  font-size: 25px;
+  font-size: 30px;
   line-height: 1.2;
 }
 
@@ -470,39 +476,31 @@ h3 {
 .overview-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin: 0 0 18px;
-  overflow: hidden;
-  border: 1px solid #303030;
+  gap: 22px 72px;
+  margin: 0 0 22px;
+  padding: 24px;
+  border: 1px solid #292929;
   border-radius: 6px;
-  background: #191919;
+  background: #181818;
 }
 
 .overview-grid > div {
   min-width: 0;
-  min-height: 82px;
-  padding: 14px 18px;
-  border-bottom: 1px solid #303030;
-}
-
-.overview-grid > div:nth-last-child(-n + 2) {
-  border-bottom: 0;
-}
-
-.overview-grid > div:nth-child(odd) {
-  border-right: 1px solid #303030;
+  min-height: 48px;
 }
 
 .overview-grid dt {
-  margin-bottom: 6px;
-  color: #9ca5aa;
-  font-size: 11px;
+  margin-bottom: 7px;
+  color: #aeb7bc;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .overview-grid dd {
   overflow: hidden;
   margin: 0;
   color: #f0f2f3;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -511,11 +509,11 @@ h3 {
 .serial-value {
   color: #afc4c7 !important;
   font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 11px !important;
+  font-size: 12px !important;
 }
 
 .console-accordion {
-  margin-top: 10px;
+  margin-top: 12px;
   overflow: hidden;
   border: 1px solid #303030;
   border-radius: 6px;
@@ -524,12 +522,12 @@ h3 {
 
 .console-accordion summary {
   display: flex;
-  min-height: 54px;
+  min-height: 62px;
   align-items: center;
-  padding: 0 17px;
+  padding: 0 22px;
   color: #e5e8e9;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
 }
 
@@ -961,7 +959,7 @@ h3 {
   }
 
   .console-main {
-    padding: 30px 24px 48px;
+    padding: 32px 24px 52px;
   }
 }
 
@@ -1005,22 +1003,17 @@ h3 {
   }
 
   .console-main {
-    padding: 24px 16px 38px;
+    padding: 28px 16px 42px;
   }
 
   .overview-grid {
     grid-template-columns: 1fr;
+    gap: 18px;
+    padding: 20px;
   }
 
-  .overview-grid > div,
-  .overview-grid > div:nth-last-child(-n + 2) {
-    min-height: 68px;
-    border-right: 0;
-    border-bottom: 1px solid #303030;
-  }
-
-  .overview-grid > div:last-child {
-    border-bottom: 0;
+  .overview-grid > div {
+    min-height: 44px;
   }
 
   .evidence-content {

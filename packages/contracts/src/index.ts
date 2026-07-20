@@ -15,3 +15,15 @@ export {
   type AndroidDevice,
   type DeviceListResponse,
 } from "./devices.js";
+export {
+  deviceActionAuditSchema,
+  deviceActionHistoryResponseSchema,
+  deviceActionResultSchema,
+  deviceControlActionSchema,
+  deviceUiTreeResponseSchema,
+  type DeviceActionAudit,
+  type DeviceActionHistoryResponse,
+  type DeviceActionResult,
+  type DeviceControlAction,
+  type DeviceUiTreeResponse,
+} from "./device-control.js";

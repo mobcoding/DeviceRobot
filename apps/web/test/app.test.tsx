@@ -56,15 +56,69 @@ const devicesResponse = {
   refreshedAt: "2026-07-20T10:00:00.000Z",
 };
 
-function mockApis(options: { healthError?: Error } = {}): { getDeviceRequests: () => number } {
-  let deviceRequests = 0;
+const uiTreeResponse = {
+  serial: "8B3Y0THX0",
+  xml: '<?xml version="1.0"?><hierarchy rotation="0" />',
+  capturedAt: "2026-07-20T10:00:00.000Z",
+};
 
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+function mockApis(options: { healthError?: Error } = {}): {
+  getDeviceRequests: () => number;
+  getActionRequests: () => number;
+} {
+  let deviceRequests = 0;
+  let actionRequests = 0;
+  const actionHistory = {
+    serial: "8B3Y0THX0",
+    actions: [] as Array<{
+      id: string;
+      serial: string;
+      action: { action: "ui.back" };
+      success: true;
+      startedAt: string;
+      finishedAt: string;
+    }>,
+  };
+
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url =
       typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const method = init?.method ?? (input instanceof Request ? input.method : "GET");
 
     if (url.includes("/api/v1/devices")) {
       deviceRequests += 1;
+
+      if (url.includes("/ui-tree")) {
+        return new Response(JSON.stringify(uiTreeResponse), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (url.includes("/actions")) {
+        if (method === "POST") {
+          actionRequests += 1;
+          const recordedAction = {
+            id: "123e4567-e89b-12d3-a456-426614174000",
+            serial: "8B3Y0THX0",
+            action: { action: "ui.back" as const },
+            success: true as const,
+            startedAt: "2026-07-20T10:00:00.000Z",
+            finishedAt: "2026-07-20T10:00:01.000Z",
+          };
+          actionHistory.actions = [recordedAction, ...actionHistory.actions];
+          return new Response(JSON.stringify(recordedAction), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        return new Response(JSON.stringify(actionHistory), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
       return new Response(JSON.stringify(devicesResponse), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -81,7 +135,7 @@ function mockApis(options: { healthError?: Error } = {}): { getDeviceRequests: (
     });
   });
 
-  return { getDeviceRequests: () => deviceRequests };
+  return { getDeviceRequests: () => deviceRequests, getActionRequests: () => actionRequests };
 }
 
 describe("DeviceRobot Web UI", () => {
@@ -139,7 +193,7 @@ describe("DeviceRobot Web UI", () => {
     expect(
       await screen.findByRole("heading", { level: 2, name: "Pixel 3 XL" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("8B3Y0THX0")).toBeInTheDocument();
+    expect(screen.getAllByText("8B3Y0THX0")).toHaveLength(2);
     expect(screen.getByText("37.0.0-14910828")).toBeInTheDocument();
     expect(screen.getByText("Ready")).toBeInTheDocument();
   });
@@ -155,5 +209,30 @@ describe("DeviceRobot Web UI", () => {
     await user.click(screen.getByRole("button", { name: "Refresh" }));
 
     await vi.waitFor(() => expect(getDeviceRequests()).toBeGreaterThan(initialRequests));
+  });
+
+  it("shows the selected device screenshot and UI hierarchy", async () => {
+    mockApis();
+    globalThis.location.hash = "#devices";
+    renderApp();
+
+    expect(
+      await screen.findByRole("region", { name: "Device control console" }),
+    ).toBeInTheDocument();
+    expect(screen.getByAltText("Device screenshot for Pixel 3 XL")).toBeInTheDocument();
+    expect(await screen.findByText(/hierarchy rotation/)).toBeInTheDocument();
+  });
+
+  it("sends a structured back action from the control console", async () => {
+    const { getActionRequests } = mockApis();
+    const user = userEvent.setup();
+    globalThis.location.hash = "#devices";
+    renderApp();
+
+    await screen.findByRole("region", { name: "Device control console" });
+    await user.click(screen.getByRole("button", { name: "Back" }));
+
+    await vi.waitFor(() => expect(getActionRequests()).toBe(1));
+    expect(await screen.findByText("Completed")).toBeInTheDocument();
   });
 });

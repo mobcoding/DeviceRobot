@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { actionPlanSchema, deviceListResponseSchema, healthResponseSchema } from "../src/index.js";
+import {
+  actionPlanSchema,
+  deviceControlActionSchema,
+  deviceListResponseSchema,
+  deviceUiTreeResponseSchema,
+  healthResponseSchema,
+} from "../src/index.js";
 
 describe("shared contracts", () => {
   it("accepts a valid health response", () => {
@@ -47,5 +53,27 @@ describe("shared contracts", () => {
     });
 
     expect(response.devices[0]?.model).toBe("Pixel 3 XL");
+  });
+
+  it("accepts only structured direct device controls", () => {
+    expect(
+      deviceControlActionSchema.parse({
+        action: "ui.swipe",
+        startX: 10,
+        startY: 20,
+        endX: 30,
+        endY: 40,
+      }),
+    ).toMatchObject({ action: "ui.swipe", endY: 40 });
+    expect(
+      deviceControlActionSchema.safeParse({ action: "app.launch", appId: "not a package" }).success,
+    ).toBe(false);
+    expect(
+      deviceUiTreeResponseSchema.parse({
+        serial: "device-1",
+        xml: "<hierarchy />",
+        capturedAt: "2026-07-20T10:00:00.000Z",
+      }),
+    ).toMatchObject({ serial: "device-1" });
   });
 });

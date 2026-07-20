@@ -40,7 +40,7 @@ describe("DeviceRobot Agent", () => {
     const migrationCount = reopened.database.sqlite
       .prepare("SELECT COUNT(*) AS count FROM schema_migrations")
       .get() as { count: number };
-    expect(migrationCount.count).toBe(1);
+    expect(migrationCount.count).toBe(2);
     await reopened.app.close();
   });
 
@@ -104,5 +104,62 @@ describe("DeviceRobot Agent", () => {
       devices: [{ serial: "device-1", model: "Pixel 3 XL" }],
     });
     await app.close();
+  });
+
+  it("serves device control data and records action audits", async () => {
+    const { app } = await createAgentApp({
+      localAppData: createTemporaryRoot(),
+      deviceControlService: {
+        captureScreenshot: async () =>
+          Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        readUiTree: async (serial) => ({
+          serial,
+          xml: '<?xml version="1.0"?><hierarchy />',
+          capturedAt: "2026-07-20T10:00:00.000Z",
+        }),
+        execute: async () => ({
+          startedAt: "2026-07-20T10:00:00.000Z",
+          finishedAt: "2026-07-20T10:00:01.000Z",
+          message: "completed",
+        }),
+      },
+    });
+    const headers = { host: "127.0.0.1:43110" };
+
+    try {
+      const screenshot = await app.inject({
+        method: "GET",
+        url: "/api/v1/devices/device-1/screenshot",
+        headers,
+      });
+      const tree = await app.inject({
+        method: "GET",
+        url: "/api/v1/devices/device-1/ui-tree",
+        headers,
+      });
+      const action = await app.inject({
+        method: "POST",
+        url: "/api/v1/devices/device-1/actions",
+        headers,
+        payload: { action: "ui.back" },
+      });
+      const history = await app.inject({
+        method: "GET",
+        url: "/api/v1/devices/device-1/actions",
+        headers,
+      });
+
+      expect(screenshot.statusCode).toBe(200);
+      expect(screenshot.headers["content-type"]).toContain("image/png");
+      expect(tree.json()).toMatchObject({ serial: "device-1" });
+      expect((tree.json() as { xml: string }).xml).toMatch(/^<\?xml/);
+      expect(action.json()).toMatchObject({ serial: "device-1", action: { action: "ui.back" } });
+      expect(history.json()).toMatchObject({
+        serial: "device-1",
+        actions: [{ success: true, action: { action: "ui.back" } }],
+      });
+    } finally {
+      await app.close();
+    }
   });
 });

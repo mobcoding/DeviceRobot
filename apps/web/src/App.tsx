@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 
 import { fetchDevices } from "./api/devices";
 import { fetchHealth } from "./api/health";
+import { DeviceControlPanel } from "./components/DeviceControlPanel";
 
 const viewIds = ["overview", "projects", "devices", "conversations", "runs", "reports"] as const;
 type ViewId = (typeof viewIds)[number];
@@ -26,7 +27,8 @@ const navigationItems: readonly NavigationItem[] = [
 const roadmap = [
   { label: "Workspace foundation", status: "Ready" },
   { label: "ADB device discovery", status: "Ready" },
-  { label: "Screen control", status: "Planned" },
+  { label: "Screen control", status: "Ready" },
+  { label: "Appium execution", status: "Planned" },
   { label: "Source-aware AI testing", status: "Planned" },
 ] as const;
 
@@ -153,14 +155,24 @@ function deviceStateLabel(state: string): string {
 
 function DevicesView({ deviceQuery }: { deviceQuery: DevicesQuery }): React.JSX.Element {
   const response = deviceQuery.data;
-  const readyDevices = response?.devices.filter(
-    (device) => device.state === "device" || device.state === "emulator",
-  );
+  const readyDevices =
+    response?.devices.filter(
+      (device) => device.state === "device" || device.state === "emulator",
+    ) ?? [];
+  const [selectedSerial, setSelectedSerial] = useState<string>();
+  const selectedDevice = readyDevices.find((device) => device.serial === selectedSerial);
+
+  useEffect(() => {
+    if (selectedDevice === undefined && readyDevices[0] !== undefined) {
+      setSelectedSerial(readyDevices[0].serial);
+    }
+  }, [readyDevices, selectedDevice]);
+
   const statusText = deviceQuery.isPending
     ? "Scanning"
     : deviceQuery.isError || response?.adb.available === false
       ? "ADB unavailable"
-      : `${readyDevices?.length ?? 0} ready`;
+      : `${readyDevices.length} ready`;
 
   return (
     <>
@@ -217,7 +229,7 @@ function DevicesView({ deviceQuery }: { deviceQuery: DevicesQuery }): React.JSX.
         <article className="metric-card">
           <span>Detected</span>
           <strong>{response?.devices.length ?? "--"}</strong>
-          <small>{readyDevices?.length ?? 0} available for automation</small>
+          <small>{readyDevices.length} available for automation</small>
         </article>
       </section>
 
@@ -280,11 +292,24 @@ function DevicesView({ deviceQuery }: { deviceQuery: DevicesQuery }): React.JSX.
                     <dd>{device.transportId ?? device.path ?? device.connection}</dd>
                   </div>
                 </dl>
+
+                {isReady && (
+                  <button
+                    className="device-control-button"
+                    type="button"
+                    aria-pressed={device.serial === selectedSerial}
+                    onClick={() => setSelectedSerial(device.serial)}
+                  >
+                    {device.serial === selectedSerial ? "Controls active" : "Open controls"}
+                  </button>
+                )}
               </article>
             );
           })}
         </section>
       )}
+
+      <DeviceControlPanel device={selectedDevice} />
     </>
   );
 }

@@ -24,6 +24,25 @@ const migrations: Migration[] = [
       );
     `,
   },
+  {
+    version: 2,
+    name: "device-action-audit",
+    sql: `
+      CREATE TABLE IF NOT EXISTS device_action_audits (
+        id TEXT PRIMARY KEY,
+        serial TEXT NOT NULL,
+        action_name TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        success INTEGER NOT NULL,
+        message TEXT,
+        started_at TEXT NOT NULL,
+        finished_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS device_action_audits_serial_finished_at
+        ON device_action_audits (serial, finished_at DESC);
+    `,
+  },
 ];
 
 export type DatabaseHandle = {

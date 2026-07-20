@@ -2,11 +2,32 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import fastifyStatic from "@fastify/static";
 import { ensureAgentDirectories, resolveAgentPaths, type AgentPaths } from "@device-robot/config";
-import { deviceListResponseSchema, healthResponseSchema } from "@device-robot/contracts";
-import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
+import {
+  deviceActionHistoryResponseSchema,
+  deviceActionResultSchema,
+  deviceControlActionSchema,
+  deviceListResponseSchema,
+  deviceUiTreeResponseSchema,
+  healthResponseSchema,
+} from "@device-robot/contracts";
+import Fastify, {
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyServerOptions,
+} from "fastify";
 
 import { openDatabase, type DatabaseHandle } from "./db/database.js";
+import {
+  AdbDeviceControlService,
+  DeviceControlError,
+  type DeviceControlService,
+} from "./devices/adb-device-control-service.js";
 import { AdbDeviceService, type DeviceDiscoveryService } from "./devices/adb-device-service.js";
+import {
+  createFailedActionAudit,
+  SqliteDeviceActionAuditStore,
+  type DeviceActionAuditStore,
+} from "./devices/device-action-audit-store.js";
 import { isAllowedOrigin, isLoopbackHost } from "./security/loopback.js";
 
 export const AGENT_VERSION = "0.1.0";
@@ -18,6 +39,8 @@ export type CreateAgentAppOptions = {
   serveWeb?: boolean;
   webRoot?: string;
   deviceService?: DeviceDiscoveryService;
+  deviceControlService?: DeviceControlService;
+  deviceActionAuditStore?: DeviceActionAuditStore;
 };
 
 export type AgentApp = {
@@ -25,10 +48,34 @@ export type AgentApp = {
   database: DatabaseHandle;
   paths: AgentPaths;
   deviceService: DeviceDiscoveryService;
+  deviceControlService: DeviceControlService;
+  deviceActionAuditStore: DeviceActionAuditStore;
 };
 
 function defaultWebRoot(): string {
   return resolve(import.meta.dirname, "../../web/dist");
+}
+
+function parseSerial(params: unknown): string {
+  if (typeof params !== "object" || params === null) {
+    throw new DeviceControlError("A device serial is required", 400);
+  }
+
+  const serial = (params as Record<string, unknown>).serial;
+  if (typeof serial !== "string" || serial.trim().length === 0 || serial.length > 256) {
+    throw new DeviceControlError("A valid device serial is required", 400);
+  }
+
+  return serial;
+}
+
+function controlErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
+  if (error instanceof DeviceControlError) {
+    return reply.code(error.statusCode).send({ error: error.message });
+  }
+
+  const message = error instanceof Error ? error.message : "Device control request failed";
+  return reply.code(500).send({ error: message });
 }
 
 export async function createAgentApp(options: CreateAgentAppOptions = {}): Promise<AgentApp> {
@@ -40,6 +87,10 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
   const shouldServeWeb = options.serveWeb ?? false;
   const webAvailable = shouldServeWeb && existsSync(webRoot);
   const deviceService = options.deviceService ?? new AdbDeviceService();
+  const deviceControlService =
+    options.deviceControlService ?? new AdbDeviceControlService({ deviceService });
+  const deviceActionAuditStore =
+    options.deviceActionAuditStore ?? new SqliteDeviceActionAuditStore(database.sqlite);
 
   const app = Fastify({
     logger: options.logger ?? false,
@@ -70,6 +121,69 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     return deviceListResponseSchema.parse(await deviceService.listDevices());
   });
 
+  app.get("/api/v1/devices/:serial/screenshot", async (request, reply) => {
+    try {
+      const screenshot = await deviceControlService.captureScreenshot(parseSerial(request.params));
+      return reply.header("Cache-Control", "no-store").type("image/png").send(screenshot);
+    } catch (error) {
+      return controlErrorReply(reply, error);
+    }
+  });
+
+  app.get("/api/v1/devices/:serial/ui-tree", async (request, reply) => {
+    try {
+      const response = await deviceControlService.readUiTree(parseSerial(request.params));
+      return deviceUiTreeResponseSchema.parse(response);
+    } catch (error) {
+      return controlErrorReply(reply, error);
+    }
+  });
+
+  app.get("/api/v1/devices/:serial/actions", async (request, reply) => {
+    try {
+      const serial = parseSerial(request.params);
+      return deviceActionHistoryResponseSchema.parse({
+        serial,
+        actions: deviceActionAuditStore.list(serial),
+      });
+    } catch (error) {
+      return controlErrorReply(reply, error);
+    }
+  });
+
+  app.post("/api/v1/devices/:serial/actions", async (request, reply) => {
+    let serial: string;
+    let action: ReturnType<typeof deviceControlActionSchema.parse>;
+
+    try {
+      serial = parseSerial(request.params);
+      action = deviceControlActionSchema.parse(request.body);
+    } catch (error) {
+      return controlErrorReply(
+        reply,
+        error instanceof DeviceControlError
+          ? error
+          : new DeviceControlError("The device action payload is invalid", 400),
+      );
+    }
+
+    const requestedAt = new Date().toISOString();
+    try {
+      const execution = await deviceControlService.execute(serial, action);
+      const audit = deviceActionAuditStore.record({
+        serial,
+        action,
+        success: true,
+        ...execution,
+      });
+      return deviceActionResultSchema.parse(audit);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Device action failed";
+      deviceActionAuditStore.record(createFailedActionAudit(serial, action, requestedAt, message));
+      return controlErrorReply(reply, error);
+    }
+  });
+
   if (webAvailable) {
     await app.register(fastifyStatic, {
       root: webRoot,
@@ -89,5 +203,5 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     database.close();
   });
 
-  return { app, database, paths, deviceService };
+  return { app, database, paths, deviceService, deviceControlService, deviceActionAuditStore };
 }

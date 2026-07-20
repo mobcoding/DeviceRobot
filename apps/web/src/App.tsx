@@ -187,55 +187,57 @@ function ConsoleHeader({
         </select>
       </label>
 
-      <nav className="console-nav" aria-label="设备工作页签">
-        {visibleTabs.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            aria-current={activeView === tab.id ? "page" : undefined}
-            onClick={() => onNavigate(tab.id)}
-          >
-            <WorkspaceIcon viewId={tab.id} />
-            <span>{tab.label}</span>
-          </button>
-        ))}
-        <div className="workspace-add">
-          <button
-            type="button"
-            className="workspace-add-trigger"
-            aria-label="添加工作页签"
-            title="添加工作页签"
-            aria-expanded={addMenuOpen}
-            disabled={addableTabs.length === 0}
-            onClick={onToggleAddMenu}
-          >
-            <Plus aria-hidden="true" size={17} strokeWidth={1.8} />
-          </button>
-          {addMenuOpen && (
-            <div className="workspace-add-menu" aria-label="可添加的工作页签">
-              {addableTabs.map((tab) => (
-                <button key={tab.id} type="button" onClick={() => onAddView(tab.id)}>
-                  <WorkspaceIcon viewId={tab.id} />
-                  <span>{tab.label}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </nav>
+      <div className="workspace-header">
+        <nav className="console-nav" aria-label="设备工作页签">
+          {visibleTabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              aria-current={activeView === tab.id ? "page" : undefined}
+              onClick={() => onNavigate(tab.id)}
+            >
+              <WorkspaceIcon viewId={tab.id} />
+              <span>{tab.label}</span>
+            </button>
+          ))}
+          <div className="workspace-add">
+            <button
+              type="button"
+              className="workspace-add-trigger"
+              aria-label="添加工作页签"
+              title="添加工作页签"
+              aria-expanded={addMenuOpen}
+              disabled={addableTabs.length === 0}
+              onClick={onToggleAddMenu}
+            >
+              <Plus aria-hidden="true" size={17} strokeWidth={1.8} />
+            </button>
+            {addMenuOpen && (
+              <div className="workspace-add-menu" aria-label="可添加的工作页签">
+                {addableTabs.map((tab) => (
+                  <button key={tab.id} type="button" onClick={() => onAddView(tab.id)}>
+                    <WorkspaceIcon viewId={tab.id} />
+                    <span>{tab.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </nav>
 
-      <div className="console-runtime" aria-label="本地运行状态">
-        <span className="device-telemetry">{networkLabel(selectedDevice)}</span>
-        <span className="device-telemetry">{batteryLabel(selectedDevice)}</span>
-        <span
-          className={agentStatus === "已连接" ? "runtime-indicator healthy" : "runtime-indicator"}
-        >
-          Agent {agentStatus}
-        </span>
-        <span className={adbAvailable ? "runtime-indicator healthy" : "runtime-indicator"}>
-          ADB {adbAvailable ? "就绪" : "不可用"}
-        </span>
-        <AppiumRuntimePanel variant="compact" />
+        <div className="console-runtime" aria-label="本地运行状态">
+          <span className="device-telemetry">{networkLabel(selectedDevice)}</span>
+          <span className="device-telemetry">{batteryLabel(selectedDevice)}</span>
+          <span
+            className={agentStatus === "已连接" ? "runtime-indicator healthy" : "runtime-indicator"}
+          >
+            Agent {agentStatus}
+          </span>
+          <span className={adbAvailable ? "runtime-indicator healthy" : "runtime-indicator"}>
+            ADB {adbAvailable ? "就绪" : "不可用"}
+          </span>
+          <AppiumRuntimePanel variant="compact" />
+        </div>
       </div>
     </header>
   );

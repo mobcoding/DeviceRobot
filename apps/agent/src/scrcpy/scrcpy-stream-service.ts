@@ -8,6 +8,8 @@ import { AdbScrcpyClient, AdbScrcpyOptionsLatest } from "@yume-chan/adb-scrcpy";
 import { AdbServerNodeTcpConnector } from "@yume-chan/adb-server-node-tcp";
 import {
   AndroidKeyEventAction,
+  AndroidKeyCode,
+  AndroidKeyEventMeta,
   AndroidMotionEventAction,
   AndroidMotionEventButton,
   ScrcpyVideoCodecId,
@@ -43,7 +45,8 @@ export type ScrcpyControlCommand =
       videoWidth: number;
       videoHeight: number;
     }
-  | { type: "back" };
+  | { type: "back" }
+  | { type: "key"; key: "home" | "recentApps" | "volumeUp" | "volumeDown" };
 
 export interface ScrcpyStreamService {
   subscribe(serial: string, subscriber: ScrcpyStreamSubscriber): Promise<() => void>;
@@ -101,6 +104,16 @@ export function parseScrcpyControlCommand(value: unknown): ScrcpyControlCommand 
   const message = value as Record<string, unknown>;
   if (message.type === "back") {
     return { type: "back" };
+  }
+
+  if (
+    message.type === "key" &&
+    (message.key === "home" ||
+      message.key === "recentApps" ||
+      message.key === "volumeUp" ||
+      message.key === "volumeDown")
+  ) {
+    return { type: "key", key: message.key };
   }
 
   if (
@@ -308,6 +321,28 @@ export class AdbScrcpyStreamService implements ScrcpyStreamService {
     if (command.type === "back") {
       await session.controller.backOrScreenOn(AndroidKeyEventAction.Down);
       await session.controller.backOrScreenOn(AndroidKeyEventAction.Up);
+      return;
+    }
+
+    if (command.type === "key") {
+      const keyCode = {
+        home: AndroidKeyCode.AndroidHome,
+        recentApps: AndroidKeyCode.AndroidAppSwitch,
+        volumeUp: AndroidKeyCode.VolumeUp,
+        volumeDown: AndroidKeyCode.VolumeDown,
+      }[command.key];
+      await session.controller.injectKeyCode({
+        action: AndroidKeyEventAction.Down,
+        keyCode,
+        repeat: 0,
+        metaState: AndroidKeyEventMeta.None,
+      });
+      await session.controller.injectKeyCode({
+        action: AndroidKeyEventAction.Up,
+        keyCode,
+        repeat: 0,
+        metaState: AndroidKeyEventMeta.None,
+      });
       return;
     }
 

@@ -311,6 +311,31 @@ describe("DeviceRobot Web UI", () => {
     expect(screen.getByText("UI 层级与操作审计")).toBeInTheDocument();
   });
 
+  it("shows device quick controls by default and can collapse them", async () => {
+    mockApis();
+    const user = userEvent.setup();
+    renderApp();
+
+    const mirror = await screen.findByRole("region", { name: "屏幕镜像" });
+    expect(within(mirror).getByRole("button", { name: "主页" })).toBeInTheDocument();
+    expect(within(mirror).getByRole("button", { name: "返回" })).toBeInTheDocument();
+    expect(within(mirror).getByRole("button", { name: "最近任务" })).toBeInTheDocument();
+    expect(within(mirror).getByRole("button", { name: "音量增加" })).toBeInTheDocument();
+    expect(within(mirror).getByRole("button", { name: "音量减小" })).toBeInTheDocument();
+
+    await user.click(within(mirror).getByRole("button", { name: "主页" }));
+    await vi.waitFor(() =>
+      expect(MockWebSocket.instances[0]?.sent).toContain('{"type":"key","key":"home"}'),
+    );
+
+    await user.click(within(mirror).getByRole("button", { name: "收起快捷操作" }));
+    expect(within(mirror).queryByRole("button", { name: "主页" })).not.toBeInTheDocument();
+    expect(within(mirror).getByRole("button", { name: "展开快捷操作" })).toBeInTheDocument();
+
+    await user.click(within(mirror).getByRole("button", { name: "展开快捷操作" }));
+    expect(within(mirror).getByRole("button", { name: "主页" })).toBeInTheDocument();
+  });
+
   it("maps a mirror click to immediate scrcpy pointer messages", async () => {
     const { getActionRequests } = mockApis();
     renderApp();

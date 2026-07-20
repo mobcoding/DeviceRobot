@@ -385,7 +385,9 @@ summary:focus-visible {
 .mirror-screen-frame {
   position: relative;
   display: grid;
-  width: 100%;
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
   height: auto;
   max-height: calc(100vh - 150px);
   aspect-ratio: 9 / 19;
@@ -395,6 +397,71 @@ summary:focus-visible {
   border: 1px solid #303030;
   border-radius: 4px;
   background: #020202;
+}
+
+.mirror-workspace {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.mirror-quick-controls {
+  display: flex;
+  width: 38px;
+  min-width: 38px;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 0;
+  border-right: 1px solid #303030;
+  background: #111111;
+}
+
+.mirror-quick-controls.collapsed {
+  width: 30px;
+  min-width: 30px;
+}
+
+.mirror-quick-groups {
+  display: flex;
+  width: 100%;
+  flex: 1;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.mirror-quick-group {
+  display: grid;
+  gap: 3px;
+  justify-items: center;
+}
+
+.mirror-quick-group-secondary {
+  padding-bottom: 6px;
+  border-bottom: 1px solid #303030;
+}
+
+.mirror-quick-button {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  color: #b8c1c5;
+  background: transparent;
+}
+
+.mirror-quick-button:hover {
+  color: #ffffff;
+  background: #292929;
+}
+
+.mirror-quick-collapse {
+  flex: 0 0 auto;
+  margin-top: 5px;
 }
 
 .mirror-screen-frame canvas {

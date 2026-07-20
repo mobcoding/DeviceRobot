@@ -24,7 +24,7 @@ describe("scrcpy stream protocol", () => {
     expect([...result.subarray(9)]).toEqual([0, 0, 0, 2, 0x65, 0x88]);
   });
 
-  it("accepts only bounded pointer and back control commands", () => {
+  it("accepts only bounded pointer, back, and approved key control commands", () => {
     expect(
       scrcpyStreamProtocol.parseScrcpyControlCommand({
         type: "pointer",
@@ -39,6 +39,13 @@ describe("scrcpy stream protocol", () => {
     expect(scrcpyStreamProtocol.parseScrcpyControlCommand({ type: "back" })).toEqual({
       type: "back",
     });
+    expect(scrcpyStreamProtocol.parseScrcpyControlCommand({ type: "key", key: "home" })).toEqual({
+      type: "key",
+      key: "home",
+    });
+    expect(
+      scrcpyStreamProtocol.parseScrcpyControlCommand({ type: "key", key: "power" }),
+    ).toBeUndefined();
     expect(
       scrcpyStreamProtocol.parseScrcpyControlCommand({
         type: "pointer",

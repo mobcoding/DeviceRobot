@@ -1,4 +1,14 @@
-import { ArrowLeft, LoaderCircle, RefreshCw } from "lucide-react";
+import {
+  ArrowLeft,
+  House,
+  ListVideo,
+  LoaderCircle,
+  PanelLeftClose,
+  PanelLeftOpen,
+  RefreshCw,
+  Volume1,
+  Volume2,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AndroidDevice } from "@device-robot/contracts";
 
@@ -29,7 +39,8 @@ type StreamControl =
       videoWidth: number;
       videoHeight: number;
     }
-  | { type: "back" };
+  | { type: "back" }
+  | { type: "key"; key: "home" | "recentApps" | "volumeUp" | "volumeDown" };
 
 type ActivePointer = DevicePoint & {
   pointerId: number;
@@ -119,6 +130,7 @@ export function DeviceMirrorPanel({ device }: DeviceMirrorPanelProps): React.JSX
   const [streamError, setStreamError] = useState<string>();
   const [controlError, setControlError] = useState<string>();
   const [screenSize, setScreenSize] = useState<DevicePoint>();
+  const [quickControlsCollapsed, setQuickControlsCollapsed] = useState(false);
   const serial = device.serial;
 
   useEffect(() => {
@@ -414,15 +426,6 @@ export function DeviceMirrorPanel({ device }: DeviceMirrorPanelProps): React.JSX
           <button
             type="button"
             className="mirror-refresh"
-            aria-label="返回"
-            title="返回"
-            onClick={() => sendControl({ type: "back" })}
-          >
-            <ArrowLeft aria-hidden="true" size={16} strokeWidth={1.8} />
-          </button>
-          <button
-            type="button"
-            className="mirror-refresh"
             aria-label="重新连接实时画面"
             title="重新连接实时画面"
             onClick={() => setStreamAttempt((attempt) => attempt + 1)}
@@ -431,23 +434,96 @@ export function DeviceMirrorPanel({ device }: DeviceMirrorPanelProps): React.JSX
           </button>
         </div>
       </header>
-      <div className="mirror-screen-frame">
-        <canvas
-          ref={canvasRef}
-          className="interactive-device-screen"
-          role="img"
-          aria-label={`设备实时画面：${deviceName(device)}`}
-          aria-busy={streamState === "connecting"}
-          onPointerCancel={handlePointerCancel}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-        />
-        {streamState === "connecting" && (
-          <span className="mirror-operation" aria-label="正在连接实时画面">
-            <LoaderCircle aria-hidden="true" size={20} strokeWidth={1.8} />
-          </span>
-        )}
+      <div className="mirror-workspace">
+        <aside
+          className={`mirror-quick-controls${quickControlsCollapsed ? " collapsed" : ""}`}
+          aria-label="设备快捷操作"
+        >
+          {!quickControlsCollapsed && (
+            <div className="mirror-quick-groups">
+              <div className="mirror-quick-group">
+                <button
+                  type="button"
+                  className="mirror-quick-button"
+                  aria-label="主页"
+                  title="主页"
+                  onClick={() => sendControl({ type: "key", key: "home" })}
+                >
+                  <House aria-hidden="true" size={18} strokeWidth={1.8} />
+                </button>
+                <button
+                  type="button"
+                  className="mirror-quick-button"
+                  aria-label="返回"
+                  title="返回"
+                  onClick={() => sendControl({ type: "back" })}
+                >
+                  <ArrowLeft aria-hidden="true" size={18} strokeWidth={1.8} />
+                </button>
+                <button
+                  type="button"
+                  className="mirror-quick-button"
+                  aria-label="最近任务"
+                  title="最近任务"
+                  onClick={() => sendControl({ type: "key", key: "recentApps" })}
+                >
+                  <ListVideo aria-hidden="true" size={18} strokeWidth={1.8} />
+                </button>
+              </div>
+              <div className="mirror-quick-group mirror-quick-group-secondary">
+                <button
+                  type="button"
+                  className="mirror-quick-button"
+                  aria-label="音量增加"
+                  title="音量增加"
+                  onClick={() => sendControl({ type: "key", key: "volumeUp" })}
+                >
+                  <Volume2 aria-hidden="true" size={18} strokeWidth={1.8} />
+                </button>
+                <button
+                  type="button"
+                  className="mirror-quick-button"
+                  aria-label="音量减小"
+                  title="音量减小"
+                  onClick={() => sendControl({ type: "key", key: "volumeDown" })}
+                >
+                  <Volume1 aria-hidden="true" size={18} strokeWidth={1.8} />
+                </button>
+              </div>
+            </div>
+          )}
+          <button
+            type="button"
+            className="mirror-quick-button mirror-quick-collapse"
+            aria-label={quickControlsCollapsed ? "展开快捷操作" : "收起快捷操作"}
+            title={quickControlsCollapsed ? "展开快捷操作" : "收起快捷操作"}
+            onClick={() => setQuickControlsCollapsed((collapsed) => !collapsed)}
+          >
+            {quickControlsCollapsed ? (
+              <PanelLeftOpen aria-hidden="true" size={18} strokeWidth={1.8} />
+            ) : (
+              <PanelLeftClose aria-hidden="true" size={18} strokeWidth={1.8} />
+            )}
+          </button>
+        </aside>
+        <div className="mirror-screen-frame">
+          <canvas
+            ref={canvasRef}
+            className="interactive-device-screen"
+            role="img"
+            aria-label={`设备实时画面：${deviceName(device)}`}
+            aria-busy={streamState === "connecting"}
+            onPointerCancel={handlePointerCancel}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+          />
+          {streamState === "connecting" && (
+            <span className="mirror-operation" aria-label="正在连接实时画面">
+              <LoaderCircle aria-hidden="true" size={20} strokeWidth={1.8} />
+            </span>
+          )}
+        </div>
       </div>
       {error !== undefined && <p className="mirror-error">{error}</p>}
     </section>

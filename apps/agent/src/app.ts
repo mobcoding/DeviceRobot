@@ -271,6 +271,10 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
         return;
       }
 
+      if (command.type === "key") {
+        return;
+      }
+
       if (command.action === "down") {
         pointerStarts.set(command.pointerId, {
           x: command.x,

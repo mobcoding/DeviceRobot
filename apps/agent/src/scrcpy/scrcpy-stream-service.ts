@@ -46,7 +46,7 @@ export type ScrcpyControlCommand =
       videoHeight: number;
     }
   | { type: "back" }
-  | { type: "key"; key: "home" | "recentApps" | "volumeUp" | "volumeDown" };
+  | { type: "key"; key: "home" | "recentApps" | "volumeUp" | "volumeDown" | "power" };
 
 export interface ScrcpyStreamService {
   subscribe(serial: string, subscriber: ScrcpyStreamSubscriber): Promise<() => void>;
@@ -111,7 +111,8 @@ export function parseScrcpyControlCommand(value: unknown): ScrcpyControlCommand 
     (message.key === "home" ||
       message.key === "recentApps" ||
       message.key === "volumeUp" ||
-      message.key === "volumeDown")
+      message.key === "volumeDown" ||
+      message.key === "power")
   ) {
     return { type: "key", key: message.key };
   }
@@ -330,6 +331,7 @@ export class AdbScrcpyStreamService implements ScrcpyStreamService {
         recentApps: AndroidKeyCode.AndroidAppSwitch,
         volumeUp: AndroidKeyCode.VolumeUp,
         volumeDown: AndroidKeyCode.VolumeDown,
+        power: AndroidKeyCode.Power,
       }[command.key];
       await session.controller.injectKeyCode({
         action: AndroidKeyEventAction.Down,

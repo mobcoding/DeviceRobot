@@ -403,10 +403,16 @@ describe("DeviceRobot Web UI", () => {
     expect(within(mirror).getByRole("button", { name: "最近任务" })).toBeInTheDocument();
     expect(within(mirror).getByRole("button", { name: "音量增加" })).toBeInTheDocument();
     expect(within(mirror).getByRole("button", { name: "音量减小" })).toBeInTheDocument();
+    expect(within(mirror).getByRole("button", { name: "电源（亮屏或息屏）" })).toBeInTheDocument();
 
     await user.click(within(mirror).getByRole("button", { name: "主页" }));
     await vi.waitFor(() =>
       expect(MockWebSocket.instances[0]?.sent).toContain('{"type":"key","key":"home"}'),
+    );
+
+    await user.click(within(mirror).getByRole("button", { name: "电源（亮屏或息屏）" }));
+    await vi.waitFor(() =>
+      expect(MockWebSocket.instances[0]?.sent).toContain('{"type":"key","key":"power"}'),
     );
 
     await user.click(within(mirror).getByRole("button", { name: "收起快捷操作" }));

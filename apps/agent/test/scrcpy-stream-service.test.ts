@@ -43,8 +43,12 @@ describe("scrcpy stream protocol", () => {
       type: "key",
       key: "home",
     });
+    expect(scrcpyStreamProtocol.parseScrcpyControlCommand({ type: "key", key: "power" })).toEqual({
+      type: "key",
+      key: "power",
+    });
     expect(
-      scrcpyStreamProtocol.parseScrcpyControlCommand({ type: "key", key: "power" }),
+      scrcpyStreamProtocol.parseScrcpyControlCommand({ type: "key", key: "camera" }),
     ).toBeUndefined();
     expect(
       scrcpyStreamProtocol.parseScrcpyControlCommand({

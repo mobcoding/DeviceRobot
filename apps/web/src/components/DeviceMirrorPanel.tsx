@@ -5,6 +5,7 @@ import {
   House,
   ListVideo,
   LoaderCircle,
+  Power,
   RefreshCw,
   Volume1,
   Volume2,
@@ -41,7 +42,7 @@ type StreamControl =
       videoHeight: number;
     }
   | { type: "back" }
-  | { type: "key"; key: "home" | "recentApps" | "volumeUp" | "volumeDown" };
+  | { type: "key"; key: "home" | "recentApps" | "volumeUp" | "volumeDown" | "power" };
 
 type ActivePointer = DevicePoint & {
   pointerId: number;
@@ -504,6 +505,15 @@ export function DeviceMirrorPanel({
                   onClick={() => sendControl({ type: "key", key: "volumeDown" })}
                 >
                   <Volume1 aria-hidden="true" size={18} strokeWidth={1.8} />
+                </button>
+                <button
+                  type="button"
+                  className="mirror-quick-button"
+                  aria-label="电源（亮屏或息屏）"
+                  title="电源（亮屏或息屏）"
+                  onClick={() => sendControl({ type: "key", key: "power" })}
+                >
+                  <Power aria-hidden="true" size={18} strokeWidth={1.8} />
                 </button>
               </div>
             </div>

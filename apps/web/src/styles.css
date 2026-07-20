@@ -636,6 +636,88 @@ h1 {
   margin-top: 18px;
 }
 
+.appium-runtime {
+  margin-top: 18px;
+  padding: 20px;
+  border: 1px solid rgba(139, 168, 205, 0.14);
+  border-radius: 8px;
+  background: rgba(10, 24, 42, 0.74);
+}
+
+.appium-runtime-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.appium-runtime-actions .compact-button {
+  padding: 0 12px;
+}
+
+.appium-runtime-actions .subtle-action {
+  color: #9db1c9;
+  background: rgba(88, 110, 137, 0.08);
+}
+
+.appium-runtime-list {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid rgba(139, 168, 205, 0.1);
+  border-radius: 6px;
+  background: rgba(139, 168, 205, 0.08);
+}
+
+.appium-runtime-list > div {
+  min-width: 0;
+  padding: 13px;
+  background: rgba(8, 21, 37, 0.68);
+}
+
+.appium-runtime-list dt,
+.appium-runtime-list dd,
+.appium-runtime-list small {
+  display: block;
+}
+
+.appium-runtime-list dt {
+  color: #637a97;
+  font-size: 10px;
+}
+
+.appium-runtime-list dd {
+  margin: 8px 0 5px;
+  color: #b8c9dc;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.appium-runtime-list small {
+  overflow: hidden;
+  color: #7087a2;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appium-runtime-issues {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.appium-runtime-issues li {
+  padding: 8px 10px;
+  border-left: 2px solid #d3a74f;
+  color: #bca26d;
+  background: rgba(111, 82, 24, 0.12);
+  font-size: 11px;
+}
+
 .section-heading {
   margin-bottom: 18px;
 }
@@ -1006,6 +1088,10 @@ h1 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .appium-runtime-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .detail-grid {
     grid-template-columns: 1fr;
   }
@@ -1106,6 +1192,15 @@ h1 {
   }
 
   .action-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .appium-runtime-actions {
+    justify-content: flex-start;
+    margin-top: 14px;
+  }
+
+  .appium-runtime-list {
     grid-template-columns: 1fr;
   }
 

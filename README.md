@@ -4,7 +4,7 @@ DeviceRobot is a Windows-first, local Android AI testing workspace. The current 
 
 ## Current status
 
-The repository discovers locally connected Android devices through ADB and reports authorized, unauthorized, offline, USB, TCP, and emulator states using real device data. For an authorized device, the **Devices** workspace can capture a PNG screenshot, read a valid `uiautomator` XML hierarchy, and issue audited tap, long-press, text, swipe, back, app launch, and app stop actions. Source analysis, AI execution, Appium execution, scrcpy, and test reporting remain future work.
+The repository discovers locally connected Android devices through ADB and reports authorized, unauthorized, offline, USB, TCP, and emulator states using real device data. For an authorized device, the **Devices** workspace can capture a PNG screenshot, read a valid `uiautomator` XML hierarchy, and issue audited tap, long-press, text, swipe, back, app launch, and app stop actions. It also diagnoses the local Appium, UiAutomator2, Java, and Android SDK runtime, and starts or stops an Appium server restricted to `127.0.0.1:4723`. Source analysis, AI execution, DSL test-case execution, scrcpy, and test reporting remain future work.
 
 ## Requirements
 

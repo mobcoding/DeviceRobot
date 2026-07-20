@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   actionPlanSchema,
+  appiumRuntimeSchema,
   deviceControlActionSchema,
   deviceListResponseSchema,
   deviceUiTreeResponseSchema,
@@ -75,5 +76,29 @@ describe("shared contracts", () => {
         capturedAt: "2026-07-20T10:00:00.000Z",
       }),
     ).toMatchObject({ serial: "device-1" });
+  });
+
+  it("accepts a local Appium runtime diagnostic", () => {
+    expect(
+      appiumRuntimeSchema.parse({
+        status: "ready",
+        checkedAt: "2026-07-20T10:00:00.000Z",
+        appium: { available: true, version: "3.5.2" },
+        uiautomator2: {
+          available: true,
+          packageName: "appium-uiautomator2-driver",
+          version: "8.1.0",
+        },
+        java: { available: true, version: "21" },
+        androidSdk: { available: true, path: "D:\\Android\\Sdk" },
+        server: {
+          state: "stopped",
+          host: "127.0.0.1",
+          port: 4723,
+          logFile: "C:\\logs\\appium.log",
+        },
+        issues: [],
+      }),
+    ).toMatchObject({ status: "ready", server: { port: 4723 } });
   });
 });

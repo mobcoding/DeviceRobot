@@ -7,6 +7,7 @@ export {
   type Selector,
 } from "./action-plan.js";
 export { healthResponseSchema, type HealthResponse } from "./health.js";
+export { appiumRuntimeSchema, type AppiumRuntime } from "./appium.js";
 export {
   adbEnvironmentSchema,
   androidDeviceSchema,

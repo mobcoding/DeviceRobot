@@ -9,6 +9,7 @@ import {
   deviceListResponseSchema,
   deviceUiTreeResponseSchema,
   healthResponseSchema,
+  appiumRuntimeSchema,
 } from "@device-robot/contracts";
 import Fastify, {
   type FastifyInstance,
@@ -29,6 +30,7 @@ import {
   type DeviceActionAuditStore,
 } from "./devices/device-action-audit-store.js";
 import { isAllowedOrigin, isLoopbackHost } from "./security/loopback.js";
+import { AppiumRuntimeError, AppiumRuntimeService } from "./appium/appium-runtime-service.js";
 
 export const AGENT_VERSION = "0.1.0";
 
@@ -41,6 +43,7 @@ export type CreateAgentAppOptions = {
   deviceService?: DeviceDiscoveryService;
   deviceControlService?: DeviceControlService;
   deviceActionAuditStore?: DeviceActionAuditStore;
+  appiumRuntimeService?: AppiumRuntimeService;
 };
 
 export type AgentApp = {
@@ -50,6 +53,7 @@ export type AgentApp = {
   deviceService: DeviceDiscoveryService;
   deviceControlService: DeviceControlService;
   deviceActionAuditStore: DeviceActionAuditStore;
+  appiumRuntimeService: AppiumRuntimeService;
 };
 
 function defaultWebRoot(): string {
@@ -78,6 +82,15 @@ function controlErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
   return reply.code(500).send({ error: message });
 }
 
+function appiumErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
+  if (error instanceof AppiumRuntimeError) {
+    return reply.code(error.statusCode).send({ error: error.message });
+  }
+
+  const message = error instanceof Error ? error.message : "Appium runtime request failed";
+  return reply.code(500).send({ error: message });
+}
+
 export async function createAgentApp(options: CreateAgentAppOptions = {}): Promise<AgentApp> {
   const paths = options.paths ?? resolveAgentPaths(options.localAppData);
   ensureAgentDirectories(paths);
@@ -91,6 +104,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     options.deviceControlService ?? new AdbDeviceControlService({ deviceService });
   const deviceActionAuditStore =
     options.deviceActionAuditStore ?? new SqliteDeviceActionAuditStore(database.sqlite);
+  const appiumRuntimeService = options.appiumRuntimeService ?? new AppiumRuntimeService({ paths });
 
   const app = Fastify({
     logger: options.logger ?? false,
@@ -119,6 +133,26 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
 
   app.get("/api/v1/devices", async () => {
     return deviceListResponseSchema.parse(await deviceService.listDevices());
+  });
+
+  app.get("/api/v1/appium/runtime", async () => {
+    return appiumRuntimeSchema.parse(await appiumRuntimeService.inspect());
+  });
+
+  app.post("/api/v1/appium/runtime/start", async (_request, reply) => {
+    try {
+      return appiumRuntimeSchema.parse(await appiumRuntimeService.start());
+    } catch (error) {
+      return appiumErrorReply(reply, error);
+    }
+  });
+
+  app.post("/api/v1/appium/runtime/stop", async (_request, reply) => {
+    try {
+      return appiumRuntimeSchema.parse(await appiumRuntimeService.stop());
+    } catch (error) {
+      return appiumErrorReply(reply, error);
+    }
   });
 
   app.get("/api/v1/devices/:serial/screenshot", async (request, reply) => {
@@ -200,8 +234,17 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
   }
 
   app.addHook("onClose", async () => {
+    await appiumRuntimeService.dispose();
     database.close();
   });
 
-  return { app, database, paths, deviceService, deviceControlService, deviceActionAuditStore };
+  return {
+    app,
+    database,
+    paths,
+    deviceService,
+    deviceControlService,
+    deviceActionAuditStore,
+    appiumRuntimeService,
+  };
 }

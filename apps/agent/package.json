@@ -16,6 +16,8 @@
     "@device-robot/contracts": "workspace:*",
     "@devicefarmer/adbkit": "3.3.9",
     "@fastify/static": "10.1.0",
+    "appium": "3.5.2",
+    "appium-uiautomator2-driver": "8.1.0",
     "better-sqlite3": "12.11.1",
     "drizzle-orm": "0.45.2",
     "fastify": "5.10.0"

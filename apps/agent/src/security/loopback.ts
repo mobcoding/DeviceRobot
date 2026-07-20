@@ -33,8 +33,7 @@ export function isAllowedOrigin(
     const parsedOrigin = new URL(origin);
     return (
       (parsedOrigin.protocol === "http:" || parsedOrigin.protocol === "https:") &&
-      parsedOrigin.host.toLowerCase() === requestHost.toLowerCase() &&
-      loopbackHosts.has(parsedOrigin.hostname.toLowerCase())
+      isLoopbackHost(parsedOrigin.host)
     );
   } catch {
     return false;

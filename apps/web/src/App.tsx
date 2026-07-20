@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { fetchDevices } from "./api/devices";
 import { fetchHealth } from "./api/health";
 import { DeviceControlPanel } from "./components/DeviceControlPanel";
+import { AppiumRuntimePanel } from "./components/AppiumRuntimePanel";
 
 const viewIds = ["overview", "projects", "devices", "conversations", "runs", "reports"] as const;
 type ViewId = (typeof viewIds)[number];
@@ -318,6 +319,7 @@ function DevicesView({ deviceQuery }: { deviceQuery: DevicesQuery }): React.JSX.
       )}
 
       <DeviceControlPanel device={selectedDevice} />
+      <AppiumRuntimePanel />
     </>
   );
 }

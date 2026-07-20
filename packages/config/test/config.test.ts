@@ -23,5 +23,6 @@ describe("agent paths", () => {
 
     expect(paths.root).toBe(join(base, "AIMobileTester"));
     expect(paths.database).toBe(join(paths.root, "device-robot.sqlite"));
+    expect(paths.appiumHome).toBe(join(paths.root, "appium"));
   });
 });

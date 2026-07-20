@@ -71,6 +71,21 @@ describe("DeviceRobot Agent", () => {
     await app.close();
   });
 
+  it("allows a loopback Vite development origin on a different port", async () => {
+    const { app } = await createAgentApp({ localAppData: createTemporaryRoot() });
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/system/health",
+      headers: {
+        host: "127.0.0.1:43110",
+        origin: "http://127.0.0.1:5173",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    await app.close();
+  });
+
   it("returns devices from the injected discovery service", async () => {
     const { app } = await createAgentApp({
       localAppData: createTemporaryRoot(),

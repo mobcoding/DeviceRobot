@@ -10,6 +10,7 @@ export type AgentPaths = {
   root: string;
   database: string;
   logs: string;
+  appiumHome: string;
   repositories: string;
   artifacts: string;
   reports: string;
@@ -23,6 +24,7 @@ export function resolveAgentPaths(localAppData = process.env.LOCALAPPDATA): Agen
     root,
     database: join(root, "device-robot.sqlite"),
     logs: join(root, "logs"),
+    appiumHome: join(root, "appium"),
     repositories: join(root, "repositories"),
     artifacts: join(root, "artifacts"),
     reports: join(root, "reports"),
@@ -33,6 +35,7 @@ export function ensureAgentDirectories(paths: AgentPaths): void {
   for (const directory of [
     paths.root,
     paths.logs,
+    paths.appiumHome,
     paths.repositories,
     paths.artifacts,
     paths.reports,

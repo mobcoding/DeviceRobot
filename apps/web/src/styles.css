@@ -111,7 +111,7 @@ summary:focus-visible {
   min-width: 0;
   height: 54px;
   align-items: stretch;
-  padding-left: clamp(32px, 5vw, 100px);
+  padding-left: 18px;
 }
 
 .console-nav > button,
@@ -316,6 +316,10 @@ summary:focus-visible {
 .device-mirror {
   position: sticky;
   top: 68px;
+  display: flex;
+  width: 100%;
+  height: calc(100vh - 82px);
+  flex-direction: column;
 }
 
 .mirror-header {
@@ -368,8 +372,11 @@ summary:focus-visible {
 
 .mirror-screen-frame {
   display: grid;
-  min-height: 500px;
+  width: 100%;
+  height: auto;
   max-height: calc(100vh - 150px);
+  aspect-ratio: 9 / 19;
+  margin-block: auto;
   place-items: center;
   overflow: hidden;
   border: 1px solid #303030;
@@ -441,7 +448,7 @@ summary:focus-visible {
 .main-empty-state {
   width: 100%;
   max-width: 1110px;
-  margin: 0;
+  margin: 0 auto;
 }
 
 .overview-heading {
@@ -923,7 +930,7 @@ h3 {
   }
 
   .workspace-header {
-    padding-left: 36px;
+    padding-left: 18px;
   }
 
   .device-console-layout {
@@ -987,6 +994,7 @@ h3 {
 
   .device-mirror {
     position: static;
+    height: auto;
   }
 
   .mirror-screen-frame {

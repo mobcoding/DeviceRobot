@@ -15,6 +15,7 @@
     "@device-robot/config": "workspace:*",
     "@device-robot/contracts": "workspace:*",
     "@devicefarmer/adbkit": "3.3.9",
+    "@fastify/multipart": "9.3.0",
     "@fastify/static": "10.1.0",
     "@fastify/websocket": "11.3.0",
     "@yume-chan/adb": "2.6.0",

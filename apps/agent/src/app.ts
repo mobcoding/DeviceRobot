@@ -1,11 +1,15 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import fastifyStatic from "@fastify/static";
+import fastifyMultipart from "@fastify/multipart";
 import fastifyWebsocket from "@fastify/websocket";
 import { ensureAgentDirectories, resolveAgentPaths, type AgentPaths } from "@device-robot/config";
 import {
   deviceActionHistoryResponseSchema,
   deviceActionResultSchema,
+  apkArtifactSchema,
+  apkInstallRequestSchema,
+  apkInstallResponseSchema,
   deviceApplicationFilterSchema,
   deviceApplicationListResponseSchema,
   deviceControlActionSchema,
@@ -22,6 +26,13 @@ import Fastify, {
 } from "fastify";
 
 import { openDatabase, type DatabaseHandle } from "./db/database.js";
+import {
+  apkArtifactLimits,
+  ApkArtifactError,
+  LocalApkArtifactService,
+  type ApkArtifactService,
+} from "./apks/apk-artifact-service.js";
+import { SqliteApkInstallAuditStore } from "./apks/apk-install-audit-store.js";
 import {
   AdbDeviceControlService,
   DeviceControlError,
@@ -57,6 +68,7 @@ export type CreateAgentAppOptions = {
   deviceService?: DeviceDiscoveryService;
   deviceControlService?: DeviceControlService;
   deviceManagementService?: DeviceManagementService;
+  apkArtifactService?: ApkArtifactService;
   deviceActionAuditStore?: DeviceActionAuditStore;
   appiumRuntimeService?: AppiumRuntimeService;
   scrcpyStreamService?: ScrcpyStreamService;
@@ -69,6 +81,7 @@ export type AgentApp = {
   deviceService: DeviceDiscoveryService;
   deviceControlService: DeviceControlService;
   deviceManagementService: DeviceManagementService;
+  apkArtifactService: ApkArtifactService;
   deviceActionAuditStore: DeviceActionAuditStore;
   appiumRuntimeService: AppiumRuntimeService;
   scrcpyStreamService: ScrcpyStreamService;
@@ -89,6 +102,21 @@ function parseSerial(params: unknown): string {
   }
 
   return serial;
+}
+
+function parseArtifactId(params: unknown): string {
+  if (typeof params !== "object" || params === null) {
+    throw new ApkArtifactError("缺少 APK 上传记录。", 400);
+  }
+
+  const artifactId = (params as Record<string, unknown>).artifactId;
+  if (
+    typeof artifactId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(artifactId)
+  ) {
+    throw new ApkArtifactError("APK 上传记录无效。", 400);
+  }
+  return artifactId;
 }
 
 function controlErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
@@ -145,6 +173,15 @@ function appiumErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
   return reply.code(500).send({ error: message });
 }
 
+function apkErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
+  if (error instanceof ApkArtifactError) {
+    return reply.code(error.statusCode).send({ error: error.message });
+  }
+
+  const message = error instanceof Error ? error.message : "APK 请求失败";
+  return reply.code(500).send({ error: message });
+}
+
 export async function createAgentApp(options: CreateAgentAppOptions = {}): Promise<AgentApp> {
   const paths = options.paths ?? resolveAgentPaths(options.localAppData);
   ensureAgentDirectories(paths);
@@ -158,6 +195,13 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     options.deviceControlService ?? new AdbDeviceControlService({ deviceService });
   const deviceManagementService =
     options.deviceManagementService ?? new AdbDeviceManagementService({ deviceService });
+  const apkArtifactService =
+    options.apkArtifactService ??
+    new LocalApkArtifactService({
+      paths,
+      deviceService,
+      auditStore: new SqliteApkInstallAuditStore(database.sqlite),
+    });
   const deviceActionAuditStore =
     options.deviceActionAuditStore ?? new SqliteDeviceActionAuditStore(database.sqlite);
   const appiumRuntimeService = options.appiumRuntimeService ?? new AppiumRuntimeService({ paths });
@@ -169,6 +213,14 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
   });
 
   await app.register(fastifyWebsocket);
+  await app.register(fastifyMultipart, {
+    limits: {
+      files: 1,
+      fields: 0,
+      parts: 1,
+      fileSize: apkArtifactLimits.maxFileSizeBytes,
+    },
+  });
 
   app.addHook("onRequest", async (request, reply) => {
     if (!isLoopbackHost(request.headers.host)) {
@@ -193,6 +245,40 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
 
   app.get("/api/v1/devices", async () => {
     return deviceListResponseSchema.parse(await deviceService.listDevices());
+  });
+
+  app.post("/api/v1/apks", async (request, reply) => {
+    try {
+      const file = await request.file();
+      if (file === undefined) {
+        throw new ApkArtifactError("请选择要上传的 APK 文件。", 400);
+      }
+      return apkArtifactSchema.parse(await apkArtifactService.stage(file.filename, file.file));
+    } catch (error) {
+      return apkErrorReply(reply, error);
+    }
+  });
+
+  app.delete("/api/v1/apks/:artifactId", async (request, reply) => {
+    try {
+      await apkArtifactService.discard(parseArtifactId(request.params));
+      return reply.code(204).send();
+    } catch (error) {
+      return apkErrorReply(reply, error);
+    }
+  });
+
+  app.post("/api/v1/devices/:serial/apks/:artifactId/install", async (request, reply) => {
+    try {
+      const response = await apkArtifactService.install(
+        parseSerial(request.params),
+        parseArtifactId(request.params),
+        apkInstallRequestSchema.parse(request.body ?? {}),
+      );
+      return apkInstallResponseSchema.parse(response);
+    } catch (error) {
+      return apkErrorReply(reply, error);
+    }
   });
 
   app.get("/api/v1/devices/:serial/files", async (request, reply) => {
@@ -481,6 +567,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     deviceService,
     deviceControlService,
     deviceManagementService,
+    apkArtifactService,
     deviceActionAuditStore,
     appiumRuntimeService,
     scrcpyStreamService,

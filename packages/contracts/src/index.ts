@@ -9,6 +9,16 @@ export {
 export { healthResponseSchema, type HealthResponse } from "./health.js";
 export { appiumRuntimeSchema, type AppiumRuntime } from "./appium.js";
 export {
+  apkArtifactSchema,
+  apkInstallRequestSchema,
+  apkInstallResponseSchema,
+  apkMetadataSchema,
+  type ApkArtifact,
+  type ApkInstallRequest,
+  type ApkInstallResponse,
+  type ApkMetadata,
+} from "./apk.js";
+export {
   adbEnvironmentSchema,
   androidDeviceSchema,
   deviceBatterySchema,

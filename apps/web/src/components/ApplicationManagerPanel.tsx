@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { AppWindow, Package, Play, RefreshCw, Search, Square } from "lucide-react";
+import { AppWindow, Package, Play, RefreshCw, Search, Square, Upload } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type {
   AndroidDevice,
@@ -13,6 +13,7 @@ import { fetchDeviceApplications } from "../api/device-management";
 
 type ApplicationManagerPanelProps = {
   device: AndroidDevice;
+  onRequestApkInstall(): void;
 };
 
 const APPLICATIONS_PER_PAGE = 50;
@@ -23,6 +24,7 @@ function sourceLabel(source: DeviceApplication["source"]): string {
 
 export function ApplicationManagerPanel({
   device,
+  onRequestApkInstall,
 }: ApplicationManagerPanelProps): React.JSX.Element {
   const [filter, setFilter] = useState<DeviceApplicationFilter>("all");
   const [searchTerm, setSearchTerm] = useState("");
@@ -63,16 +65,22 @@ export function ApplicationManagerPanel({
           <AppWindow aria-hidden="true" size={29} strokeWidth={1.7} />
           <h1>应用管理器</h1>
         </div>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label="刷新应用列表"
-          title="刷新应用列表"
-          disabled={applicationsQuery.isFetching}
-          onClick={() => void applicationsQuery.refetch()}
-        >
-          <RefreshCw aria-hidden="true" size={17} strokeWidth={1.8} />
-        </button>
+        <div className="management-heading-actions">
+          <button className="primary-command" type="button" onClick={onRequestApkInstall}>
+            <Upload aria-hidden="true" size={16} strokeWidth={1.8} />
+            <span>安装 APK</span>
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="刷新应用列表"
+            title="刷新应用列表"
+            disabled={applicationsQuery.isFetching}
+            onClick={() => void applicationsQuery.refetch()}
+          >
+            <RefreshCw aria-hidden="true" size={17} strokeWidth={1.8} />
+          </button>
+        </div>
       </header>
 
       <div className="application-toolbar">

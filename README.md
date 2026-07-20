@@ -1,10 +1,10 @@
 # DeviceRobot
 
-DeviceRobot is a Windows-first, local Android AI testing workspace. The current foundation provides a localhost-only Agent, real ADB device discovery and single-device controls, a React operator UI, shared action contracts, a deterministic test DSL, SQLite migrations, and the boundaries required for future Appium, scrcpy, and source-aware AI integrations.
+DeviceRobot is a Windows-first, local Android AI testing workspace. The current foundation provides a localhost-only Agent, real ADB device discovery and single-device controls, scrcpy streaming and manual takeover, APK installation, a React operator UI, shared action contracts, a deterministic test DSL, SQLite migrations, and the boundaries required for source-aware AI integrations.
 
 ## Current status
 
-The repository discovers locally connected Android devices through ADB and reports authorized, unauthorized, offline, USB, TCP, and emulator states using real device data. For an authorized device, the **Devices** workspace can capture a PNG screenshot, read a valid `uiautomator` XML hierarchy, and issue audited tap, long-press, text, swipe, back, app launch, and app stop actions. It also diagnoses the local Appium, UiAutomator2, Java, and Android SDK runtime, and starts or stops an Appium server restricted to `127.0.0.1:4723`. Source analysis, AI execution, DSL test-case execution, scrcpy, and test reporting remain future work.
+The repository discovers locally connected Android devices through ADB and reports authorized, unauthorized, offline, USB, TCP, and emulator states using real device data. For an authorized device, the device workspace provides a live scrcpy stream, manual input, directory browsing, installed-package management, and audited structured controls. APK files can be selected from the application manager or dropped onto the live screen; the Agent stages the file, validates its format and size, calculates SHA-256, reads package metadata with `aapt`, asks for installation confirmation, and records the result. It also diagnoses the local Appium, UiAutomator2, Java, and Android SDK runtime, and starts or stops an Appium server restricted to `127.0.0.1:4723`. Source analysis, AI execution, DSL test-case execution, and test reporting remain future work.
 
 ## Requirements
 
@@ -28,7 +28,7 @@ The Vite server proxies `/api` to the Local Agent. A production build is served 
 
 Connect an Android phone with USB debugging enabled, accept the authorization prompt on the phone, and open the **Devices** workspace. DeviceRobot refreshes the device list every three seconds and also supports manual refresh. The Agent uses `ADB_PATH` when set; otherwise it resolves `adb` from `PATH`.
 
-The control console only permits structured actions. It does not expose arbitrary ADB Shell commands, APK installation, or app-data clearing. Completed and failed actions are stored in the local SQLite audit trail.
+The control console only permits structured actions. It does not expose arbitrary ADB Shell commands or app-data clearing. APK installation uses fixed ADB arguments after local validation and explicit confirmation. Completed and failed device actions and APK installations are stored in the local SQLite audit trail.
 
 ## Verification
 

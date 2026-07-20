@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   actionPlanSchema,
+  apkArtifactSchema,
+  apkInstallResponseSchema,
   appiumRuntimeSchema,
   deviceApplicationListResponseSchema,
   deviceControlActionSchema,
@@ -138,5 +140,36 @@ describe("shared contracts", () => {
         issues: [],
       }),
     ).toMatchObject({ status: "ready", server: { port: 4723 } });
+  });
+
+  it("accepts APK staging and installation results", () => {
+    expect(
+      apkArtifactSchema.parse({
+        id: "123e4567-e89b-12d3-a456-426614174000",
+        fileName: "sample.apk",
+        sizeBytes: 1_024,
+        sha256: "a".repeat(64),
+        uploadedAt: "2026-07-20T10:00:00.000Z",
+        metadata: {
+          packageName: "com.example.app",
+          versionName: "1.0",
+          versionCode: "42",
+          minSdkVersion: "23",
+          targetSdkVersion: "35",
+        },
+      }),
+    ).toMatchObject({ metadata: { packageName: "com.example.app" } });
+
+    expect(
+      apkInstallResponseSchema.parse({
+        status: "installed",
+        serial: "device-1",
+        artifactId: "123e4567-e89b-12d3-a456-426614174000",
+        packageName: "com.example.app",
+        startedAt: "2026-07-20T10:01:00.000Z",
+        finishedAt: "2026-07-20T10:01:02.000Z",
+        message: "Success",
+      }),
+    ).toMatchObject({ status: "installed", serial: "device-1" });
   });
 });

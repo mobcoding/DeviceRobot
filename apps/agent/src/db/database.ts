@@ -43,6 +43,27 @@ const migrations: Migration[] = [
         ON device_action_audits (serial, finished_at DESC);
     `,
   },
+  {
+    version: 3,
+    name: "apk-install-audit",
+    sql: `
+      CREATE TABLE IF NOT EXISTS apk_install_audits (
+        id TEXT PRIMARY KEY,
+        artifact_id TEXT NOT NULL,
+        serial TEXT NOT NULL,
+        file_name TEXT NOT NULL,
+        package_name TEXT NOT NULL,
+        sha256 TEXT NOT NULL,
+        success INTEGER NOT NULL,
+        message TEXT,
+        started_at TEXT NOT NULL,
+        finished_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS apk_install_audits_serial_finished_at
+        ON apk_install_audits (serial, finished_at DESC);
+    `,
+  },
 ];
 
 export type DatabaseHandle = {

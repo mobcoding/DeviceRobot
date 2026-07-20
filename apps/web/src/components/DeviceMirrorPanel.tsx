@@ -5,6 +5,7 @@ import {
   House,
   ListVideo,
   LoaderCircle,
+  PackagePlus,
   Power,
   RefreshCw,
   Volume1,
@@ -16,6 +17,7 @@ import type { AndroidDevice } from "@device-robot/contracts";
 type DeviceMirrorPanelProps = {
   device: AndroidDevice;
   onPreferredSidebarWidth?(width: number): void;
+  onApkDrop?(file: File): void;
 };
 
 type DevicePoint = {
@@ -125,18 +127,21 @@ function pointFromPointer(
 export function DeviceMirrorPanel({
   device,
   onPreferredSidebarWidth,
+  onApkDrop,
 }: DeviceMirrorPanelProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
   const decoderRef = useRef<VideoDecoder | undefined>(undefined);
   const socketRef = useRef<WebSocket | undefined>(undefined);
   const pointerStart = useRef<ActivePointer | undefined>(undefined);
+  const apkDragDepth = useRef(0);
   const [streamAttempt, setStreamAttempt] = useState(0);
   const [streamState, setStreamState] = useState<"connecting" | "live" | "error">("connecting");
   const [streamError, setStreamError] = useState<string>();
   const [controlError, setControlError] = useState<string>();
   const [screenSize, setScreenSize] = useState<DevicePoint>();
   const [quickControlsCollapsed, setQuickControlsCollapsed] = useState(false);
+  const [apkDragActive, setApkDragActive] = useState(false);
   const serial = device.serial;
 
   useEffect(() => {
@@ -433,6 +438,39 @@ export function DeviceMirrorPanel({
 
   const error = controlError ?? streamError;
 
+  const handleApkDragEnter = (event: React.DragEvent<HTMLDivElement>): void => {
+    if (onApkDrop === undefined || !Array.from(event.dataTransfer.types).includes("Files")) {
+      return;
+    }
+    event.preventDefault();
+    apkDragDepth.current += 1;
+    setApkDragActive(true);
+  };
+
+  const handleApkDragLeave = (event: React.DragEvent<HTMLDivElement>): void => {
+    if (!apkDragActive) {
+      return;
+    }
+    event.preventDefault();
+    apkDragDepth.current = Math.max(0, apkDragDepth.current - 1);
+    if (apkDragDepth.current === 0) {
+      setApkDragActive(false);
+    }
+  };
+
+  const handleApkDrop = (event: React.DragEvent<HTMLDivElement>): void => {
+    if (onApkDrop === undefined) {
+      return;
+    }
+    event.preventDefault();
+    apkDragDepth.current = 0;
+    setApkDragActive(false);
+    const file = event.dataTransfer.files.item(0);
+    if (file !== null) {
+      onApkDrop(file);
+    }
+  };
+
   return (
     <section className="device-mirror" aria-label="屏幕镜像">
       <header className="mirror-header">
@@ -535,12 +573,27 @@ export function DeviceMirrorPanel({
         <div
           ref={frameRef}
           className="mirror-screen-frame"
+          onDragEnter={handleApkDragEnter}
+          onDragOver={(event) => {
+            if (onApkDrop !== undefined) {
+              event.preventDefault();
+            }
+          }}
+          onDragLeave={handleApkDragLeave}
+          onDrop={handleApkDrop}
           style={
             screenSize === undefined
               ? undefined
               : { aspectRatio: `${screenSize.x} / ${screenSize.y}` }
           }
         >
+          {apkDragActive && (
+            <div className="apk-drop-overlay" role="status">
+              <PackagePlus aria-hidden="true" size={28} strokeWidth={1.7} />
+              <strong>释放以安装 APK</strong>
+              <span>{deviceName(device)}</span>
+            </div>
+          )}
           <canvas
             ref={canvasRef}
             className="interactive-device-screen"

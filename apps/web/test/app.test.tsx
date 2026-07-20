@@ -186,14 +186,32 @@ const applicationsResponse = {
   readAt: "2026-07-20T10:00:00.000Z",
 };
 
+const apkArtifactResponse = {
+  id: "123e4567-e89b-12d3-a456-426614174000",
+  fileName: "sample.apk",
+  sizeBytes: 132,
+  sha256: "a".repeat(64),
+  uploadedAt: "2026-07-20T10:00:00.000Z",
+  metadata: {
+    packageName: "com.example.app",
+    applicationLabel: "示例应用",
+    versionName: "1.2.3",
+    versionCode: "42",
+    minSdkVersion: "23",
+    targetSdkVersion: "35",
+  },
+};
+
 function mockApis(options: { healthError?: Error } = {}): {
   getDeviceRequests: () => number;
   getActionRequests: () => number;
   getLastAction: () => unknown;
+  getInstallRequests: () => number;
 } {
   let deviceRequests = 0;
   let actionRequests = 0;
   let lastAction: unknown;
+  let installRequests = 0;
   const actionHistory = {
     serial: "8B3Y0THX0",
     actions: [] as Array<{
@@ -216,6 +234,33 @@ function mockApis(options: { healthError?: Error } = {}): {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
+    }
+
+    if (url === "/api/v1/apks" && method === "POST") {
+      return new Response(JSON.stringify(apkArtifactResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (url.includes("/apks/") && url.endsWith("/install")) {
+      installRequests += 1;
+      return new Response(
+        JSON.stringify({
+          status: "installed",
+          serial: "8B3Y0THX0",
+          artifactId: apkArtifactResponse.id,
+          packageName: "com.example.app",
+          startedAt: "2026-07-20T10:01:00.000Z",
+          finishedAt: "2026-07-20T10:01:02.000Z",
+          message: "Success",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    if (url.includes("/api/v1/apks/") && method === "DELETE") {
+      return new Response(null, { status: 204 });
     }
 
     if (url.includes("/files")) {
@@ -287,6 +332,7 @@ function mockApis(options: { healthError?: Error } = {}): {
     getDeviceRequests: () => deviceRequests,
     getActionRequests: () => actionRequests,
     getLastAction: () => lastAction,
+    getInstallRequests: () => installRequests,
   };
 }
 
@@ -356,6 +402,51 @@ describe("DeviceRobot Web UI", () => {
     await user.click(screen.getByRole("button", { name: "启动 com.android.settings" }));
     await vi.waitFor(() => expect(getActionRequests()).toBe(1));
     expect(getLastAction()).toEqual({ action: "app.launch", appId: "com.android.settings" });
+  });
+
+  it("uploads and installs an APK from the application manager", async () => {
+    const { getInstallRequests } = mockApis();
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "应用管理器" }));
+    await user.click(screen.getByRole("button", { name: "安装 APK" }));
+    await user.upload(
+      screen.getByLabelText("APK 文件"),
+      new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], "sample.apk", {
+        type: "application/vnd.android.package-archive",
+      }),
+    );
+
+    const dialog = await screen.findByRole("dialog", { name: "安装 APK" });
+    expect(within(dialog).getByText("com.example.app")).toBeInTheDocument();
+    expect(within(dialog).getByText("Pixel 3 XL")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "安装" }));
+
+    expect(await within(dialog).findByText("安装完成")).toBeInTheDocument();
+    expect(getInstallRequests()).toBe(1);
+  });
+
+  it("accepts an APK dropped on the live device screen", async () => {
+    mockApis();
+    renderApp();
+
+    const canvas = await screen.findByRole("img", { name: "设备实时画面：Pixel 3 XL" });
+    const frame = canvas.parentElement;
+    expect(frame).not.toBeNull();
+    const file = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], "sample.apk", {
+      type: "application/vnd.android.package-archive",
+    });
+    const dataTransfer = {
+      types: ["Files"],
+      files: { item: (index: number) => (index === 0 ? file : null) },
+    };
+
+    fireEvent.dragEnter(frame as HTMLDivElement, { dataTransfer });
+    expect(screen.getByText("释放以安装 APK")).toBeInTheDocument();
+    fireEvent.drop(frame as HTMLDivElement, { dataTransfer });
+
+    expect(await screen.findByRole("dialog", { name: "安装 APK" })).toBeInTheDocument();
   });
 
   it("shows a real authorized Android device in the selector", async () => {

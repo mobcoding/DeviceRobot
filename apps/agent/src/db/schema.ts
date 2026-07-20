@@ -17,3 +17,16 @@ export const deviceActionAudits = sqliteTable("device_action_audits", {
   startedAt: text("started_at").notNull(),
   finishedAt: text("finished_at").notNull(),
 });
+
+export const apkInstallAudits = sqliteTable("apk_install_audits", {
+  id: text("id").primaryKey(),
+  artifactId: text("artifact_id").notNull(),
+  serial: text("serial").notNull(),
+  fileName: text("file_name").notNull(),
+  packageName: text("package_name").notNull(),
+  sha256: text("sha256").notNull(),
+  success: integer("success", { mode: "boolean" }).notNull(),
+  message: text("message"),
+  startedAt: text("started_at").notNull(),
+  finishedAt: text("finished_at").notNull(),
+});

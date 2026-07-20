@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { healthResponseSchema } from "@device-robot/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createAgentApp } from "../src/app.js";
 
@@ -40,7 +40,7 @@ describe("DeviceRobot Agent", () => {
     const migrationCount = reopened.database.sqlite
       .prepare("SELECT COUNT(*) AS count FROM schema_migrations")
       .get() as { count: number };
-    expect(migrationCount.count).toBe(2);
+    expect(migrationCount.count).toBe(3);
     await reopened.app.close();
   });
 
@@ -176,6 +176,89 @@ describe("DeviceRobot Agent", () => {
         filter: "user",
         applications: [{ packageName: "com.example.app", source: "user" }],
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("stages and installs an uploaded APK through bounded routes", async () => {
+    const artifact = {
+      id: "123e4567-e89b-12d3-a456-426614174000",
+      fileName: "sample.apk",
+      sizeBytes: 132,
+      sha256: "a".repeat(64),
+      uploadedAt: "2026-07-20T10:00:00.000Z",
+      metadata: {
+        packageName: "com.example.app",
+        versionName: "1.2.3",
+        versionCode: "42",
+      },
+    };
+    const stage = vi.fn(async (_fileName: string, stream: NodeJS.ReadableStream) => {
+      for await (const chunk of stream) {
+        // Consume the multipart stream before returning the staged artifact.
+        void chunk;
+      }
+      return artifact;
+    });
+    const install = vi.fn(async (serial: string, artifactId: string) => ({
+      status: "installed" as const,
+      serial,
+      artifactId,
+      packageName: "com.example.app",
+      startedAt: "2026-07-20T10:01:00.000Z",
+      finishedAt: "2026-07-20T10:01:02.000Z",
+      message: "Success",
+    }));
+    const discard = vi.fn(async () => undefined);
+    const { app } = await createAgentApp({
+      localAppData: createTemporaryRoot(),
+      apkArtifactService: { stage, install, discard },
+    });
+    const boundary = "device-robot-apk-boundary";
+    const payload = Buffer.from(
+      [
+        `--${boundary}`,
+        'Content-Disposition: form-data; name="apk"; filename="sample.apk"',
+        "Content-Type: application/vnd.android.package-archive",
+        "",
+        "PK-test-apk",
+        `--${boundary}--`,
+        "",
+      ].join("\r\n"),
+    );
+    const headers = { host: "127.0.0.1:43110" };
+
+    try {
+      const upload = await app.inject({
+        method: "POST",
+        url: "/api/v1/apks",
+        headers: { ...headers, "content-type": `multipart/form-data; boundary=${boundary}` },
+        payload,
+      });
+      const installation = await app.inject({
+        method: "POST",
+        url: `/api/v1/devices/device-1/apks/${artifact.id}/install`,
+        headers,
+        payload: { replaceExisting: true, allowTestPackage: true },
+      });
+      const deletion = await app.inject({
+        method: "DELETE",
+        url: `/api/v1/apks/${artifact.id}`,
+        headers,
+      });
+
+      expect(upload.statusCode).toBe(200);
+      expect(upload.json()).toMatchObject({ id: artifact.id, fileName: "sample.apk" });
+      expect(stage).toHaveBeenCalledWith("sample.apk", expect.anything());
+      expect(installation.statusCode).toBe(200);
+      expect(installation.json()).toMatchObject({ status: "installed", serial: "device-1" });
+      expect(install).toHaveBeenCalledWith("device-1", artifact.id, {
+        replaceExisting: true,
+        allowTestPackage: true,
+      });
+      expect(deletion.statusCode).toBe(204);
+      expect(discard).toHaveBeenCalledWith(artifact.id);
     } finally {
       await app.close();
     }

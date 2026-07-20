@@ -15,6 +15,7 @@ import type { AndroidDevice } from "@device-robot/contracts";
 import { fetchDevices } from "./api/devices";
 import { fetchHealth } from "./api/health";
 import { AppiumRuntimePanel } from "./components/AppiumRuntimePanel";
+import { ApkInstallDialog } from "./components/ApkInstallDialog";
 import { ApplicationManagerPanel } from "./components/ApplicationManagerPanel";
 import { DeviceControlPanel } from "./components/DeviceControlPanel";
 import { DeviceMirrorPanel } from "./components/DeviceMirrorPanel";
@@ -308,11 +309,23 @@ export function App(): React.JSX.Element {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [mirrorWidth, setMirrorWidth] = useState<number>();
   const [isResizingLayout, setIsResizingLayout] = useState(false);
+  const [apkSelection, setApkSelection] = useState<
+    { key: number; file?: File; error?: string } | undefined
+  >();
   const layoutRef = useRef<HTMLDivElement>(null);
+  const apkInputRef = useRef<HTMLInputElement>(null);
   const resizingRef = useRef(false);
   const mirrorWidthAdjustedRef = useRef(false);
   const readyDevices = (deviceQuery.data?.devices ?? []).filter(isReadyDevice);
   const selectedDevice = readyDevices.find((device) => device.serial === selectedSerial);
+
+  const queueApk = useCallback((file: File): void => {
+    const isApk = file.name.toLocaleLowerCase().endsWith(".apk");
+    setApkSelection({
+      key: Date.now(),
+      ...(isApk ? { file } : { error: "仅支持安装 .apk 文件。" }),
+    });
+  }, []);
 
   useEffect(() => {
     if (selectedDevice === undefined && readyDevices[0] !== undefined) {
@@ -458,6 +471,20 @@ export function App(): React.JSX.Element {
 
   return (
     <div className="device-console-shell" style={shellStyle}>
+      <input
+        ref={apkInputRef}
+        className="visually-hidden"
+        type="file"
+        accept=".apk,application/vnd.android.package-archive"
+        aria-label="APK 文件"
+        onChange={(event) => {
+          const file = event.currentTarget.files?.item(0);
+          event.currentTarget.value = "";
+          if (file !== null && file !== undefined) {
+            queueApk(file);
+          }
+        }}
+      />
       <ConsoleHeader
         activeView={activeView}
         agentStatus={agentStatus}
@@ -483,6 +510,7 @@ export function App(): React.JSX.Element {
             <DeviceMirrorPanel
               device={selectedDevice}
               onPreferredSidebarWidth={usePreferredMirrorWidth}
+              onApkDrop={queueApk}
             />
           )}
         </aside>
@@ -570,12 +598,24 @@ export function App(): React.JSX.Element {
           ) : activeView === "files" && selectedDevice !== undefined ? (
             <FileManagerPanel device={selectedDevice} />
           ) : activeView === "applications" && selectedDevice !== undefined ? (
-            <ApplicationManagerPanel device={selectedDevice} />
+            <ApplicationManagerPanel
+              device={selectedDevice}
+              onRequestApkInstall={() => apkInputRef.current?.click()}
+            />
           ) : (
             <PlannedView content={plannedViews[activeView as PlannedViewId]} />
           )}
         </main>
       </div>
+      {apkSelection !== undefined && selectedDevice !== undefined && (
+        <ApkInstallDialog
+          key={apkSelection.key}
+          device={selectedDevice}
+          {...(apkSelection.file === undefined ? {} : { file: apkSelection.file })}
+          {...(apkSelection.error === undefined ? {} : { initialError: apkSelection.error })}
+          onClose={() => setApkSelection(undefined)}
+        />
+      )}
     </div>
   );
 }

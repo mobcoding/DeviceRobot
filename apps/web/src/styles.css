@@ -17,6 +17,17 @@
   box-sizing: border-box;
 }
 
+.visually-hidden {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  border: 0;
+  white-space: nowrap;
+}
+
 body {
   min-width: 320px;
   min-height: 100vh;
@@ -421,6 +432,35 @@ summary:focus-visible {
   background: #020202;
 }
 
+.apk-drop-overlay {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 7px;
+  padding: 18px;
+  border: 2px solid #53c5cc;
+  color: #eefcfd;
+  background: rgba(8, 18, 19, 0.9);
+  text-align: center;
+  pointer-events: none;
+}
+
+.apk-drop-overlay svg {
+  color: #6ed2d7;
+}
+
+.apk-drop-overlay strong {
+  font-size: 13px;
+}
+
+.apk-drop-overlay span {
+  color: #a9b8bc;
+  font-size: 10px;
+}
+
 .mirror-workspace {
   display: flex;
   min-height: 0;
@@ -616,6 +656,38 @@ summary:focus-visible {
 
 .management-title-row h1 {
   margin: 0;
+}
+
+.management-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.primary-command {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 11px;
+  border: 1px solid #53c5cc;
+  border-radius: 4px;
+  color: #071416;
+  background: #53c5cc;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.primary-command:hover:not(:disabled) {
+  border-color: #83e0e4;
+  background: #83e0e4;
+}
+
+.primary-command:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .icon-button {
@@ -1044,6 +1116,188 @@ summary:focus-visible {
 .manager-pagination button:disabled {
   cursor: not-allowed;
   opacity: 0.42;
+}
+
+.modal-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.74);
+}
+
+.apk-install-dialog {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  border: 1px solid #3b3b3b;
+  border-radius: 6px;
+  background: #181818;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+
+.apk-install-dialog > header,
+.apk-install-dialog > footer {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 18px;
+}
+
+.apk-install-dialog > header {
+  border-bottom: 1px solid #303030;
+}
+
+.apk-install-dialog > header > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.apk-install-dialog > header svg {
+  color: #82d7db;
+}
+
+.apk-install-dialog > header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.apk-install-dialog > footer {
+  justify-content: flex-end;
+  border-top: 1px solid #303030;
+}
+
+.apk-install-content {
+  min-height: 150px;
+  padding: 18px;
+}
+
+.apk-progress {
+  display: flex;
+  min-height: 112px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #cbd3d6;
+  font-size: 12px;
+}
+
+.apk-progress svg {
+  color: #65cbd1;
+  animation: mirror-spin 900ms linear infinite;
+}
+
+.apk-metadata-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 24px;
+  margin: 0;
+}
+
+.apk-metadata-grid > div {
+  min-width: 0;
+  padding: 11px 0;
+  border-bottom: 1px solid #2f2f2f;
+}
+
+.apk-metadata-grid dt {
+  margin-bottom: 5px;
+  color: #929da2;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.apk-metadata-grid dd {
+  overflow: hidden;
+  margin: 0 0 3px;
+  color: #edf0f1;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.apk-metadata-grid small {
+  display: block;
+  overflow: hidden;
+  color: #a3adb1;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.apk-metadata-grid .apk-hash-row {
+  grid-column: 1 / -1;
+}
+
+.apk-hash-row code {
+  display: block;
+  overflow: hidden;
+  color: #b6c8cb;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 9px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.apk-install-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding-top: 16px;
+}
+
+.apk-install-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #c3cbce;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.apk-install-options input {
+  width: 15px;
+  height: 15px;
+  accent-color: #53c5cc;
+}
+
+.dialog-command {
+  min-width: 70px;
+  min-height: 32px;
+  padding-inline: 12px;
+}
+
+.apk-install-success {
+  display: flex;
+  min-height: 112px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #92ddb7;
+}
+
+.apk-install-success div {
+  display: grid;
+  gap: 4px;
+}
+
+.apk-install-success strong {
+  color: #eaf5ef;
+  font-size: 14px;
+}
+
+.apk-install-success span {
+  color: #a5b7ae;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 10px;
 }
 
 .overview-title-row {
@@ -1747,6 +2001,30 @@ h3 {
     grid-template-columns: 1fr;
     gap: 18px;
     padding: 20px;
+  }
+
+  .management-heading-actions {
+    gap: 5px;
+  }
+
+  .primary-command {
+    padding-inline: 8px;
+  }
+
+  .modal-backdrop {
+    padding: 10px;
+  }
+
+  .apk-install-dialog {
+    max-height: calc(100vh - 20px);
+  }
+
+  .apk-metadata-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .apk-metadata-grid .apk-hash-row {
+    grid-column: 1;
   }
 
   .overview-grid > div {

@@ -64,7 +64,13 @@ export const androidBuildTargetSchema = z.object({
 export const androidSdkInfoSchema = z.object({
   available: z.boolean(),
   path: z.string().min(1).optional(),
-  source: z.enum(["environment", "local-properties", "unavailable"]),
+  source: z.enum(["environment", "local-properties", "managed", "unavailable"]),
+  requiredPackages: z.array(z.string().min(1)).max(32).default([]),
+  missingPackages: z.array(z.string().min(1)).max(32).default([]),
+});
+
+export const installAndroidSdkRequestSchema = z.object({
+  approved: z.literal(true),
 });
 
 export const androidBuildTargetListResponseSchema = z.object({
@@ -134,6 +140,7 @@ export type AndroidSourceIndexSummary = z.infer<typeof androidSourceIndexSummary
 export type AndroidSourceIndex = z.infer<typeof androidSourceIndexSchema>;
 export type AndroidBuildTarget = z.infer<typeof androidBuildTargetSchema>;
 export type AndroidSdkInfo = z.infer<typeof androidSdkInfoSchema>;
+export type InstallAndroidSdkRequest = z.infer<typeof installAndroidSdkRequestSchema>;
 export type AndroidBuildTargetListResponse = z.infer<typeof androidBuildTargetListResponseSchema>;
 export type ProjectBuildRunStatus = z.infer<typeof projectBuildRunStatusSchema>;
 export type ProjectBuildRun = z.infer<typeof projectBuildRunSchema>;

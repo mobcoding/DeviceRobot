@@ -1,11 +1,14 @@
 import {
   androidProjectSchema,
+  androidSdkInfoSchema,
   androidBuildTargetListResponseSchema,
   projectBuildRunListResponseSchema,
   projectBuildRunSchema,
   projectListResponseSchema,
   type AndroidProject,
+  type AndroidSdkInfo,
   type CreateProjectRequest,
+  type InstallAndroidSdkRequest,
   type AndroidBuildTargetListResponse,
   type ProjectBuildRun,
   type ProjectBuildRunListResponse,
@@ -94,6 +97,21 @@ export async function fetchProjectBuildRuns(
       ...(signal === undefined ? {} : { signal }),
     },
     projectBuildRunListResponseSchema,
+  );
+}
+
+export async function installProjectAndroidSdk(
+  projectId: string,
+  request: InstallAndroidSdkRequest,
+): Promise<AndroidSdkInfo> {
+  return await projectRequest(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/android-sdk/install`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(request),
+    },
+    androidSdkInfoSchema,
   );
 }
 

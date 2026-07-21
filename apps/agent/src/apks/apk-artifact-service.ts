@@ -189,6 +189,7 @@ async function findAaptInSdk(sdkRoot: string): Promise<string | undefined> {
 }
 
 export class LocalApkArtifactService implements ApkArtifactService {
+  readonly #paths: AgentPaths;
   readonly #artifactDirectory: string;
   readonly #deviceService: DeviceDiscoveryService;
   readonly #auditStore: ApkInstallAuditStore;
@@ -198,6 +199,7 @@ export class LocalApkArtifactService implements ApkArtifactService {
   readonly #runner: ApkCommandRunner;
 
   public constructor(options: LocalApkArtifactServiceOptions) {
+    this.#paths = options.paths;
     this.#artifactDirectory = join(options.paths.artifacts, "apks");
     this.#deviceService = options.deviceService;
     this.#auditStore = options.auditStore;
@@ -384,6 +386,7 @@ export class LocalApkArtifactService implements ApkArtifactService {
         sdkRoots.add(configured.trim());
       }
     }
+    sdkRoots.add(this.#paths.androidSdk);
     if (isAbsolute(this.#adbExecutable)) {
       sdkRoots.add(dirname(dirname(this.#adbExecutable)));
     }

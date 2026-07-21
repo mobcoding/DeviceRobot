@@ -8,6 +8,8 @@ import { execFile } from "node:child_process";
 import type { AgentPaths } from "@device-robot/config";
 import type { AppiumRuntime } from "@device-robot/contracts";
 
+import { inspectAndroidSdk } from "../android/android-sdk-service.js";
+
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 const APPIUM_HOST = "127.0.0.1" as const;
@@ -422,9 +424,17 @@ export class AppiumRuntimeService {
   }
 
   async #inspectAndroidSdk(): Promise<AppiumRuntime["androidSdk"]> {
-    const configuredPath = this.#environment.ANDROID_HOME ?? this.#environment.ANDROID_SDK_ROOT;
-    if (configuredPath !== undefined && isSdkDirectory(configuredPath)) {
-      return { available: true, path: configuredPath };
+    const configured = await inspectAndroidSdk({
+      paths: this.#paths,
+      environment: this.#environment,
+      requiredPackages: ["platform-tools"],
+    });
+    if (
+      configured.available &&
+      configured.path !== undefined &&
+      configured.missingPackages.length === 0
+    ) {
+      return { available: true, path: configured.path };
     }
 
     try {

@@ -1251,6 +1251,31 @@ summary:focus-visible {
   background: #173029;
 }
 
+.project-sdk-install {
+  display: inline-flex;
+  min-height: 24px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 1px solid #577a76;
+  border-radius: 3px;
+  color: #a9deda;
+  background: #17312d;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.project-sdk-install:hover:not(:disabled) {
+  border-color: #69aaa2;
+  color: #fff;
+}
+
+.project-sdk-install:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
 .project-build > p {
   margin: 0;
   padding: 0 14px 12px;

@@ -1,7 +1,7 @@
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveAgentPaths } from "@device-robot/config";
+import { resolveAgentPaths, type AgentPaths } from "@device-robot/config";
 import type { AndroidProject, ProjectBuildRun } from "@device-robot/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -124,6 +124,12 @@ function createProject(rootPath: string): AndroidProject {
   };
 }
 
+function prepareManagedAndroidSdk(paths: AgentPaths): void {
+  const executable = process.platform === "win32" ? "adb.exe" : "adb";
+  mkdirSync(join(paths.androidSdk, "platform-tools"), { recursive: true });
+  writeFileSync(join(paths.androidSdk, "platform-tools", executable), "");
+}
+
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { force: true, recursive: true });
@@ -141,8 +147,10 @@ describe("Android project build service", () => {
     const project = createProject(root);
     const store = new InMemoryProjectBuildStore();
     const runner = new ControlledBuildRunner();
+    const paths = resolveAgentPaths(join(root, "agent-data"));
+    prepareManagedAndroidSdk(paths);
     const service = new LocalProjectBuildService({
-      paths: resolveAgentPaths(join(root, "agent-data")),
+      paths,
       projectStore: new InMemoryProjectStore(project),
       buildStore: store,
       runner,
@@ -203,8 +211,10 @@ describe("Android project build service", () => {
         "@echo off\r\necho wrapper-ran\r\necho task=%3\r\nexit /b 0\r\n",
       );
       const project = createProject(root);
+      const paths = resolveAgentPaths(join(root, "agent-data"));
+      prepareManagedAndroidSdk(paths);
       const service = new LocalProjectBuildService({
-        paths: resolveAgentPaths(join(root, "agent-data")),
+        paths,
         projectStore: new InMemoryProjectStore(project),
         buildStore: new InMemoryProjectBuildStore(),
       });
@@ -243,5 +253,9 @@ describe("Android project build service", () => {
     await expect(
       service.start(project.id, { modulePath: "app", variant: "clean", approved: true }),
     ).rejects.toMatchObject({ statusCode: 422 });
+    writeFileSync(join(root, "gradlew.bat"), "@echo off");
+    await expect(
+      service.start(project.id, { modulePath: "app", variant: "debug", approved: true }),
+    ).rejects.toMatchObject({ statusCode: 503 });
   });
 });

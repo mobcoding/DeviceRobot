@@ -20,6 +20,7 @@ import {
   deviceUiTreeResponseSchema,
   healthResponseSchema,
   appiumRuntimeSchema,
+  androidSdkInfoSchema,
   androidBuildTargetListResponseSchema,
   androidProjectSchema,
   aiModelConnectionTestRequestSchema,
@@ -33,6 +34,7 @@ import {
   projectBuildRunListResponseSchema,
   projectBuildRunSchema,
   generateAiPlanRequestSchema,
+  installAndroidSdkRequestSchema,
   startProjectBuildRequestSchema,
 } from "@device-robot/contracts";
 import Fastify, {
@@ -437,6 +439,17 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     try {
       return androidBuildTargetListResponseSchema.parse(
         await projectBuildService.listTargets(parseProjectId(request.params)),
+      );
+    } catch (error) {
+      return projectBuildErrorReply(reply, error);
+    }
+  });
+
+  app.post("/api/v1/projects/:projectId/android-sdk/install", async (request, reply) => {
+    try {
+      installAndroidSdkRequestSchema.parse(request.body);
+      return androidSdkInfoSchema.parse(
+        await projectBuildService.installSdk(parseProjectId(request.params)),
       );
     } catch (error) {
       return projectBuildErrorReply(reply, error);

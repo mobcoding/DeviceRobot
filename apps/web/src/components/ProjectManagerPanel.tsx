@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderGit2, FolderOpen, GitBranch, RefreshCw } from "lucide-react";
+import { Download, FolderGit2, FolderOpen, GitBranch, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import type {
   AndroidBuildTarget,
@@ -14,6 +14,7 @@ import {
   fetchProjectBuildRuns,
   fetchProjectBuildTargets,
   fetchProjects,
+  installProjectAndroidSdk,
   reindexProject,
   startProjectBuild,
 } from "../api/projects";
@@ -86,14 +87,20 @@ function ProjectBuildSection({
   data,
   loading,
   building,
+  installing,
   onRequestBuild,
+  onInstallSdk,
 }: {
   project: AndroidProject;
   data: ProjectBuildData | undefined;
   loading: boolean;
   building: boolean;
+  installing: boolean;
   onRequestBuild(target: AndroidBuildTarget): void;
+  onInstallSdk(projectId: string): void;
 }): React.JSX.Element {
+  const sdkReady =
+    data !== undefined && data.androidSdk.available && data.androidSdk.missingPackages.length === 0;
   return (
     <section className="project-build" aria-label={`${project.name} 的构建`}>
       <header>
@@ -101,13 +108,20 @@ function ProjectBuildSection({
           <strong>Gradle 构建</strong>
           <small>仅使用项目自身的 Gradle Wrapper</small>
           {data !== undefined && (
-            <span
-              className={
-                data.androidSdk.available ? "project-sdk-state ready" : "project-sdk-state"
-              }
-            >
-              {data.androidSdk.available ? "Android SDK 已就绪" : "Android SDK 未发现"}
+            <span className={sdkReady ? "project-sdk-state ready" : "project-sdk-state"}>
+              {sdkReady ? "Android SDK 已就绪" : "Android SDK 需要准备"}
             </span>
+          )}
+          {data !== undefined && !sdkReady && (
+            <button
+              className="project-sdk-install"
+              type="button"
+              disabled={installing || building}
+              onClick={() => onInstallSdk(project.id)}
+            >
+              <Download aria-hidden="true" size={13} strokeWidth={1.9} />
+              {installing ? "正在安装" : "安装所需 SDK"}
+            </button>
           )}
         </div>
       </header>
@@ -121,13 +135,24 @@ function ProjectBuildSection({
         <p>未从 Gradle 配置中发现可构建的 Variant。</p>
       ) : (
         <>
+          {!sdkReady && (
+            <p>
+              {installing
+                ? "正在准备 Android SDK，请保持此页面打开。"
+                : `构建需要：${data.androidSdk.missingPackages.join("、")}`}
+            </p>
+          )}
           <div className="project-build-targets" aria-label="可构建 Variant">
             {data.targets.map((target) => (
               <span key={`${target.modulePath}-${target.variant}`}>
                 <strong>{target.moduleName}</strong>
                 <em>{target.variant}</em>
                 <code>{target.taskName}</code>
-                <button type="button" disabled={building} onClick={() => onRequestBuild(target)}>
+                <button
+                  type="button"
+                  disabled={building || installing || !sdkReady}
+                  onClick={() => onRequestBuild(target)}
+                >
                   构建
                 </button>
               </span>
@@ -213,6 +238,13 @@ export function ProjectManagerPanel(): React.JSX.Element {
       await queryClient.invalidateQueries({ queryKey: ["project-build-data"] });
     },
   });
+  const installSdkMutation = useMutation({
+    mutationFn: async (projectId: string) =>
+      await installProjectAndroidSdk(projectId, { approved: true }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["project-build-data"] });
+    },
+  });
   const submitting = createMutation.isPending;
   const value = source === "local" ? localPath : remoteUrl;
   const error = projectsQuery.isError
@@ -225,7 +257,9 @@ export function ProjectManagerPanel(): React.JSX.Element {
           ? projectBuildsQuery.error.message
           : buildMutation.isError
             ? buildMutation.error?.message
-            : undefined;
+            : installSdkMutation.isError
+              ? installSdkMutation.error?.message
+              : undefined;
 
   const submit = (event: React.FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -450,7 +484,9 @@ export function ProjectManagerPanel(): React.JSX.Element {
                 data={projectBuildsQuery.data?.[project.id]}
                 loading={projectBuildsQuery.isFetching}
                 building={buildMutation.isPending}
+                installing={installSdkMutation.isPending}
                 onRequestBuild={(target) => setPendingBuild({ project, target })}
+                onInstallSdk={(projectId) => installSdkMutation.mutate(projectId)}
               />
             </article>
           ))}

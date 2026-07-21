@@ -12,6 +12,8 @@ export type AgentPaths = {
   logs: string;
   appiumHome: string;
   gradleHome: string;
+  androidSdk: string;
+  downloads: string;
   repositories: string;
   artifacts: string;
   reports: string;
@@ -27,6 +29,8 @@ export function resolveAgentPaths(localAppData = process.env.LOCALAPPDATA): Agen
     logs: join(root, "logs"),
     appiumHome: join(root, "appium"),
     gradleHome: join(root, "gradle"),
+    androidSdk: join(root, "android-sdk"),
+    downloads: join(root, "downloads"),
     repositories: join(root, "repositories"),
     artifacts: join(root, "artifacts"),
     reports: join(root, "reports"),
@@ -39,6 +43,8 @@ export function ensureAgentDirectories(paths: AgentPaths): void {
     paths.logs,
     paths.appiumHome,
     paths.gradleHome,
+    paths.androidSdk,
+    paths.downloads,
     paths.repositories,
     paths.artifacts,
     paths.reports,

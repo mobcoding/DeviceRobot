@@ -1,7 +1,7 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createWriteStream, existsSync, type WriteStream } from "node:fs";
-import { mkdir, readFile, readdir } from "node:fs/promises";
+import { mkdir, readdir } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { promisify } from "node:util";
 import type { AgentPaths } from "@device-robot/config";
@@ -19,6 +19,7 @@ import {
   type StartProjectBuildRequest,
 } from "@device-robot/contracts";
 
+import { AndroidSdkService, AndroidSdkServiceError } from "../android/android-sdk-service.js";
 import type { ProjectBuildStore } from "./project-build-store.js";
 import type { ProjectStore } from "./project-store.js";
 
@@ -57,6 +58,7 @@ export interface ProjectBuildProcessRunner {
 
 export interface ProjectBuildService {
   listTargets(projectId: string): Promise<AndroidBuildTargetListResponse>;
+  installSdk(projectId: string): Promise<AndroidSdkInfo>;
   listRuns(projectId: string): Promise<ProjectBuildRunListResponse>;
   start(projectId: string, request: StartProjectBuildRequest): Promise<ProjectBuildRun>;
   dispose(): Promise<void>;
@@ -67,6 +69,7 @@ export type LocalProjectBuildServiceOptions = {
   projectStore: ProjectStore;
   buildStore: ProjectBuildStore;
   runner?: ProjectBuildProcessRunner;
+  sdkService?: AndroidSdkService;
 };
 
 type ActiveBuild = {
@@ -137,29 +140,6 @@ function findWrapper(rootPath: string): string | undefined {
   const names =
     process.platform === "win32" ? ["gradlew.bat", "gradlew"] : ["gradlew", "gradlew.bat"];
   return names.map((name) => join(rootPath, name)).find((path) => existsSync(path));
-}
-
-async function findAndroidSdk(rootPath: string): Promise<AndroidSdkInfo> {
-  for (const value of [process.env.ANDROID_SDK_ROOT, process.env.ANDROID_HOME]) {
-    if (value !== undefined && value.trim().length > 0 && existsSync(value.trim())) {
-      return { available: true, path: value.trim(), source: "environment" };
-    }
-  }
-
-  try {
-    const localProperties = await readFile(join(rootPath, "local.properties"), "utf8");
-    const value = /^\s*sdk\.dir\s*=\s*(.+?)\s*$/mu.exec(localProperties)?.[1];
-    if (value !== undefined) {
-      const path = value.replaceAll("\\:", ":").replaceAll("\\\\", "\\").trim();
-      if (path.length > 0 && existsSync(path)) {
-        return { available: true, path, source: "local-properties" };
-      }
-    }
-  } catch {
-    // Gradle can still provide its own SDK diagnostics during the approved build.
-  }
-
-  return { available: false, source: "unavailable" };
 }
 
 function createDefaultRunner(): ProjectBuildProcessRunner {
@@ -279,6 +259,7 @@ export class LocalProjectBuildService implements ProjectBuildService {
   readonly #projectStore: ProjectStore;
   readonly #buildStore: ProjectBuildStore;
   readonly #runner: ProjectBuildProcessRunner;
+  readonly #sdkService: AndroidSdkService;
   readonly #activeRuns = new Map<string, ActiveBuild>();
 
   public constructor(options: LocalProjectBuildServiceOptions) {
@@ -286,6 +267,7 @@ export class LocalProjectBuildService implements ProjectBuildService {
     this.#projectStore = options.projectStore;
     this.#buildStore = options.buildStore;
     this.#runner = options.runner ?? createDefaultRunner();
+    this.#sdkService = options.sdkService ?? new AndroidSdkService({ paths: options.paths });
     this.#buildStore.recoverInterruptedRuns(new Date().toISOString());
   }
 
@@ -295,9 +277,19 @@ export class LocalProjectBuildService implements ProjectBuildService {
     return androidBuildTargetListResponseSchema.parse({
       projectId,
       gradleWrapper: wrapper !== undefined,
-      androidSdk: await findAndroidSdk(project.rootPath),
+      androidSdk: await this.#sdkService.inspect(project.rootPath, project.modules),
       targets: wrapper === undefined ? [] : discoverAndroidBuildTargets(project),
     });
+  }
+
+  public async installSdk(projectId: string): Promise<AndroidSdkInfo> {
+    const project = this.#requireProject(projectId);
+    try {
+      return await this.#sdkService.install(project.rootPath, project.modules);
+    } catch (error) {
+      const message = error instanceof AndroidSdkServiceError ? error.message : errorMessage(error);
+      throw new ProjectBuildError(`Android SDK 安装失败：${message}`, 503);
+    }
   }
 
   public async listRuns(projectId: string): Promise<ProjectBuildRunListResponse> {
@@ -327,6 +319,18 @@ export class LocalProjectBuildService implements ProjectBuildService {
     if (wrapper === undefined) {
       throw new ProjectBuildError("未找到 Gradle Wrapper，已拒绝执行构建。", 422);
     }
+    const androidSdk = await this.#sdkService.inspect(project.rootPath, project.modules);
+    if (
+      !androidSdk.available ||
+      androidSdk.path === undefined ||
+      androidSdk.missingPackages.length > 0
+    ) {
+      const missing = androidSdk.missingPackages.join("、");
+      throw new ProjectBuildError(
+        missing.length === 0 ? "Android SDK 未就绪。" : `Android SDK 缺少：${missing}。`,
+        503,
+      );
+    }
 
     const buildLogDirectory = join(this.#paths.logs, "builds");
     await mkdir(buildLogDirectory, { recursive: true });
@@ -354,7 +358,6 @@ export class LocalProjectBuildService implements ProjectBuildService {
     );
     let buildProcess: ProjectBuildProcess;
     try {
-      const androidSdk = await findAndroidSdk(project.rootPath);
       buildProcess = this.#runner.start({
         executable: wrapper,
         args: ["--no-daemon", "--console=plain", target.taskName],
@@ -362,9 +365,8 @@ export class LocalProjectBuildService implements ProjectBuildService {
         environment: {
           ...process.env,
           GRADLE_USER_HOME: this.#paths.gradleHome,
-          ...(androidSdk.source === "local-properties" && androidSdk.path !== undefined
-            ? { ANDROID_HOME: androidSdk.path, ANDROID_SDK_ROOT: androidSdk.path }
-            : {}),
+          ANDROID_HOME: androidSdk.path,
+          ANDROID_SDK_ROOT: androidSdk.path,
         },
         onOutput: (chunk) => logStream.write(chunk),
       });

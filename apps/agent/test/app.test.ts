@@ -189,7 +189,13 @@ describe("DeviceRobot Agent", () => {
         listTargets: async () => ({
           projectId: project.id,
           gradleWrapper: true,
-          androidSdk: { available: true, path: "D:\\Android\\Sdk", source: "environment" as const },
+          androidSdk: {
+            available: true,
+            path: "D:\\Android\\Sdk",
+            source: "environment" as const,
+            requiredPackages: ["platform-tools"],
+            missingPackages: [],
+          },
           targets: [
             {
               modulePath: "app",
@@ -198,6 +204,13 @@ describe("DeviceRobot Agent", () => {
               taskName: ":app:assembleDebug",
             },
           ],
+        }),
+        installSdk: async () => ({
+          available: true,
+          path: "D:\\Android\\Sdk",
+          source: "environment" as const,
+          requiredPackages: ["platform-tools"],
+          missingPackages: [],
         }),
         listRuns: async () => ({ projectId: project.id, runs: [buildRun] }),
         start: startBuild,
@@ -234,6 +247,12 @@ describe("DeviceRobot Agent", () => {
         method: "GET",
         url: `/api/v1/projects/${project.id}/builds/targets`,
         headers,
+      });
+      const sdkInstall = await app.inject({
+        method: "POST",
+        url: `/api/v1/projects/${project.id}/android-sdk/install`,
+        headers,
+        payload: { approved: true },
       });
       const runs = await app.inject({
         method: "GET",
@@ -281,6 +300,7 @@ describe("DeviceRobot Agent", () => {
       expect(created.statusCode).toBe(200);
       expect(indexed.statusCode).toBe(200);
       expect(targets.statusCode).toBe(200);
+      expect(sdkInstall.statusCode).toBe(200);
       expect(runs.statusCode).toBe(200);
       expect(build.statusCode).toBe(200);
       expect(aiStatus.statusCode).toBe(200);

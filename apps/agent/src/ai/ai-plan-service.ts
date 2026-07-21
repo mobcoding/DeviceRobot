@@ -400,6 +400,8 @@ function planPromptRules(): string[] {
     "必须只输出 JSON 对象，格式为 {reply:string,actions:AgentAction[]}。reply 使用简体中文。",
     "actions 至少一项、最多二十项。只能使用 app.launch、app.stop、ui.tap、ui.longPress、ui.input、ui.swipe、ui.back、ui.wait、assert.visible、assert.notVisible、assert.text、assert.activity、device.permission、device.orientation、device.screenshot。",
     '严格示例：{"reply":"先记录启动流程的可观察证据。","actions":[{"action":"ui.wait","durationMs":1500},{"action":"device.screenshot","name":"启动页"}]}。',
+    "动作字段：app.launch/app.stop 必须有 appId；ui.tap、ui.longPress、assert.visible、assert.notVisible 必须有 target；assert.text 还必须有 expected；ui.input 必须有 value；ui.swipe 必须有 start 和 end，二者均为 {x:number,y:number}；ui.wait 必须有 durationMs:number；assert.activity 必须有 expected；device.screenshot 可选 name。",
+    "target 必须是对象，且包含 text、resourceId、accessibilityId、className 之一，或同时包含 x:number 与 y:number；不得写成 selector、element、description、page、route 或字符串。",
     "严禁输出 adb.shell、app.install、文件路径、命令行、未在证据中出现的 resourceId、accessibilityId、页面文案或路由。证据不足时使用 ui.wait、device.screenshot 或在 reply 中说明限制。",
     "每个 ui.tap、ui.longPress、assert.visible、assert.notVisible、assert.text 都必须提供 target；优先使用 text、resourceId、accessibilityId 等语义定位器。",
   ];
@@ -413,10 +415,16 @@ function repairPrompt(): string {
   ].join("\n");
 }
 
-function repairUserPrompt(userPromptText: string, invalidContent: string): string {
+function repairUserPrompt(
+  userPromptText: string,
+  invalidContent: string,
+  validationFeedback: string,
+): string {
   return [
     "原始任务上下文：",
     userPromptText,
+    "程序校验反馈：",
+    validationFeedback,
     "需要修正的模型草稿：",
     invalidContent.slice(0, 16_000),
   ].join("\n");
@@ -499,24 +507,27 @@ export class OpenAiCompatiblePlanProvider implements AiPlanModelProvider {
       MODEL_TIMEOUT_MS,
       "请求模型",
     );
-    const firstContent = extractContent(payload);
-    try {
-      return parseModelPlan(firstContent);
-    } catch (error) {
-      if (!(error instanceof AiPlanError) || error.statusCode !== 422) {
-        throw error;
+    const configuration: CompleteOpenAiCompatibleConfiguration = {
+      baseUrl: this.#configuration.baseUrl,
+      apiKey: this.#configuration.apiKey,
+      model: this.#configuration.model,
+    };
+    let candidateContent = extractContent(payload);
+    for (let repairAttempt = 0; repairAttempt < 3; repairAttempt += 1) {
+      try {
+        return parseModelPlan(candidateContent);
+      } catch (error) {
+        if (!(error instanceof AiPlanError) || error.statusCode !== 422 || repairAttempt === 2) {
+          throw error;
+        }
+        const repairedPayload = await requestStructuredPlan(configuration, [
+          { role: "system", content: repairPrompt() },
+          { role: "user", content: repairUserPrompt(input.user, candidateContent, error.message) },
+        ]);
+        candidateContent = extractContent(repairedPayload);
       }
-      const configuration: CompleteOpenAiCompatibleConfiguration = {
-        baseUrl: this.#configuration.baseUrl,
-        apiKey: this.#configuration.apiKey,
-        model: this.#configuration.model,
-      };
-      const repairedPayload = await requestStructuredPlan(configuration, [
-        { role: "system", content: repairPrompt() },
-        { role: "user", content: repairUserPrompt(input.user, firstContent) },
-      ]);
-      return parseModelPlan(extractContent(repairedPayload));
     }
+    throw new AiPlanError("模型未返回可用的操作计划。", 422);
   }
 
   public async testConnection(): Promise<void> {

@@ -249,7 +249,7 @@ describe("AI action plan service", () => {
     }
   });
 
-  it("repairs one invalid model plan and accepts JSON wrapped in explanatory text", async () => {
+  it("repairs invalid model plans with validation feedback and accepts wrapped JSON", async () => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => {
       void _url;
       void _init;
@@ -261,6 +261,21 @@ describe("AI action plan service", () => {
                 message: {
                   content:
                     '计划草稿：\n```json\n{"reply":"验证启动流程。","actions":[{"action":"navigate","to":"主页"}]}\n```',
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (fetchMock.mock.calls.length === 2) {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    '{"reply":"继续验证启动流程。","actions":[{"action":"ui.tap","text":"首页"}]}',
                 },
               },
             ],
@@ -304,10 +319,13 @@ describe("AI action plan service", () => {
           actions: [{ action: "ui.wait", durationMs: 1500 }, { action: "device.screenshot" }],
         },
       });
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
       expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
         max_tokens: 2048,
       });
+      expect(
+        String(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).messages[1].content),
+      ).toContain("actions.0");
     } finally {
       vi.unstubAllGlobals();
     }

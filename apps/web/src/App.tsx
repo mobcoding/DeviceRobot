@@ -18,6 +18,7 @@ import { fetchHealth } from "./api/health";
 import { AppiumRuntimePanel } from "./components/AppiumRuntimePanel";
 import { ApkInstallDialog } from "./components/ApkInstallDialog";
 import { ApplicationManagerPanel } from "./components/ApplicationManagerPanel";
+import { AiPlanPanel } from "./components/AiPlanPanel";
 import { DeviceControlPanel } from "./components/DeviceControlPanel";
 import { DeviceLogcatPanel } from "./components/DeviceLogcatPanel";
 import { DeviceMirrorPanel } from "./components/DeviceMirrorPanel";
@@ -39,7 +40,10 @@ const GOLDEN_RATIO = 1.618;
 const MINIMUM_MIRROR_WIDTH = 280;
 
 type ViewId = (typeof viewIds)[number];
-type PlannedViewId = Exclude<ViewId, "devices" | "files" | "applications" | "logs">;
+type PlannedViewId = Exclude<
+  ViewId,
+  "devices" | "files" | "applications" | "logs" | "projects" | "conversations"
+>;
 type WorkspaceTab = { id: ViewId; label: string };
 
 type PlannedViewContent = {
@@ -71,16 +75,6 @@ const workspaceTabs: readonly WorkspaceTab[] = [
 ];
 
 const plannedViews: Record<PlannedViewId, PlannedViewContent> = {
-  projects: {
-    title: "项目",
-    description: "尚未接入 Android 项目。",
-    capabilities: ["本地与 Git 仓库", "Gradle 构建变体", "XML View 与 Compose 索引"],
-  },
-  conversations: {
-    title: "AI 与用例",
-    description: "尚未创建 AI 对话或测试用例。",
-    capabilities: ["源码感知规划", "结构化操作", "审批与信任策略"],
-  },
   runs: {
     title: "测试运行",
     description: "尚未启动测试运行。",
@@ -616,6 +610,8 @@ export function App(): React.JSX.Element {
             <DeviceLogcatPanel device={selectedDevice} />
           ) : activeView === "projects" ? (
             <ProjectManagerPanel />
+          ) : activeView === "conversations" ? (
+            <AiPlanPanel device={selectedDevice} />
           ) : (
             <PlannedView content={plannedViews[activeView as PlannedViewId]} />
           )}

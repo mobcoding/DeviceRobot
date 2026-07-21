@@ -310,6 +310,31 @@ const runningProjectBuildResponse = {
   startedAt: "2026-07-21T10:01:00.000Z",
 };
 
+const aiModelStatusResponse = {
+  configured: true,
+  provider: "openai-compatible",
+  baseUrl: "https://model.example/v1",
+  model: "test-model",
+};
+
+const aiPlanResponse = {
+  reply: "已生成首页可见性检查计划。",
+  plan: {
+    id: "423e4567-e89b-12d3-a456-426614174000",
+    projectId: exampleProject.id,
+    actions: [{ action: "assert.visible", target: { text: "首页" } }],
+    requiresApproval: true,
+  },
+  policy: {
+    allowed: true,
+    requiresApproval: true,
+    reason: "AI 生成的计划仅供预览，执行前必须获得明确确认。",
+    warnings: [],
+  },
+  context: { projectName: "Example", sourceIndexAvailable: false, evidence: [] },
+  generatedAt: "2026-07-21T10:02:00.000Z",
+};
+
 const apkArtifactResponse = {
   id: "123e4567-e89b-12d3-a456-426614174000",
   fileName: "sample.apk",
@@ -335,6 +360,7 @@ function mockApis(options: { healthError?: Error } = {}): {
   getProjectCreateRequests: () => number;
   getProjectReindexRequests: () => number;
   getProjectBuildRequests: () => number;
+  getAiPlanRequests: () => number;
 } {
   let deviceRequests = 0;
   let actionRequests = 0;
@@ -346,6 +372,7 @@ function mockApis(options: { healthError?: Error } = {}): {
   let projectSourceIndexed = false;
   let projectBuildRequests = 0;
   let projectBuildStarted = false;
+  let aiPlanRequests = 0;
   const actionHistory = {
     serial: "8B3Y0THX0",
     actions: [] as Array<{
@@ -365,6 +392,21 @@ function mockApis(options: { healthError?: Error } = {}): {
 
     if (url.includes("/api/v1/appium/runtime")) {
       return new Response(JSON.stringify(appiumRuntimeResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (url === "/api/v1/ai/status") {
+      return new Response(JSON.stringify(aiModelStatusResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (url === "/api/v1/ai/plans" && method === "POST") {
+      aiPlanRequests += 1;
+      return new Response(JSON.stringify(aiPlanResponse), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -541,6 +583,7 @@ function mockApis(options: { healthError?: Error } = {}): {
     getProjectCreateRequests: () => projectCreateRequests,
     getProjectReindexRequests: () => projectReindexRequests,
     getProjectBuildRequests: () => projectBuildRequests,
+    getAiPlanRequests: () => aiPlanRequests,
   };
 }
 
@@ -635,6 +678,24 @@ describe("DeviceRobot Web UI", () => {
 
     await vi.waitFor(() => expect(getProjectBuildRequests()).toBe(1));
     expect(await screen.findByText("构建中")).toBeInTheDocument();
+  });
+
+  it("uses the configured model to generate a preview-only AI ActionPlan", async () => {
+    const { getAiPlanRequests } = mockApis();
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
+    await user.click(screen.getByRole("button", { name: "AI 与用例" }));
+    expect(await screen.findByText("模型已配置")).toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: "测试目标" }), "验证首页可见");
+    await user.click(screen.getByRole("button", { name: "生成操作计划" }));
+
+    await vi.waitFor(() => expect(getAiPlanRequests()).toBe(1));
+    expect(await screen.findByText("已生成首页可见性检查计划。")).toBeInTheDocument();
+    expect(screen.getByText("ActionPlan 预览")).toBeInTheDocument();
+    expect(screen.getByText("assert.visible")).toBeInTheDocument();
+    expect(screen.getByText("执行前必须确认")).toBeInTheDocument();
   });
 
   it("opens device files from the default file manager tab", async () => {

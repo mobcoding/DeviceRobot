@@ -8,6 +8,18 @@ export {
 } from "./action-plan.js";
 export { healthResponseSchema, type HealthResponse } from "./health.js";
 export {
+  aiModelStatusSchema,
+  aiPlanContextSchema,
+  aiPlanPolicySchema,
+  aiPlanResponseSchema,
+  generateAiPlanRequestSchema,
+  type AiModelStatus,
+  type AiPlanContext,
+  type AiPlanPolicy,
+  type AiPlanResponse,
+  type GenerateAiPlanRequest,
+} from "./ai.js";
+export {
   androidProjectModuleSchema,
   androidProjectSchema,
   androidBuildTargetListResponseSchema,

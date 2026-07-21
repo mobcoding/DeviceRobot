@@ -22,10 +22,13 @@ import {
   appiumRuntimeSchema,
   androidBuildTargetListResponseSchema,
   androidProjectSchema,
+  aiModelStatusSchema,
+  aiPlanResponseSchema,
   createProjectRequestSchema,
   projectListResponseSchema,
   projectBuildRunListResponseSchema,
   projectBuildRunSchema,
+  generateAiPlanRequestSchema,
   startProjectBuildRequestSchema,
 } from "@device-robot/contracts";
 import Fastify, {
@@ -81,6 +84,7 @@ import {
   type ProjectBuildService,
 } from "./projects/project-build-service.js";
 import { SqliteProjectBuildStore } from "./projects/project-build-store.js";
+import { AiPlanError, LocalAiPlanService, type AiPlanService } from "./ai/ai-plan-service.js";
 
 export const AGENT_VERSION = "0.1.0";
 const WEBSOCKET_OPEN = 1;
@@ -97,6 +101,7 @@ export type CreateAgentAppOptions = {
   deviceFileTransferService?: DeviceFileTransferService;
   projectService?: ProjectService;
   projectBuildService?: ProjectBuildService;
+  aiPlanService?: AiPlanService;
   apkArtifactService?: ApkArtifactService;
   deviceActionAuditStore?: DeviceActionAuditStore;
   appiumRuntimeService?: AppiumRuntimeService;
@@ -113,6 +118,7 @@ export type AgentApp = {
   deviceFileTransferService: DeviceFileTransferService;
   projectService: ProjectService;
   projectBuildService: ProjectBuildService;
+  aiPlanService: AiPlanService;
   apkArtifactService: ApkArtifactService;
   deviceActionAuditStore: DeviceActionAuditStore;
   appiumRuntimeService: AppiumRuntimeService;
@@ -286,6 +292,15 @@ function projectBuildErrorReply(reply: FastifyReply, error: unknown): FastifyRep
   return reply.code(500).send({ error: message });
 }
 
+function aiPlanErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
+  if (error instanceof AiPlanError) {
+    return reply.code(error.statusCode).send({ error: error.message });
+  }
+
+  const message = error instanceof Error ? error.message : "AI 计划请求失败。";
+  return reply.code(500).send({ error: message });
+}
+
 export async function createAgentApp(options: CreateAgentAppOptions = {}): Promise<AgentApp> {
   const paths = options.paths ?? resolveAgentPaths(options.localAppData);
   ensureAgentDirectories(paths);
@@ -311,6 +326,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
       projectStore,
       buildStore: new SqliteProjectBuildStore(database.sqlite),
     });
+  const aiPlanService = options.aiPlanService ?? new LocalAiPlanService({ projectStore });
   const apkArtifactService =
     options.apkArtifactService ??
     new LocalApkArtifactService({
@@ -417,6 +433,20 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
       );
     } catch (error) {
       return projectBuildErrorReply(reply, error);
+    }
+  });
+
+  app.get("/api/v1/ai/status", async () => {
+    return aiModelStatusSchema.parse(await aiPlanService.status());
+  });
+
+  app.post("/api/v1/ai/plans", async (request, reply) => {
+    try {
+      return aiPlanResponseSchema.parse(
+        await aiPlanService.generate(generateAiPlanRequestSchema.parse(request.body)),
+      );
+    } catch (error) {
+      return aiPlanErrorReply(reply, error);
     }
   });
 
@@ -807,6 +837,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     deviceFileTransferService,
     projectService,
     projectBuildService,
+    aiPlanService,
     apkArtifactService,
     deviceActionAuditStore,
     appiumRuntimeService,

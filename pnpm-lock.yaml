@@ -43,6 +43,9 @@ importers:
 
   apps/agent:
     dependencies:
+      "@device-robot/ai-core":
+        specifier: workspace:*
+        version: link:../../packages/ai-core
       "@device-robot/config":
         specifier: workspace:*
         version: link:../../packages/config
@@ -88,6 +91,9 @@ importers:
       fastify:
         specifier: 5.10.0
         version: 5.10.0
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
     devDependencies:
       "@types/better-sqlite3":
         specifier: 7.6.13

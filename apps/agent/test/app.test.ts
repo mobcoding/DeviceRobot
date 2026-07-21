@@ -154,6 +154,24 @@ describe("DeviceRobot Agent", () => {
       startedAt: "2026-07-21T10:00:00.000Z",
     };
     const startBuild = vi.fn(async () => buildRun);
+    const aiPlan = {
+      reply: "已生成首页检查计划。",
+      plan: {
+        id: "323e4567-e89b-12d3-a456-426614174000",
+        projectId: project.id,
+        actions: [{ action: "ui.wait" as const, durationMs: 500 }],
+        requiresApproval: true,
+      },
+      policy: {
+        allowed: true,
+        requiresApproval: true,
+        reason: "AI 生成的计划仅供预览。",
+        warnings: [],
+      },
+      context: { projectName: project.name, sourceIndexAvailable: false, evidence: [] },
+      generatedAt: "2026-07-21T10:00:00.000Z",
+    };
+    const generateAiPlan = vi.fn(async () => aiPlan);
     const { app } = await createAgentApp({
       localAppData: createTemporaryRoot(),
       projectService: { list: async () => [project], add, reindex },
@@ -174,6 +192,15 @@ describe("DeviceRobot Agent", () => {
         listRuns: async () => ({ projectId: project.id, runs: [buildRun] }),
         start: startBuild,
         dispose: async () => {},
+      },
+      aiPlanService: {
+        status: async () => ({
+          configured: true,
+          provider: "openai-compatible" as const,
+          baseUrl: "https://model.example/v1",
+          model: "test-model",
+        }),
+        generate: generateAiPlan,
       },
     });
     const headers = { host: "127.0.0.1:43110" };
@@ -207,6 +234,13 @@ describe("DeviceRobot Agent", () => {
         headers,
         payload: { modulePath: "app", variant: "debug", approved: true },
       });
+      const aiStatus = await app.inject({ method: "GET", url: "/api/v1/ai/status", headers });
+      const aiGenerated = await app.inject({
+        method: "POST",
+        url: "/api/v1/ai/plans",
+        headers,
+        payload: { projectId: project.id, goal: "检查首页" },
+      });
 
       expect(listed.statusCode).toBe(200);
       expect(listed.json()).toMatchObject({ projects: [{ name: "Example" }] });
@@ -215,6 +249,8 @@ describe("DeviceRobot Agent", () => {
       expect(targets.statusCode).toBe(200);
       expect(runs.statusCode).toBe(200);
       expect(build.statusCode).toBe(200);
+      expect(aiStatus.statusCode).toBe(200);
+      expect(aiGenerated.statusCode).toBe(200);
       expect(created.json()).toMatchObject({ modules: [{ packageName: "com.example.app" }] });
       expect(add).toHaveBeenCalledWith({ source: "local", rootPath: "C:\\Github\\Example" });
       expect(reindex).toHaveBeenCalledWith(project.id);
@@ -223,6 +259,7 @@ describe("DeviceRobot Agent", () => {
         variant: "debug",
         approved: true,
       });
+      expect(generateAiPlan).toHaveBeenCalledWith({ projectId: project.id, goal: "检查首页" });
     } finally {
       await app.close();
     }

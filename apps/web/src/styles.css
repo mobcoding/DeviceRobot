@@ -1424,6 +1424,240 @@ summary:focus-visible {
   font-size: 11px;
 }
 
+.ai-model-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid #5b4d37;
+  border-radius: 5px;
+  color: #d6bb82;
+  background: #252117;
+}
+
+.ai-model-status.ready {
+  border-color: #2f6b63;
+  color: #8fd4c6;
+  background: #173029;
+}
+
+.ai-model-status > div {
+  display: grid;
+  gap: 2px;
+}
+
+.ai-model-status strong {
+  font-size: 11px;
+}
+
+.ai-model-status span {
+  color: #aeb8bc;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 10px;
+}
+
+.ai-config-hint {
+  margin: 0 0 15px;
+  color: #8e999e;
+  font-size: 10px;
+  line-height: 1.65;
+}
+
+.ai-config-hint code {
+  color: #b7d9d6;
+  font-family: "Cascadia Code", Consolas, monospace;
+}
+
+.ai-plan-form {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 12px;
+  margin-bottom: 17px;
+  padding: 13px;
+  border: 1px solid #303030;
+  border-radius: 6px;
+  background: #191919;
+}
+
+.ai-plan-form label {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  align-content: start;
+  color: #aeb8bc;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.ai-plan-form select,
+.ai-plan-form textarea {
+  width: 100%;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #edf0f1;
+  background: #151515;
+  font-size: 12px;
+}
+
+.ai-plan-form select {
+  height: 32px;
+  padding: 0 8px;
+}
+
+.ai-plan-form label small {
+  color: #899499;
+  font-size: 9px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.ai-goal-field {
+  grid-row: span 2;
+}
+
+.ai-plan-form textarea {
+  min-height: 92px;
+  resize: vertical;
+  padding: 9px;
+  font-family: inherit;
+  line-height: 1.55;
+}
+
+.ai-plan-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ai-plan-actions > span {
+  overflow: hidden;
+  color: #8e999e;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-plan-actions .primary-command {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ai-conversation {
+  display: grid;
+  gap: 10px;
+}
+
+.ai-message {
+  padding: 12px 13px;
+  border: 1px solid #303030;
+  border-radius: 6px;
+  background: #191919;
+}
+
+.ai-message.user {
+  border-left: 3px solid #4f7190;
+}
+
+.ai-message.assistant {
+  border-left: 3px solid #3c847b;
+}
+
+.ai-message > strong {
+  color: #cfd8da;
+  font-size: 10px;
+}
+
+.ai-message > p {
+  margin: 7px 0 0;
+  color: #b8c1c4;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.ai-plan-result {
+  margin-top: 12px;
+  border: 1px solid #354144;
+  border-radius: 4px;
+  background: #151515;
+}
+
+.ai-plan-result > header {
+  display: flex;
+  min-height: 33px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 9px;
+  border-bottom: 1px solid #303030;
+}
+
+.ai-plan-result > header span {
+  color: #d5dfdf;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.ai-plan-result > header em {
+  color: #dfbd7c;
+  font-size: 9px;
+  font-style: normal;
+}
+
+.ai-plan-result ol {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 8px;
+  list-style: none;
+}
+
+.ai-plan-result li {
+  display: grid;
+  grid-template-columns: 22px minmax(130px, 190px) minmax(0, 1fr);
+  align-items: start;
+  gap: 7px;
+  padding: 7px;
+  background: #1c1c1c;
+}
+
+.ai-plan-result li > strong {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 50%;
+  color: #88d8c0;
+  background: #21413b;
+  font-size: 9px;
+}
+
+.ai-plan-result li > code {
+  color: #a9deda;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 10px;
+}
+
+.ai-plan-result li > pre {
+  min-width: 0;
+  margin: 0;
+  overflow: auto;
+  color: #9da8ac;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.ai-plan-result > p {
+  margin: 0;
+  padding: 0 9px 9px;
+  color: #8e999e;
+  font-size: 9px;
+}
+
 .manager-path-form button {
   flex: 0 0 auto;
   min-width: 46px;

@@ -54,6 +54,54 @@ export const androidSourceIndexSchema = z.object({
   evidence: z.array(androidSourceEvidenceSchema).max(2_000),
 });
 
+export const androidBuildTargetSchema = z.object({
+  modulePath: z.string().min(1),
+  moduleName: z.string().min(1),
+  variant: z.string().regex(/^[A-Za-z][A-Za-z0-9_]*$/u),
+  taskName: z.string().regex(/^:[A-Za-z0-9_:]+$/u),
+});
+
+export const androidSdkInfoSchema = z.object({
+  available: z.boolean(),
+  path: z.string().min(1).optional(),
+  source: z.enum(["environment", "local-properties", "unavailable"]),
+});
+
+export const androidBuildTargetListResponseSchema = z.object({
+  projectId: z.uuid(),
+  gradleWrapper: z.boolean(),
+  androidSdk: androidSdkInfoSchema,
+  targets: z.array(androidBuildTargetSchema).max(500),
+});
+
+export const projectBuildRunStatusSchema = z.enum(["running", "succeeded", "failed", "cancelled"]);
+
+export const projectBuildRunSchema = z.object({
+  id: z.uuid(),
+  projectId: z.uuid(),
+  modulePath: z.string().min(1),
+  variant: z.string().regex(/^[A-Za-z][A-Za-z0-9_]*$/u),
+  taskName: z.string().regex(/^:[A-Za-z0-9_:]+$/u),
+  status: projectBuildRunStatusSchema,
+  logPath: z.string().min(1),
+  artifactPaths: z.array(z.string().min(1)).max(100),
+  message: z.string().min(1).optional(),
+  exitCode: z.number().int().nullable().optional(),
+  startedAt: z.iso.datetime(),
+  finishedAt: z.iso.datetime().optional(),
+});
+
+export const projectBuildRunListResponseSchema = z.object({
+  projectId: z.uuid(),
+  runs: z.array(projectBuildRunSchema).max(100),
+});
+
+export const startProjectBuildRequestSchema = z.object({
+  modulePath: z.string().min(1).max(1_024),
+  variant: z.string().regex(/^[A-Za-z][A-Za-z0-9_]*$/u),
+  approved: z.literal(true),
+});
+
 export const androidProjectSchema = z.object({
   id: z.uuid(),
   name: z.string().min(1),
@@ -84,6 +132,13 @@ export type AndroidSourceEvidence = z.infer<typeof androidSourceEvidenceSchema>;
 export type AndroidSourceIndexModule = z.infer<typeof androidSourceIndexModuleSchema>;
 export type AndroidSourceIndexSummary = z.infer<typeof androidSourceIndexSummarySchema>;
 export type AndroidSourceIndex = z.infer<typeof androidSourceIndexSchema>;
+export type AndroidBuildTarget = z.infer<typeof androidBuildTargetSchema>;
+export type AndroidSdkInfo = z.infer<typeof androidSdkInfoSchema>;
+export type AndroidBuildTargetListResponse = z.infer<typeof androidBuildTargetListResponseSchema>;
+export type ProjectBuildRunStatus = z.infer<typeof projectBuildRunStatusSchema>;
+export type ProjectBuildRun = z.infer<typeof projectBuildRunSchema>;
+export type ProjectBuildRunListResponse = z.infer<typeof projectBuildRunListResponseSchema>;
+export type StartProjectBuildRequest = z.infer<typeof startProjectBuildRequestSchema>;
 export type AndroidProject = z.infer<typeof androidProjectSchema>;
 export type ProjectListResponse = z.infer<typeof projectListResponseSchema>;
 export type CreateProjectRequest = z.infer<typeof createProjectRequestSchema>;

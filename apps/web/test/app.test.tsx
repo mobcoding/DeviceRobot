@@ -240,9 +240,10 @@ const projectsResponse = {
     },
   ],
 };
+const exampleProject = projectsResponse.projects[0]!;
 
 const indexedProjectResponse = {
-  ...projectsResponse.projects[0],
+  ...exampleProject,
   sourceIndex: {
     schemaVersion: 1,
     scannedAt: "2026-07-21T10:01:00.000Z",
@@ -276,6 +277,39 @@ const indexedProjectResponse = {
   },
 };
 
+const projectBuildTargetResponse = {
+  projectId: exampleProject.id,
+  gradleWrapper: true,
+  androidSdk: { available: true, path: "D:\\Android\\Sdk", source: "environment" },
+  targets: [
+    {
+      modulePath: "app",
+      moduleName: "app",
+      variant: "debug",
+      taskName: ":app:assembleDebug",
+    },
+    {
+      modulePath: "app",
+      moduleName: "app",
+      variant: "release",
+      taskName: ":app:assembleRelease",
+    },
+  ],
+};
+
+const runningProjectBuildResponse = {
+  id: "223e4567-e89b-12d3-a456-426614174000",
+  projectId: exampleProject.id,
+  modulePath: "app",
+  variant: "debug",
+  taskName: ":app:assembleDebug",
+  status: "running",
+  logPath: "C:\\Users\\tester\\AppData\\Local\\AIMobileTester\\logs\\builds\\build.log",
+  artifactPaths: [],
+  message: "Gradle 构建正在执行。",
+  startedAt: "2026-07-21T10:01:00.000Z",
+};
+
 const apkArtifactResponse = {
   id: "123e4567-e89b-12d3-a456-426614174000",
   fileName: "sample.apk",
@@ -300,6 +334,7 @@ function mockApis(options: { healthError?: Error } = {}): {
   getFileUploadRequests: () => number;
   getProjectCreateRequests: () => number;
   getProjectReindexRequests: () => number;
+  getProjectBuildRequests: () => number;
 } {
   let deviceRequests = 0;
   let actionRequests = 0;
@@ -309,6 +344,8 @@ function mockApis(options: { healthError?: Error } = {}): {
   let projectCreateRequests = 0;
   let projectReindexRequests = 0;
   let projectSourceIndexed = false;
+  let projectBuildRequests = 0;
+  let projectBuildStarted = false;
   const actionHistory = {
     serial: "8B3Y0THX0",
     actions: [] as Array<{
@@ -340,6 +377,31 @@ function mockApis(options: { healthError?: Error } = {}): {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
+    }
+
+    if (url.endsWith(`/projects/${projectBuildTargetResponse.projectId}/builds/targets`)) {
+      return new Response(JSON.stringify(projectBuildTargetResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (url.endsWith(`/projects/${projectBuildTargetResponse.projectId}/builds`)) {
+      if (method === "POST") {
+        projectBuildRequests += 1;
+        projectBuildStarted = true;
+        return new Response(JSON.stringify(runningProjectBuildResponse), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          projectId: projectBuildTargetResponse.projectId,
+          runs: projectBuildStarted ? [runningProjectBuildResponse] : [],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
     }
 
     if (url === "/api/v1/projects") {
@@ -478,6 +540,7 @@ function mockApis(options: { healthError?: Error } = {}): {
     getFileUploadRequests: () => fileUploadRequests,
     getProjectCreateRequests: () => projectCreateRequests,
     getProjectReindexRequests: () => projectReindexRequests,
+    getProjectBuildRequests: () => projectBuildRequests,
   };
 }
 
@@ -551,6 +614,27 @@ describe("DeviceRobot Web UI", () => {
     expect(
       screen.getByText("app/src/main/java/com/example/app/HomeScreen.kt:1"),
     ).toBeInTheDocument();
+  });
+
+  it("requires an explicit confirmation before starting a discovered Gradle Variant", async () => {
+    const { getProjectBuildRequests } = mockApis();
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
+    await user.click(screen.getByRole("button", { name: "项目" }));
+    const task = await screen.findByText(":app:assembleDebug");
+    const target = task.parentElement;
+    expect(target).not.toBeNull();
+    await user.click(within(target as HTMLElement).getByRole("button", { name: "构建" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "确认构建" });
+    expect(within(dialog).getByText(":app:assembleDebug")).toBeInTheDocument();
+    expect(getProjectBuildRequests()).toBe(0);
+    await user.click(within(dialog).getByRole("button", { name: "确认构建" }));
+
+    await vi.waitFor(() => expect(getProjectBuildRequests()).toBe(1));
+    expect(await screen.findByText("构建中")).toBeInTheDocument();
   });
 
   it("opens device files from the default file manager tab", async () => {

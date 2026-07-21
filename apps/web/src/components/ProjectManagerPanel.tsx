@@ -1,9 +1,33 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderGit2, FolderOpen, GitBranch, RefreshCw } from "lucide-react";
 import { useState } from "react";
-import type { AndroidProject, ProjectSource } from "@device-robot/contracts";
+import type {
+  AndroidBuildTarget,
+  AndroidProject,
+  AndroidSdkInfo,
+  ProjectBuildRun,
+  ProjectSource,
+} from "@device-robot/contracts";
 
-import { createProject, fetchProjects, reindexProject } from "../api/projects";
+import {
+  createProject,
+  fetchProjectBuildRuns,
+  fetchProjectBuildTargets,
+  fetchProjects,
+  reindexProject,
+  startProjectBuild,
+} from "../api/projects";
+
+type ProjectBuildData = {
+  targets: AndroidBuildTarget[];
+  runs: ProjectBuildRun[];
+  androidSdk: AndroidSdkInfo;
+};
+
+type PendingBuild = {
+  project: AndroidProject;
+  target: AndroidBuildTarget;
+};
 
 function sourceLabel(source: ProjectSource): string {
   return source === "local" ? "本地目录" : "Git 仓库";
@@ -44,11 +68,95 @@ function evidenceKindLabel(
   }
 }
 
+function buildStatusLabel(status: ProjectBuildRun["status"]): string {
+  switch (status) {
+    case "running":
+      return "构建中";
+    case "succeeded":
+      return "已完成";
+    case "failed":
+      return "失败";
+    case "cancelled":
+      return "已取消";
+  }
+}
+
+function ProjectBuildSection({
+  project,
+  data,
+  loading,
+  building,
+  onRequestBuild,
+}: {
+  project: AndroidProject;
+  data: ProjectBuildData | undefined;
+  loading: boolean;
+  building: boolean;
+  onRequestBuild(target: AndroidBuildTarget): void;
+}): React.JSX.Element {
+  return (
+    <section className="project-build" aria-label={`${project.name} 的构建`}>
+      <header>
+        <div>
+          <strong>Gradle 构建</strong>
+          <small>仅使用项目自身的 Gradle Wrapper</small>
+          {data !== undefined && (
+            <span
+              className={
+                data.androidSdk.available ? "project-sdk-state ready" : "project-sdk-state"
+              }
+            >
+              {data.androidSdk.available ? "Android SDK 已就绪" : "Android SDK 未发现"}
+            </span>
+          )}
+        </div>
+      </header>
+      {!project.gradleWrapper ? (
+        <p>未检测到 Gradle Wrapper，已禁用构建操作。</p>
+      ) : loading ? (
+        <p>正在发现可构建的 Variant。</p>
+      ) : data === undefined ? (
+        <p>暂时无法读取构建信息。</p>
+      ) : data.targets.length === 0 ? (
+        <p>未从 Gradle 配置中发现可构建的 Variant。</p>
+      ) : (
+        <>
+          <div className="project-build-targets" aria-label="可构建 Variant">
+            {data.targets.map((target) => (
+              <span key={`${target.modulePath}-${target.variant}`}>
+                <strong>{target.moduleName}</strong>
+                <em>{target.variant}</em>
+                <code>{target.taskName}</code>
+                <button type="button" disabled={building} onClick={() => onRequestBuild(target)}>
+                  构建
+                </button>
+              </span>
+            ))}
+          </div>
+          {data.runs.length > 0 && (
+            <div className="project-build-runs" aria-label="构建记录">
+              {data.runs.slice(0, 3).map((run) => (
+                <span key={run.id} className={`project-build-run ${run.status}`}>
+                  <strong>{buildStatusLabel(run.status)}</strong>
+                  <code>{run.taskName}</code>
+                  {run.message !== undefined && <small>{run.message}</small>}
+                  {run.artifactPaths.length > 0 && <em>{run.artifactPaths[0]}</em>}
+                </span>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 export function ProjectManagerPanel(): React.JSX.Element {
   const queryClient = useQueryClient();
   const [source, setSource] = useState<ProjectSource>("local");
   const [localPath, setLocalPath] = useState("");
   const [remoteUrl, setRemoteUrl] = useState("");
+  const [pendingBuild, setPendingBuild] = useState<PendingBuild>();
   const projectsQuery = useQuery({
     queryKey: ["projects"],
     queryFn: ({ signal }) => fetchProjects(signal),
@@ -73,6 +181,38 @@ export function ProjectManagerPanel(): React.JSX.Element {
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
     },
   });
+  const projectIds = projectsQuery.data?.projects.map((project) => project.id) ?? [];
+  const projectBuildsQuery = useQuery({
+    queryKey: ["project-build-data", projectIds],
+    enabled: projectIds.length > 0,
+    queryFn: async ({ signal }): Promise<Record<string, ProjectBuildData>> =>
+      Object.fromEntries(
+        await Promise.all(
+          projectIds.map(async (projectId) => {
+            const [targets, runs] = await Promise.all([
+              fetchProjectBuildTargets(projectId, signal),
+              fetchProjectBuildRuns(projectId, signal),
+            ]);
+            return [
+              projectId,
+              { targets: targets.targets, runs: runs.runs, androidSdk: targets.androidSdk },
+            ] as const;
+          }),
+        ),
+      ),
+  });
+  const buildMutation = useMutation({
+    mutationFn: async (request: PendingBuild) =>
+      await startProjectBuild(request.project.id, {
+        modulePath: request.target.modulePath,
+        variant: request.target.variant,
+        approved: true,
+      }),
+    onSuccess: async () => {
+      setPendingBuild(undefined);
+      await queryClient.invalidateQueries({ queryKey: ["project-build-data"] });
+    },
+  });
   const submitting = createMutation.isPending;
   const value = source === "local" ? localPath : remoteUrl;
   const error = projectsQuery.isError
@@ -81,7 +221,11 @@ export function ProjectManagerPanel(): React.JSX.Element {
       ? createMutation.error?.message
       : reindexMutation.isError
         ? reindexMutation.error?.message
-        : undefined;
+        : projectBuildsQuery.isError
+          ? projectBuildsQuery.error.message
+          : buildMutation.isError
+            ? buildMutation.error?.message
+            : undefined;
 
   const submit = (event: React.FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -301,8 +445,50 @@ export function ProjectManagerPanel(): React.JSX.Element {
                   </>
                 )}
               </section>
+              <ProjectBuildSection
+                project={project}
+                data={projectBuildsQuery.data?.[project.id]}
+                loading={projectBuildsQuery.isFetching}
+                building={buildMutation.isPending}
+                onRequestBuild={(target) => setPendingBuild({ project, target })}
+              />
             </article>
           ))}
+        </div>
+      )}
+      {pendingBuild !== undefined && (
+        <div className="modal-backdrop" role="presentation">
+          <section
+            className="project-build-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="确认构建"
+          >
+            <h2>确认构建</h2>
+            <p>
+              将执行 <strong>{pendingBuild.project.name}</strong> 的 Gradle Wrapper
+              任务。构建会写入该项目的
+              <code> build/ </code>输出目录，日志保存在本地 Agent 数据目录。
+            </p>
+            <code className="project-build-command">{pendingBuild.target.taskName}</code>
+            <footer>
+              <button
+                type="button"
+                disabled={buildMutation.isPending}
+                onClick={() => setPendingBuild(undefined)}
+              >
+                取消
+              </button>
+              <button
+                className="primary-command"
+                type="button"
+                disabled={buildMutation.isPending}
+                onClick={() => buildMutation.mutate(pendingBuild)}
+              >
+                {buildMutation.isPending ? "正在启动构建" : "确认构建"}
+              </button>
+            </footer>
+          </section>
         </div>
       )}
     </section>

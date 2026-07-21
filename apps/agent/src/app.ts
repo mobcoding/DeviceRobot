@@ -20,9 +20,13 @@ import {
   deviceUiTreeResponseSchema,
   healthResponseSchema,
   appiumRuntimeSchema,
+  androidBuildTargetListResponseSchema,
   androidProjectSchema,
   createProjectRequestSchema,
   projectListResponseSchema,
+  projectBuildRunListResponseSchema,
+  projectBuildRunSchema,
+  startProjectBuildRequestSchema,
 } from "@device-robot/contracts";
 import Fastify, {
   type FastifyInstance,
@@ -71,6 +75,12 @@ import {
   type ProjectService,
 } from "./projects/project-service.js";
 import { SqliteProjectStore } from "./projects/project-store.js";
+import {
+  LocalProjectBuildService,
+  ProjectBuildError,
+  type ProjectBuildService,
+} from "./projects/project-build-service.js";
+import { SqliteProjectBuildStore } from "./projects/project-build-store.js";
 
 export const AGENT_VERSION = "0.1.0";
 const WEBSOCKET_OPEN = 1;
@@ -86,6 +96,7 @@ export type CreateAgentAppOptions = {
   deviceManagementService?: DeviceManagementService;
   deviceFileTransferService?: DeviceFileTransferService;
   projectService?: ProjectService;
+  projectBuildService?: ProjectBuildService;
   apkArtifactService?: ApkArtifactService;
   deviceActionAuditStore?: DeviceActionAuditStore;
   appiumRuntimeService?: AppiumRuntimeService;
@@ -101,6 +112,7 @@ export type AgentApp = {
   deviceManagementService: DeviceManagementService;
   deviceFileTransferService: DeviceFileTransferService;
   projectService: ProjectService;
+  projectBuildService: ProjectBuildService;
   apkArtifactService: ApkArtifactService;
   deviceActionAuditStore: DeviceActionAuditStore;
   appiumRuntimeService: AppiumRuntimeService;
@@ -265,6 +277,15 @@ function projectErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
   return reply.code(500).send({ error: message });
 }
 
+function projectBuildErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
+  if (error instanceof ProjectBuildError) {
+    return reply.code(error.statusCode).send({ error: error.message });
+  }
+
+  const message = error instanceof Error ? error.message : "项目构建请求失败。";
+  return reply.code(500).send({ error: message });
+}
+
 export async function createAgentApp(options: CreateAgentAppOptions = {}): Promise<AgentApp> {
   const paths = options.paths ?? resolveAgentPaths(options.localAppData);
   ensureAgentDirectories(paths);
@@ -280,9 +301,16 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     options.deviceManagementService ?? new AdbDeviceManagementService({ deviceService });
   const deviceFileTransferService =
     options.deviceFileTransferService ?? new AdbDeviceFileTransferService({ paths, deviceService });
+  const projectStore = new SqliteProjectStore(database.sqlite);
   const projectService =
-    options.projectService ??
-    new LocalProjectService({ paths, store: new SqliteProjectStore(database.sqlite) });
+    options.projectService ?? new LocalProjectService({ paths, store: projectStore });
+  const projectBuildService =
+    options.projectBuildService ??
+    new LocalProjectBuildService({
+      paths,
+      projectStore,
+      buildStore: new SqliteProjectBuildStore(database.sqlite),
+    });
   const apkArtifactService =
     options.apkArtifactService ??
     new LocalApkArtifactService({
@@ -356,6 +384,39 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
       );
     } catch (error) {
       return projectErrorReply(reply, error);
+    }
+  });
+
+  app.get("/api/v1/projects/:projectId/builds/targets", async (request, reply) => {
+    try {
+      return androidBuildTargetListResponseSchema.parse(
+        await projectBuildService.listTargets(parseProjectId(request.params)),
+      );
+    } catch (error) {
+      return projectBuildErrorReply(reply, error);
+    }
+  });
+
+  app.get("/api/v1/projects/:projectId/builds", async (request, reply) => {
+    try {
+      return projectBuildRunListResponseSchema.parse(
+        await projectBuildService.listRuns(parseProjectId(request.params)),
+      );
+    } catch (error) {
+      return projectBuildErrorReply(reply, error);
+    }
+  });
+
+  app.post("/api/v1/projects/:projectId/builds", async (request, reply) => {
+    try {
+      return projectBuildRunSchema.parse(
+        await projectBuildService.start(
+          parseProjectId(request.params),
+          startProjectBuildRequestSchema.parse(request.body),
+        ),
+      );
+    } catch (error) {
+      return projectBuildErrorReply(reply, error);
     }
   });
 
@@ -732,6 +793,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
   app.addHook("onClose", async () => {
     await scrcpyStreamService.dispose();
     await appiumRuntimeService.dispose();
+    await projectBuildService.dispose();
     database.close();
   });
 
@@ -744,6 +806,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     deviceManagementService,
     deviceFileTransferService,
     projectService,
+    projectBuildService,
     apkArtifactService,
     deviceActionAuditStore,
     appiumRuntimeService,

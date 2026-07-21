@@ -10,6 +10,9 @@ export { healthResponseSchema, type HealthResponse } from "./health.js";
 export {
   androidProjectModuleSchema,
   androidProjectSchema,
+  androidBuildTargetListResponseSchema,
+  androidBuildTargetSchema,
+  androidSdkInfoSchema,
   androidSourceEvidenceKindSchema,
   androidSourceEvidenceSchema,
   androidSourceIndexModuleSchema,
@@ -17,9 +20,16 @@ export {
   androidSourceIndexSummarySchema,
   createProjectRequestSchema,
   projectListResponseSchema,
+  projectBuildRunListResponseSchema,
+  projectBuildRunSchema,
+  projectBuildRunStatusSchema,
   projectSourceSchema,
+  startProjectBuildRequestSchema,
   type AndroidProject,
   type AndroidProjectModule,
+  type AndroidBuildTarget,
+  type AndroidBuildTargetListResponse,
+  type AndroidSdkInfo,
   type AndroidSourceEvidence,
   type AndroidSourceEvidenceKind,
   type AndroidSourceIndex,
@@ -27,7 +37,11 @@ export {
   type AndroidSourceIndexSummary,
   type CreateProjectRequest,
   type ProjectListResponse,
+  type ProjectBuildRun,
+  type ProjectBuildRunListResponse,
+  type ProjectBuildRunStatus,
   type ProjectSource,
+  type StartProjectBuildRequest,
 } from "./projects.js";
 export { appiumRuntimeSchema, type AppiumRuntime } from "./appium.js";
 export {

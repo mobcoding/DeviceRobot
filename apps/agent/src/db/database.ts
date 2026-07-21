@@ -92,6 +92,32 @@ const migrations: Migration[] = [
       ALTER TABLE projects ADD COLUMN source_index_json TEXT;
     `,
   },
+  {
+    version: 6,
+    name: "project-build-runs",
+    sql: `
+      CREATE TABLE IF NOT EXISTS project_build_runs (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        module_path TEXT NOT NULL,
+        variant TEXT NOT NULL,
+        task_name TEXT NOT NULL,
+        status TEXT NOT NULL,
+        log_path TEXT NOT NULL,
+        artifact_paths_json TEXT NOT NULL,
+        message TEXT,
+        exit_code INTEGER,
+        started_at TEXT NOT NULL,
+        finished_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS project_build_runs_project_started_at
+        ON project_build_runs (project_id, started_at DESC);
+
+      CREATE INDEX IF NOT EXISTS project_build_runs_project_status
+        ON project_build_runs (project_id, status);
+    `,
+  },
 ];
 
 export type DatabaseHandle = {

@@ -1204,6 +1204,226 @@ summary:focus-visible {
   font-size: 9px;
 }
 
+.project-build {
+  border-top: 1px solid #303030;
+  background: #181818;
+}
+
+.project-build > header {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  padding: 0 14px;
+}
+
+.project-build > header > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.project-build > header strong {
+  color: #dce4e6;
+  font-size: 11px;
+}
+
+.project-build > header small {
+  color: #8e999e;
+  font-size: 9px;
+}
+
+.project-sdk-state {
+  display: inline-flex;
+  min-height: 18px;
+  align-items: center;
+  padding: 0 5px;
+  border: 1px solid #5b4d37;
+  border-radius: 3px;
+  color: #d6bb82;
+  background: #2c271c;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.project-sdk-state.ready {
+  border-color: #2f6b63;
+  color: #88d8c0;
+  background: #173029;
+}
+
+.project-build > p {
+  margin: 0;
+  padding: 0 14px 12px;
+  color: #8e999e;
+  font-size: 10px;
+}
+
+.project-build-targets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 6px;
+  padding: 0 14px 10px;
+}
+
+.project-build-targets > span {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 7px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid #363636;
+  border-radius: 4px;
+  background: #202020;
+}
+
+.project-build-targets strong,
+.project-build-targets em {
+  overflow: hidden;
+  color: #dce4e6;
+  font-size: 10px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-build-targets em {
+  color: #a9deda;
+  font-family: "Cascadia Code", Consolas, monospace;
+}
+
+.project-build-targets code {
+  grid-column: 1;
+  overflow: hidden;
+  color: #919da1;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-build-targets button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  min-width: 43px;
+  border: 1px solid #3c7772;
+  border-radius: 3px;
+  color: #aff0e6;
+  background: #17312d;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.project-build-targets button:hover:not(:disabled) {
+  border-color: #69aaa2;
+  color: #fff;
+}
+
+.project-build-targets button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.project-build-runs {
+  display: grid;
+  gap: 1px;
+  border-top: 1px solid #303030;
+  padding: 8px 14px 10px;
+}
+
+.project-build-run {
+  display: grid;
+  grid-template-columns: 48px minmax(130px, 220px) minmax(0, 1fr);
+  gap: 7px;
+  min-width: 0;
+  padding: 5px 6px;
+  background: #202020;
+}
+
+.project-build-run > strong {
+  color: #8fc6c9;
+  font-size: 9px;
+}
+
+.project-build-run.failed > strong {
+  color: #e09aa1;
+}
+
+.project-build-run.cancelled > strong {
+  color: #b6a6d9;
+}
+
+.project-build-run > code,
+.project-build-run > small,
+.project-build-run > em {
+  overflow: hidden;
+  color: #aeb8bc;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 9px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-build-run > small,
+.project-build-run > em {
+  color: #8c979b;
+  font-family: inherit;
+}
+
+.project-build-dialog {
+  width: min(470px, calc(100vw - 32px));
+  padding: 20px;
+  border: 1px solid #455155;
+  border-radius: 6px;
+  color: #dce4e6;
+  background: #1b1b1b;
+  box-shadow: 0 22px 70px rgb(0 0 0 / 55%);
+}
+
+.project-build-dialog h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.project-build-dialog p {
+  margin: 12px 0;
+  color: #aeb8bc;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.project-build-dialog p code,
+.project-build-command {
+  color: #a9deda;
+  font-family: "Cascadia Code", Consolas, monospace;
+}
+
+.project-build-command {
+  display: block;
+  padding: 9px 10px;
+  border: 1px solid #343f42;
+  border-radius: 4px;
+  background: #121212;
+  font-size: 11px;
+}
+
+.project-build-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.project-build-dialog footer > button:not(.primary-command) {
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid #4a5053;
+  border-radius: 4px;
+  color: #d9dfe1;
+  background: #292929;
+  font-size: 11px;
+}
+
 .manager-path-form button {
   flex: 0 0 auto;
   min-width: 46px;

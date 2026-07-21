@@ -40,7 +40,7 @@ describe("DeviceRobot Agent", () => {
     const migrationCount = reopened.database.sqlite
       .prepare("SELECT COUNT(*) AS count FROM schema_migrations")
       .get() as { count: number };
-    expect(migrationCount.count).toBe(5);
+    expect(migrationCount.count).toBe(6);
     await reopened.app.close();
   });
 
@@ -142,9 +142,39 @@ describe("DeviceRobot Agent", () => {
     };
     const add = vi.fn(async () => project);
     const reindex = vi.fn(async () => project);
+    const buildRun = {
+      id: "223e4567-e89b-12d3-a456-426614174000",
+      projectId: project.id,
+      modulePath: "app",
+      variant: "debug",
+      taskName: ":app:assembleDebug",
+      status: "running" as const,
+      logPath: "C:\\logs\\build.log",
+      artifactPaths: [],
+      startedAt: "2026-07-21T10:00:00.000Z",
+    };
+    const startBuild = vi.fn(async () => buildRun);
     const { app } = await createAgentApp({
       localAppData: createTemporaryRoot(),
       projectService: { list: async () => [project], add, reindex },
+      projectBuildService: {
+        listTargets: async () => ({
+          projectId: project.id,
+          gradleWrapper: true,
+          androidSdk: { available: true, path: "D:\\Android\\Sdk", source: "environment" as const },
+          targets: [
+            {
+              modulePath: "app",
+              moduleName: "app",
+              variant: "debug",
+              taskName: ":app:assembleDebug",
+            },
+          ],
+        }),
+        listRuns: async () => ({ projectId: project.id, runs: [buildRun] }),
+        start: startBuild,
+        dispose: async () => {},
+      },
     });
     const headers = { host: "127.0.0.1:43110" };
 
@@ -161,14 +191,38 @@ describe("DeviceRobot Agent", () => {
         url: `/api/v1/projects/${project.id}/index`,
         headers,
       });
+      const targets = await app.inject({
+        method: "GET",
+        url: `/api/v1/projects/${project.id}/builds/targets`,
+        headers,
+      });
+      const runs = await app.inject({
+        method: "GET",
+        url: `/api/v1/projects/${project.id}/builds`,
+        headers,
+      });
+      const build = await app.inject({
+        method: "POST",
+        url: `/api/v1/projects/${project.id}/builds`,
+        headers,
+        payload: { modulePath: "app", variant: "debug", approved: true },
+      });
 
       expect(listed.statusCode).toBe(200);
       expect(listed.json()).toMatchObject({ projects: [{ name: "Example" }] });
       expect(created.statusCode).toBe(200);
       expect(indexed.statusCode).toBe(200);
+      expect(targets.statusCode).toBe(200);
+      expect(runs.statusCode).toBe(200);
+      expect(build.statusCode).toBe(200);
       expect(created.json()).toMatchObject({ modules: [{ packageName: "com.example.app" }] });
       expect(add).toHaveBeenCalledWith({ source: "local", rootPath: "C:\\Github\\Example" });
       expect(reindex).toHaveBeenCalledWith(project.id);
+      expect(startBuild).toHaveBeenCalledWith(project.id, {
+        modulePath: "app",
+        variant: "debug",
+        approved: true,
+      });
     } finally {
       await app.close();
     }

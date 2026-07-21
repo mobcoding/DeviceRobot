@@ -44,3 +44,18 @@ export const projects = sqliteTable("projects", {
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
+
+export const projectBuildRuns = sqliteTable("project_build_runs", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  modulePath: text("module_path").notNull(),
+  variant: text("variant").notNull(),
+  taskName: text("task_name").notNull(),
+  status: text("status").notNull(),
+  logPath: text("log_path").notNull(),
+  artifactPathsJson: text("artifact_paths_json").notNull(),
+  message: text("message"),
+  exitCode: integer("exit_code"),
+  startedAt: text("started_at").notNull(),
+  finishedAt: text("finished_at"),
+});

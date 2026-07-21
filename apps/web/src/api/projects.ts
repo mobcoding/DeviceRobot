@@ -1,8 +1,15 @@
 import {
   androidProjectSchema,
+  androidBuildTargetListResponseSchema,
+  projectBuildRunListResponseSchema,
+  projectBuildRunSchema,
   projectListResponseSchema,
   type AndroidProject,
   type CreateProjectRequest,
+  type AndroidBuildTargetListResponse,
+  type ProjectBuildRun,
+  type ProjectBuildRunListResponse,
+  type StartProjectBuildRequest,
   type ProjectListResponse,
 } from "@device-robot/contracts";
 
@@ -59,5 +66,48 @@ export async function reindexProject(projectId: string): Promise<AndroidProject>
       headers: { Accept: "application/json" },
     },
     androidProjectSchema,
+  );
+}
+
+export async function fetchProjectBuildTargets(
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<AndroidBuildTargetListResponse> {
+  return await projectRequest(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/builds/targets`,
+    {
+      headers: { Accept: "application/json" },
+      ...(signal === undefined ? {} : { signal }),
+    },
+    androidBuildTargetListResponseSchema,
+  );
+}
+
+export async function fetchProjectBuildRuns(
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<ProjectBuildRunListResponse> {
+  return await projectRequest(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/builds`,
+    {
+      headers: { Accept: "application/json" },
+      ...(signal === undefined ? {} : { signal }),
+    },
+    projectBuildRunListResponseSchema,
+  );
+}
+
+export async function startProjectBuild(
+  projectId: string,
+  request: StartProjectBuildRequest,
+): Promise<ProjectBuildRun> {
+  return await projectRequest(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/builds`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(request),
+    },
+    projectBuildRunSchema,
   );
 }

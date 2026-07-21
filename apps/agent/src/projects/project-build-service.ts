@@ -22,6 +22,12 @@ import {
 import { AndroidSdkService, AndroidSdkServiceError } from "../android/android-sdk-service.js";
 import type { ProjectBuildStore } from "./project-build-store.js";
 import type { ProjectStore } from "./project-store.js";
+import {
+  LocalProjectTemporarySigningService,
+  ProjectTemporarySigningError,
+  type ProjectTemporarySigningService,
+  type TemporarySigningMaterial,
+} from "./project-temporary-signing-service.js";
 
 const execFileAsync = promisify(execFile);
 const MAX_BUILD_ARTIFACTS = 100;
@@ -70,6 +76,7 @@ export type LocalProjectBuildServiceOptions = {
   buildStore: ProjectBuildStore;
   runner?: ProjectBuildProcessRunner;
   sdkService?: AndroidSdkService;
+  temporarySigningService?: ProjectTemporarySigningService;
 };
 
 type ActiveBuild = {
@@ -78,6 +85,7 @@ type ActiveBuild = {
   project: AndroidProject;
   target: AndroidBuildTarget;
   run: ProjectBuildRun;
+  temporarySigning?: TemporarySigningMaterial;
   cancelled: boolean;
   completion: Promise<void>;
 };
@@ -260,6 +268,7 @@ export class LocalProjectBuildService implements ProjectBuildService {
   readonly #buildStore: ProjectBuildStore;
   readonly #runner: ProjectBuildProcessRunner;
   readonly #sdkService: AndroidSdkService;
+  readonly #temporarySigningService: ProjectTemporarySigningService;
   readonly #activeRuns = new Map<string, ActiveBuild>();
 
   public constructor(options: LocalProjectBuildServiceOptions) {
@@ -268,6 +277,8 @@ export class LocalProjectBuildService implements ProjectBuildService {
     this.#buildStore = options.buildStore;
     this.#runner = options.runner ?? createDefaultRunner();
     this.#sdkService = options.sdkService ?? new AndroidSdkService({ paths: options.paths });
+    this.#temporarySigningService =
+      options.temporarySigningService ?? new LocalProjectTemporarySigningService();
     this.#buildStore.recoverInterruptedRuns(new Date().toISOString());
   }
 
@@ -357,7 +368,14 @@ export class LocalProjectBuildService implements ProjectBuildService {
       `# DeviceRobot Gradle build\n# Started: ${startedAt}\n# Task: ${target.taskName}\n\n`,
     );
     let buildProcess: ProjectBuildProcess;
+    let temporarySigning: TemporarySigningMaterial | undefined;
     try {
+      temporarySigning = await this.#temporarySigningService.prepare(project);
+      if (temporarySigning !== undefined) {
+        logStream.write(
+          "\n[DeviceRobot] 已生成临时签名，仅用于本次本地构建，构建结束后将自动删除。\n",
+        );
+      }
       buildProcess = this.#runner.start({
         executable: wrapper,
         args: ["--no-daemon", "--console=plain", target.taskName],
@@ -371,10 +389,14 @@ export class LocalProjectBuildService implements ProjectBuildService {
         onOutput: (chunk) => logStream.write(chunk),
       });
     } catch (error) {
+      await temporarySigning?.dispose();
       const failedRun = projectBuildRunSchema.parse({
         ...run,
         status: "failed",
-        message: `无法启动 Gradle Wrapper：${errorMessage(error)}`,
+        message:
+          error instanceof ProjectTemporarySigningError
+            ? error.message
+            : `无法启动 Gradle Wrapper：${errorMessage(error)}`,
         exitCode: null,
         finishedAt: new Date().toISOString(),
       });
@@ -389,6 +411,7 @@ export class LocalProjectBuildService implements ProjectBuildService {
       project,
       target,
       run,
+      ...(temporarySigning === undefined ? {} : { temporarySigning }),
       cancelled: false,
       completion: Promise.resolve(),
     } satisfies ActiveBuild;
@@ -425,6 +448,14 @@ export class LocalProjectBuildService implements ProjectBuildService {
 
   async #complete(active: ActiveBuild, result: ProjectBuildProcessResult): Promise<void> {
     this.#activeRuns.delete(active.run.id);
+    if (active.temporarySigning !== undefined) {
+      try {
+        await active.temporarySigning.dispose();
+        active.logStream.write("[DeviceRobot] 临时签名已清理。\n");
+      } catch (error) {
+        active.logStream.write(`[DeviceRobot] 临时签名清理失败：${errorMessage(error)}\n`);
+      }
+    }
     await closeLogStream(active.logStream);
     const finishedAt = new Date().toISOString();
     const artifactPaths =

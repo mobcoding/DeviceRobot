@@ -928,50 +928,7 @@ summary:focus-visible {
   outline-offset: -2px;
 }
 
-.project-summary-meta {
-  display: flex;
-  min-width: 0;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 12px;
-}
-
-.project-summary-stat,
-.project-summary-revision {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.project-summary-stat small,
-.project-summary-revision small {
-  color: #89949a;
-  font-size: 10px;
-  line-height: 1;
-}
-
-.project-summary-stat strong,
-.project-summary-revision code {
-  color: #cbd5d8;
-  font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1.1;
-}
-
-.project-summary-revision {
-  width: 96px;
-}
-
-.project-summary-revision code {
-  overflow: hidden;
-  color: #aebbc0;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-source,
-.project-wrapper {
+.project-source {
   display: inline-flex;
   min-height: 23px;
   flex: 0 0 auto;
@@ -990,18 +947,6 @@ summary:focus-visible {
   border-color: #514c69;
   color: #c6bcea;
   background: #242133;
-}
-
-.project-wrapper {
-  border-color: #4b4b4b;
-  color: #9ba5a9;
-  background: #222;
-}
-
-.project-wrapper.ready {
-  border-color: #2f6b63;
-  color: #88d8c0;
-  background: #173029;
 }
 
 .project-build {
@@ -3150,17 +3095,6 @@ h3 {
 
   .project-summary-heading {
     width: 100%;
-  }
-
-  .project-summary-meta {
-    width: 100%;
-    padding-left: 24px;
-    gap: 10px;
-  }
-
-  .project-summary-revision {
-    flex: 1 1 auto;
-    width: auto;
   }
 
   .primary-command {

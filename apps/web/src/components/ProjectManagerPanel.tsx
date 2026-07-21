@@ -33,10 +33,6 @@ function sourceLabel(source: ProjectSource): string {
   return source === "local" ? "本地目录" : "Git 仓库";
 }
 
-function revisionLabel(project: AndroidProject): string {
-  return project.revision === undefined ? "未检测到 Git 版本" : project.revision.slice(0, 12);
-}
-
 function buildStatusLabel(status: ProjectBuildRun["status"]): string {
   switch (status) {
     case "running":
@@ -357,21 +353,6 @@ export function ProjectManagerPanel(): React.JSX.Element {
                   <strong title={project.name}>{project.name}</strong>
                   <span className={`project-source ${project.source}`}>
                     {sourceLabel(project.source)}
-                  </span>
-                </span>
-                <span className="project-summary-meta" aria-label={`${project.name} 的项目摘要`}>
-                  <span
-                    className={project.gradleWrapper ? "project-wrapper ready" : "project-wrapper"}
-                  >
-                    {project.gradleWrapper ? "Gradle Wrapper" : "未检测到 Wrapper"}
-                  </span>
-                  <span className="project-summary-stat">
-                    <small>模块</small>
-                    <strong>{project.modules.length} 个</strong>
-                  </span>
-                  <span className="project-summary-revision">
-                    <small>版本</small>
-                    <code>{revisionLabel(project)}</code>
                   </span>
                 </span>
               </summary>

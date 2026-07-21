@@ -175,6 +175,9 @@ function createDefaultRunner(): ProjectBuildProcessRunner {
         env: options.environment,
         shell: false,
         windowsHide: true,
+        // cmd.exe must receive the wrapper path's quote characters verbatim.
+        // Without this, Node escapes them as \" and every .bat wrapper fails before Gradle starts.
+        windowsVerbatimArguments: useWindowsCommand,
       });
 
       const writeOutput = (chunk: Buffer | string): void => {

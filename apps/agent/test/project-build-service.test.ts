@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveAgentPaths } from "@device-robot/config";
@@ -192,6 +192,37 @@ describe("Android project build service", () => {
       });
     });
   });
+
+  it.skipIf(process.platform !== "win32")(
+    "starts a Windows Gradle Wrapper batch file without escaping its quote characters",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "device-robot-build-"));
+      temporaryDirectories.push(root);
+      writeFileSync(
+        join(root, "gradlew.bat"),
+        "@echo off\r\necho wrapper-ran\r\necho task=%3\r\nexit /b 0\r\n",
+      );
+      const project = createProject(root);
+      const service = new LocalProjectBuildService({
+        paths: resolveAgentPaths(join(root, "agent-data")),
+        projectStore: new InMemoryProjectStore(project),
+        buildStore: new InMemoryProjectBuildStore(),
+      });
+
+      const running = await service.start(project.id, {
+        modulePath: "app",
+        variant: "debug",
+        approved: true,
+      });
+      await vi.waitFor(async () => {
+        const runs = await service.listRuns(project.id);
+        expect(runs.runs[0]).toMatchObject({ id: running.id, status: "succeeded", exitCode: 0 });
+      });
+
+      const runs = await service.listRuns(project.id);
+      expect(readFileSync(runs.runs[0]!.logPath, "utf8")).toContain("wrapper-ran");
+    },
+  );
 
   it("rejects missing projects and cannot receive arbitrary Gradle task names", async () => {
     const root = mkdtempSync(join(tmpdir(), "device-robot-build-"));

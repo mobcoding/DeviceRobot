@@ -1468,14 +1468,14 @@ summary:focus-visible {
 
 .ai-model-status-main span {
   color: #aab5b8;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
 }
 
 .ai-model-status-main strong {
   color: #f0e3c4;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .ai-model-status.ready .ai-model-status-main strong {
@@ -1486,7 +1486,7 @@ summary:focus-visible {
   min-width: 0;
   margin: 0;
   color: #aeb8bc;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -1494,7 +1494,7 @@ summary:focus-visible {
   position: relative;
   min-width: max-content;
   color: #bfc9cc;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .ai-config-details summary {
@@ -1537,14 +1537,14 @@ summary:focus-visible {
   border-radius: 4px;
   color: #aeb8bc;
   background: rgb(0 0 0 / 14%);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.7;
 }
 
 .ai-config-details code {
   color: #c4e4e0;
   font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .ai-plan-form {
@@ -1572,6 +1572,7 @@ summary:focus-visible {
 
 .ai-plan-form-heading .eyebrow {
   margin-bottom: 4px;
+  font-size: 12px;
 }
 
 .ai-plan-form-heading h2 {
@@ -1585,7 +1586,7 @@ summary:focus-visible {
   align-items: center;
   gap: 5px;
   color: #a9cfc9;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -1612,7 +1613,7 @@ summary:focus-visible {
   align-items: center;
   gap: 6px;
   color: #b9c3c6;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -1633,9 +1634,9 @@ summary:focus-visible {
 
 .ai-context-field small,
 .ai-device-context small {
-  min-height: 16px;
+  min-height: 18px;
   color: #879398;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 400;
   line-height: 1.5;
 }
@@ -1650,7 +1651,7 @@ summary:focus-visible {
 .ai-device-context strong {
   overflow: hidden;
   color: #e0e6e8;
-  font-size: 12px;
+  font-size: 15px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1671,7 +1672,7 @@ summary:focus-visible {
 .ai-plan-actions > span {
   overflow: hidden;
   color: #8e999e;
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1681,6 +1682,7 @@ summary:focus-visible {
   min-height: 36px;
   align-items: center;
   gap: 5px;
+  font-size: 12px;
 }
 
 .ai-empty-state {
@@ -1706,13 +1708,13 @@ summary:focus-visible {
 
 .ai-empty-state strong {
   color: #ced7d9;
-  font-size: 12px;
+  font-size: 15px;
 }
 
 .ai-empty-state p {
   margin: 0;
   color: #939fa3;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -1738,7 +1740,7 @@ summary:focus-visible {
 
 .ai-message > strong {
   color: #cfd8da;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .ai-message > p {
@@ -1767,13 +1769,13 @@ summary:focus-visible {
 
 .ai-plan-result > header span {
   color: #d5dfdf;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
 }
 
 .ai-plan-result > header em {
   color: #dfbd7c;
-  font-size: 9px;
+  font-size: 12px;
   font-style: normal;
 }
 
@@ -1802,13 +1804,13 @@ summary:focus-visible {
   border-radius: 50%;
   color: #88d8c0;
   background: #21413b;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .ai-plan-result li > code {
   color: #a9deda;
   font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .ai-plan-result li > pre {
@@ -1817,7 +1819,7 @@ summary:focus-visible {
   overflow: auto;
   color: #9da8ac;
   font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.5;
 }
 
@@ -1825,7 +1827,7 @@ summary:focus-visible {
   margin: 0;
   padding: 0 9px 9px;
   color: #8e999e;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .manager-path-form button {

@@ -195,10 +195,20 @@ describe("AI action plan service", () => {
           headers: { "Content-Type": "application/json" },
         });
       }
-      return new Response(JSON.stringify({ choices: [{ message: { content: "连接成功" } }] }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: null,
+                reasoning_content: "正在推理",
+              },
+              finish_reason: "length",
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
     });
     vi.stubGlobal("fetch", fetchMock);
     const service = new LocalAiPlanService({
@@ -228,6 +238,10 @@ describe("AI action plan service", () => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
         headers: expect.objectContaining({ Authorization: "Bearer test-key" }),
+      });
+      expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+        max_tokens: 256,
+        model: "model-a",
       });
     } finally {
       vi.unstubAllGlobals();

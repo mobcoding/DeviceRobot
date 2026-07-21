@@ -243,7 +243,7 @@ function extractModelIds(payload: unknown): string[] {
   return [...models].sort((left, right) => left.localeCompare(right, "en"));
 }
 
-function extractContent(payload: unknown): string {
+function extractChoiceMessage(payload: unknown): Record<string, unknown> {
   if (typeof payload !== "object" || payload === null) {
     throw new AiPlanError("模型响应格式无效。", 502);
   }
@@ -255,11 +255,56 @@ function extractContent(payload: unknown): string {
   if (typeof message !== "object" || message === null) {
     throw new AiPlanError("模型响应格式无效。", 502);
   }
-  const content = (message as { message?: { content?: unknown } }).message?.content;
-  if (typeof content !== "string" || content.trim().length === 0) {
-    throw new AiPlanError("模型未返回文本计划。", 502);
+  const chatMessage = (message as { message?: unknown }).message;
+  if (typeof chatMessage !== "object" || chatMessage === null) {
+    throw new AiPlanError("模型响应格式无效。", 502);
   }
-  return content.trim();
+  return chatMessage as Record<string, unknown>;
+}
+
+function contentText(content: unknown): string | undefined {
+  if (typeof content === "string") {
+    return content.trim().length > 0 ? content.trim() : undefined;
+  }
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+
+  const parts: string[] = [];
+  for (const part of content) {
+    if (typeof part === "string") {
+      parts.push(part);
+      continue;
+    }
+    if (typeof part !== "object" || part === null) {
+      continue;
+    }
+    const text = (part as { text?: unknown }).text;
+    if (typeof text === "string") {
+      parts.push(text);
+      continue;
+    }
+    if (typeof text === "object" && text !== null) {
+      const value = (text as { value?: unknown }).value;
+      if (typeof value === "string") {
+        parts.push(value);
+      }
+    }
+  }
+  const combined = parts.join("").trim();
+  return combined.length > 0 ? combined : undefined;
+}
+
+function extractContent(payload: unknown): string {
+  const content = contentText(extractChoiceMessage(payload).content);
+  if (content === undefined) {
+    throw new AiPlanError("模型未返回可用于生成计划的最终文本。", 502);
+  }
+  return content;
+}
+
+function verifyChatCompletion(payload: unknown): void {
+  extractChoiceMessage(payload);
 }
 
 function parseModelPlan(content: string): ModelPlanPayload {
@@ -347,14 +392,14 @@ export class OpenAiCompatiblePlanProvider implements AiPlanModelProvider {
         body: JSON.stringify({
           model: this.#configuration.model,
           temperature: 0,
-          max_tokens: 16,
+          max_tokens: 256,
           messages: [{ role: "user", content: "请仅回复：连接成功" }],
         }),
       },
       MODEL_CONFIGURATION_TIMEOUT_MS,
       "测试模型连接",
     );
-    extractContent(payload);
+    verifyChatCompletion(payload);
   }
 }
 

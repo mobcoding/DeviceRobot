@@ -690,25 +690,6 @@ describe("DeviceRobot Web UI", () => {
     await vi.waitFor(() => expect(getProjectCreateRequests()).toBe(1));
   });
 
-  it("rebuilds and displays the project's source index", async () => {
-    const { getProjectReindexRequests } = mockApis();
-    const user = userEvent.setup();
-    renderApp();
-
-    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
-    await user.click(screen.getByRole("button", { name: "项目" }));
-    await screen.findByText("未建立索引");
-    await user.click(screen.getByText("源码索引"));
-    await user.click(screen.getByRole("button", { name: "重新索引" }));
-
-    await vi.waitFor(() => expect(getProjectReindexRequests()).toBe(1));
-    expect(await screen.findByText("索引已就绪")).toBeInTheDocument();
-    expect(screen.getByText("HomeScreen")).toBeInTheDocument();
-    expect(
-      screen.getByText("app/src/main/java/com/example/app/HomeScreen.kt:1"),
-    ).toBeInTheDocument();
-  });
-
   it("requires an explicit confirmation before starting a discovered Gradle Variant", async () => {
     const { getProjectBuildRequests } = mockApis();
     const user = userEvent.setup();

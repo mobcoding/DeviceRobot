@@ -32,6 +32,11 @@ const modelPlanPayloadSchema = z.object({
 
 type ModelPlanPayload = z.infer<typeof modelPlanPayloadSchema>;
 
+type ChatMessage = {
+  role: "system" | "user";
+  content: string;
+};
+
 export class AiPlanError extends Error {
   public constructor(
     message: string,
@@ -307,13 +312,136 @@ function verifyChatCompletion(payload: unknown): void {
   extractChoiceMessage(payload);
 }
 
-function parseModelPlan(content: string): ModelPlanPayload {
-  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/iu.exec(content)?.[1] ?? content;
-  try {
-    return modelPlanPayloadSchema.parse(JSON.parse(fenced));
-  } catch {
-    throw new AiPlanError("模型返回的计划未通过结构化校验。", 422);
+function balancedJsonObjectAt(content: string, start: number): string | undefined {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < content.length; index += 1) {
+    const character = content[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+    } else if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return content.slice(start, index + 1);
+      }
+    }
   }
+  return undefined;
+}
+
+function jsonCandidates(content: string): string[] {
+  const candidates: string[] = [];
+  const add = (candidate: string | undefined): void => {
+    const normalized = candidate?.trim();
+    if (normalized !== undefined && normalized.length > 0 && !candidates.includes(normalized)) {
+      candidates.push(normalized);
+    }
+  };
+
+  add(content);
+  for (const match of content.matchAll(/```(?:json)?\s*([\s\S]*?)```/giu)) {
+    add(match[1]);
+  }
+  for (let start = content.indexOf("{"); start >= 0; start = content.indexOf("{", start + 1)) {
+    add(balancedJsonObjectAt(content, start));
+  }
+  return candidates;
+}
+
+function modelPlanValidationMessage(error: z.ZodError): string {
+  const fields = [
+    ...new Set(
+      error.issues
+        .map((issue) => issue.path.map(String).join("."))
+        .filter((path) => path.length > 0),
+    ),
+  ].slice(0, 3);
+  if (fields.length === 0) {
+    return "模型返回的计划不符合操作计划格式。";
+  }
+  return `模型返回的计划字段不符合要求：${fields.join("、")}。`;
+}
+
+function parseModelPlan(content: string): ModelPlanPayload {
+  let validationError: z.ZodError | undefined;
+  for (const candidate of jsonCandidates(content)) {
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      const result = modelPlanPayloadSchema.safeParse(parsed);
+      if (result.success) {
+        return result.data;
+      }
+      validationError ??= result.error;
+    } catch {
+      // Continue with a fenced or embedded JSON object, if one was returned.
+    }
+  }
+  if (validationError !== undefined) {
+    throw new AiPlanError(modelPlanValidationMessage(validationError), 422);
+  }
+  throw new AiPlanError("模型未返回有效的 JSON 操作计划。", 422);
+}
+
+function planPromptRules(): string[] {
+  return [
+    "必须只输出 JSON 对象，格式为 {reply:string,actions:AgentAction[]}。reply 使用简体中文。",
+    "actions 至少一项、最多二十项。只能使用 app.launch、app.stop、ui.tap、ui.longPress、ui.input、ui.swipe、ui.back、ui.wait、assert.visible、assert.notVisible、assert.text、assert.activity、device.permission、device.orientation、device.screenshot。",
+    '严格示例：{"reply":"先记录启动流程的可观察证据。","actions":[{"action":"ui.wait","durationMs":1500},{"action":"device.screenshot","name":"启动页"}]}。',
+    "严禁输出 adb.shell、app.install、文件路径、命令行、未在证据中出现的 resourceId、accessibilityId、页面文案或路由。证据不足时使用 ui.wait、device.screenshot 或在 reply 中说明限制。",
+    "每个 ui.tap、ui.longPress、assert.visible、assert.notVisible、assert.text 都必须提供 target；优先使用 text、resourceId、accessibilityId 等语义定位器。",
+  ];
+}
+
+function repairPrompt(): string {
+  return [
+    "你是 Android 自动化测试操作计划的 JSON 修复器。",
+    ...planPromptRules(),
+    "上一次响应不能通过程序校验。请保留其安全意图，但修正为唯一、完整且可解析的 JSON 对象。不得输出 Markdown、解释或其他文本。",
+  ].join("\n");
+}
+
+function repairUserPrompt(userPromptText: string, invalidContent: string): string {
+  return [
+    "原始任务上下文：",
+    userPromptText,
+    "需要修正的模型草稿：",
+    invalidContent.slice(0, 16_000),
+  ].join("\n");
+}
+
+async function requestStructuredPlan(
+  configuration: CompleteOpenAiCompatibleConfiguration,
+  messages: ChatMessage[],
+): Promise<unknown> {
+  return callModelApi(
+    modelEndpoint(configuration.baseUrl),
+    configuration.apiKey,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        model: configuration.model,
+        temperature: 0.2,
+        max_tokens: 2048,
+        response_format: { type: "json_object" },
+        messages,
+      }),
+    },
+    MODEL_TIMEOUT_MS,
+    "请求模型",
+  );
 }
 
 export class OpenAiCompatiblePlanProvider implements AiPlanModelProvider {
@@ -360,6 +488,7 @@ export class OpenAiCompatiblePlanProvider implements AiPlanModelProvider {
         body: JSON.stringify({
           model: this.#configuration.model,
           temperature: 0.2,
+          max_tokens: 2048,
           response_format: { type: "json_object" },
           messages: [
             { role: "system", content: input.system },
@@ -370,7 +499,24 @@ export class OpenAiCompatiblePlanProvider implements AiPlanModelProvider {
       MODEL_TIMEOUT_MS,
       "请求模型",
     );
-    return parseModelPlan(extractContent(payload));
+    const firstContent = extractContent(payload);
+    try {
+      return parseModelPlan(firstContent);
+    } catch (error) {
+      if (!(error instanceof AiPlanError) || error.statusCode !== 422) {
+        throw error;
+      }
+      const configuration: CompleteOpenAiCompatibleConfiguration = {
+        baseUrl: this.#configuration.baseUrl,
+        apiKey: this.#configuration.apiKey,
+        model: this.#configuration.model,
+      };
+      const repairedPayload = await requestStructuredPlan(configuration, [
+        { role: "system", content: repairPrompt() },
+        { role: "user", content: repairUserPrompt(input.user, firstContent) },
+      ]);
+      return parseModelPlan(extractContent(repairedPayload));
+    }
   }
 
   public async testConnection(): Promise<void> {
@@ -429,6 +575,7 @@ function sourceEvidenceText(project: AndroidProject): string {
 
 function systemPrompt(): string {
   return [
+    ...planPromptRules(),
     "你是 Android 自动化测试规划助手。只生成可审阅的测试操作计划，不执行设备操作。",
     "必须只输出 JSON 对象，格式为 {reply:string,actions:AgentAction[]}。reply 使用简体中文。",
     "actions 至少一项、最多二十项。只能使用 app.launch、app.stop、ui.tap、ui.longPress、ui.input、ui.swipe、ui.back、ui.wait、assert.visible、assert.notVisible、assert.text、assert.activity、device.permission、device.orientation、device.screenshot。",

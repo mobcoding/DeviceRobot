@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AiPlanError,
   LocalAiPlanService,
+  OpenAiCompatiblePlanProvider,
   type AiPlanModelProvider,
 } from "../src/ai/ai-plan-service.js";
 import type { ProjectStore } from "../src/projects/project-store.js";
@@ -242,6 +243,70 @@ describe("AI action plan service", () => {
       expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
         max_tokens: 256,
         model: "model-a",
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("repairs one invalid model plan and accepts JSON wrapped in explanatory text", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => {
+      void _url;
+      void _init;
+      if (fetchMock.mock.calls.length === 1) {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    '计划草稿：\n```json\n{"reply":"验证启动流程。","actions":[{"action":"navigate","to":"主页"}]}\n```',
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content:
+                  '已修正：\n```json\n{"reply":"等待启动流程稳定并保留截图证据。","actions":[{"action":"ui.wait","durationMs":1500},{"action":"device.screenshot","name":"启动页"}]}\n```',
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new LocalAiPlanService({
+      projectStore: new InMemoryProjectStore(createProject()),
+      modelProvider: new OpenAiCompatiblePlanProvider({
+        baseUrl: "https://model.example/v1",
+        apiKey: "test-key",
+        model: "test-model",
+      }),
+    });
+
+    try {
+      await expect(
+        service.generate({
+          projectId: "123e4567-e89b-12d3-a456-426614174000",
+          goal: "验证启动页进入主页的流程",
+        }),
+      ).resolves.toMatchObject({
+        reply: "等待启动流程稳定并保留截图证据。",
+        plan: {
+          actions: [{ action: "ui.wait", durationMs: 1500 }, { action: "device.screenshot" }],
+        },
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+        max_tokens: 2048,
       });
     } finally {
       vi.unstubAllGlobals();

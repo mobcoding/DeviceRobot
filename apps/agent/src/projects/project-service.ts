@@ -240,13 +240,20 @@ function normalizeGitRemote(value: string): string {
 }
 
 function cloneDirectoryName(remoteUrl: string): string {
-  const sourceName =
-    new URL(remoteUrl).pathname
-      .split("/")
-      .at(-1)
-      ?.replace(/\.git$/iu, "") ?? "project";
+  const sourceName = repositoryName(remoteUrl);
   const safeName = sourceName.replace(/[^A-Za-z0-9._-]/gu, "-").slice(0, 80) || "project";
   return `${safeName}-${randomUUID()}`;
+}
+
+function repositoryName(remoteUrl: string): string {
+  try {
+    const pathname = new URL(remoteUrl).pathname;
+    const lastSegment = pathname.split("/").filter(Boolean).at(-1);
+    const name = decodeURIComponent(lastSegment ?? "").replace(/\.git$/iu, "").trim();
+    return name || "未命名项目";
+  } catch {
+    return "未命名项目";
+  }
 }
 
 export class LocalProjectService implements ProjectService {
@@ -263,7 +270,17 @@ export class LocalProjectService implements ProjectService {
   }
 
   public async list(): Promise<AndroidProject[]> {
-    return this.#store.list();
+    return this.#store.list().map((project) => {
+      if (project.source !== "git" || project.remoteUrl === undefined) {
+        return project;
+      }
+      const name = repositoryName(project.remoteUrl);
+      if (project.name === name) {
+        return project;
+      }
+      this.#store.updateName(project.id, name);
+      return { ...project, name };
+    });
   }
 
   public async add(request: CreateProjectRequest): Promise<AndroidProject> {
@@ -346,7 +363,7 @@ export class LocalProjectService implements ProjectService {
     const now = new Date().toISOString();
     const project = androidProjectSchema.parse({
       id: randomUUID(),
-      name: basename(rootPath) || "未命名项目",
+      name: source === "git" && remoteUrl !== undefined ? repositoryName(remoteUrl) : basename(rootPath) || "未命名项目",
       source,
       rootPath,
       ...(remoteUrl === undefined ? {} : { remoteUrl }),

@@ -11,6 +11,7 @@ export interface ProjectStore {
   findById(id: string): AndroidProject | undefined;
   findByRootPath(rootPath: string): AndroidProject | undefined;
   create(project: AndroidProject): void;
+  updateName(id: string, name: string): void;
   updateSourceIndex(project: AndroidProject): void;
 }
 
@@ -96,6 +97,10 @@ export class SqliteProjectStore implements ProjectStore {
         project.createdAt,
         project.updatedAt,
       );
+  }
+
+  public updateName(id: string, name: string): void {
+    this.#sqlite.prepare("UPDATE projects SET name = ? WHERE id = ?").run(name, id);
   }
 
   public updateSourceIndex(project: AndroidProject): void {

@@ -26,6 +26,8 @@ class InMemoryProjectStore implements ProjectStore {
 
   public create(): void {}
 
+  public updateName(): void {}
+
   public updateSourceIndex(): void {}
 }
 

@@ -79,6 +79,13 @@ class InMemoryProjectStore implements ProjectStore {
     this.projects.push(project);
   }
 
+  public updateName(id: string, name: string): void {
+    const index = this.projects.findIndex((project) => project.id === id);
+    if (index >= 0) {
+      this.projects[index] = { ...this.projects[index]!, name };
+    }
+  }
+
   public updateSourceIndex(project: AndroidProject): void {
     const index = this.projects.findIndex((candidate) => candidate.id === project.id);
     if (index >= 0) {
@@ -217,6 +224,7 @@ describe("Android project service", () => {
     });
 
     expect(project).toMatchObject({
+      name: "android-app",
       source: "git",
       remoteUrl: "https://github.com/example/android-app.git",
       revision: "abcdef012345",
@@ -232,6 +240,29 @@ describe("Android project service", () => {
       ],
       300_000,
     );
+  });
+
+  it("normalizes existing Git project names from their remote URL", async () => {
+    const { root, service, store } = createFixture();
+    const projectRoot = join(root, "repositories", "android-app-a1b2c3d4");
+    mkdirSync(projectRoot, { recursive: true });
+    createAndroidProject(projectRoot);
+    store.create({
+      id: "123e4567-e89b-12d3-a456-426614174000",
+      name: "android-app-a1b2c3d4",
+      source: "git",
+      rootPath: projectRoot,
+      remoteUrl: "https://github.com/example/android-app.git",
+      gradleWrapper: true,
+      modules: [],
+      createdAt: "2026-07-21T00:00:00.000Z",
+      updatedAt: "2026-07-21T00:00:00.000Z",
+    });
+
+    await expect(service.list()).resolves.toEqual([
+      expect.objectContaining({ id: "123e4567-e89b-12d3-a456-426614174000", name: "android-app" }),
+    ]);
+    expect(store.findById("123e4567-e89b-12d3-a456-426614174000")?.name).toBe("android-app");
   });
 
   it("rejects non-HTTPS repository addresses before starting Git", async () => {

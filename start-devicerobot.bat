@@ -14,6 +14,18 @@ if errorlevel 1 (
 )
 
 echo pnpm was not found. Using Corepack instead.
+set "COREPACK_PNPM_SHIM=%TEMP%\DeviceRobot\pnpm-shim"
+if not exist "%COREPACK_PNPM_SHIM%" mkdir "%COREPACK_PNPM_SHIM%"
+if not exist "%COREPACK_PNPM_SHIM%" (
+  echo Could not create the temporary pnpm compatibility folder.
+  pause
+  exit /b 1
+)
+
+> "%COREPACK_PNPM_SHIM%\pnpm.cmd" echo @echo off
+>> "%COREPACK_PNPM_SHIM%\pnpm.cmd" echo call corepack pnpm %%*
+set "PATH=%COREPACK_PNPM_SHIM%;%PATH%"
+
 echo Starting DeviceRobot Agent and Web services...
 call corepack pnpm dev
 set "exitCode=%ERRORLEVEL%"

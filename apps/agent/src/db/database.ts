@@ -85,6 +85,13 @@ const migrations: Migration[] = [
         ON projects (updated_at DESC);
     `,
   },
+  {
+    version: 5,
+    name: "project-source-index",
+    sql: `
+      ALTER TABLE projects ADD COLUMN source_index_json TEXT;
+    `,
+  },
 ];
 
 export type DatabaseHandle = {

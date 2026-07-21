@@ -28,6 +28,36 @@ function createAndroidProject(root: string): void {
     join(root, "app", "src", "main", "AndroidManifest.xml"),
     '<manifest package="com.example.app"><application /></manifest>',
   );
+  mkdirSync(join(root, "app", "src", "main", "res", "layout"), { recursive: true });
+  mkdirSync(join(root, "app", "src", "main", "res", "navigation"), { recursive: true });
+  mkdirSync(join(root, "app", "src", "main", "java", "com", "example", "app"), {
+    recursive: true,
+  });
+  writeFileSync(
+    join(root, "app", "src", "main", "res", "layout", "activity_main.xml"),
+    [
+      '<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android">',
+      '  <TextView android:id="@+id/title" />',
+      "</androidx.constraintlayout.widget.ConstraintLayout>",
+    ].join("\n"),
+  );
+  writeFileSync(
+    join(root, "app", "src", "main", "res", "navigation", "main_navigation.xml"),
+    '<navigation xmlns:android="http://schemas.android.com/apk/res/android"><fragment android:id="@+id/home" android:name="com.example.app.HomeFragment" /></navigation>',
+  );
+  writeFileSync(
+    join(root, "app", "src", "main", "java", "com", "example", "app", "HomeScreen.kt"),
+    [
+      "@Composable",
+      "fun HomeScreen() = Unit",
+      'fun routes() = composable("home") { }',
+      "data class HomeState(val title: String)",
+    ].join("\n"),
+  );
+  writeFileSync(
+    join(root, "app", "src", "main", "java", "com", "example", "app", "DeviceBridge.java"),
+    "public class DeviceBridge {}",
+  );
 }
 
 class InMemoryProjectStore implements ProjectStore {
@@ -37,12 +67,23 @@ class InMemoryProjectStore implements ProjectStore {
     return [...this.projects];
   }
 
+  public findById(id: string): AndroidProject | undefined {
+    return this.projects.find((project) => project.id === id);
+  }
+
   public findByRootPath(rootPath: string): AndroidProject | undefined {
     return this.projects.find((project) => project.rootPath === rootPath);
   }
 
   public create(project: AndroidProject): void {
     this.projects.push(project);
+  }
+
+  public updateSourceIndex(project: AndroidProject): void {
+    const index = this.projects.findIndex((candidate) => candidate.id === project.id);
+    if (index >= 0) {
+      this.projects[index] = project;
+    }
   }
 }
 
@@ -101,6 +142,30 @@ describe("Android project service", () => {
         }),
       ]),
     });
+    expect(project.sourceIndex).toMatchObject({
+      schemaVersion: 1,
+      summary: {
+        filesScanned: 4,
+        kotlinJavaFileCount: 2,
+        xmlViewCount: 2,
+        composeScreenCount: 1,
+        navigationDestinationCount: 2,
+        typeCount: 2,
+      },
+      evidence: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "compose-screen",
+          name: "HomeScreen",
+          filePath: "app/src/main/java/com/example/app/HomeScreen.kt",
+          line: 1,
+        }),
+        expect.objectContaining({
+          kind: "navigation-destination",
+          name: "home",
+          filePath: "app/src/main/java/com/example/app/HomeScreen.kt",
+        }),
+      ]),
+    });
     expect(store.list()).toHaveLength(1);
     expect(runner.run).toHaveBeenCalledWith(
       "git",
@@ -110,6 +175,23 @@ describe("Android project service", () => {
     await expect(service.add({ source: "local", rootPath: projectRoot })).rejects.toMatchObject({
       statusCode: 409,
     });
+  });
+
+  it("rebuilds a stored project's source index without executing Gradle", async () => {
+    const { root, service, runner } = createFixture();
+    const projectRoot = join(root, "Example");
+    mkdirSync(projectRoot);
+    createAndroidProject(projectRoot);
+    const project = await service.add({ source: "local", rootPath: projectRoot });
+
+    writeFileSync(
+      join(projectRoot, "app", "src", "main", "res", "layout", "settings.xml"),
+      "<LinearLayout><Button /></LinearLayout>",
+    );
+    const reindexed = await service.reindex(project.id);
+
+    expect(reindexed.sourceIndex?.summary.xmlViewCount).toBe(4);
+    expect(runner.run).toHaveBeenCalledTimes(1);
   });
 
   it("clones a HTTPS repository with fixed Git arguments before scanning it", async () => {

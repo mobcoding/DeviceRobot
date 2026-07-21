@@ -3,7 +3,7 @@ import { FolderGit2, FolderOpen, GitBranch, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import type { AndroidProject, ProjectSource } from "@device-robot/contracts";
 
-import { createProject, fetchProjects } from "../api/projects";
+import { createProject, fetchProjects, reindexProject } from "../api/projects";
 
 function sourceLabel(source: ProjectSource): string {
   return source === "local" ? "本地目录" : "Git 仓库";
@@ -11,6 +11,37 @@ function sourceLabel(source: ProjectSource): string {
 
 function revisionLabel(project: AndroidProject): string {
   return project.revision === undefined ? "未检测到 Git 版本" : project.revision.slice(0, 12);
+}
+
+function sourceIndexLabel(project: AndroidProject): string {
+  return project.sourceIndex === undefined ? "未建立索引" : "索引已就绪";
+}
+
+function sourceIndexTime(project: AndroidProject): string | undefined {
+  if (project.sourceIndex === undefined) {
+    return undefined;
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date(project.sourceIndex.scannedAt));
+}
+
+function evidenceKindLabel(
+  kind: NonNullable<AndroidProject["sourceIndex"]>["evidence"][number]["kind"],
+): string {
+  switch (kind) {
+    case "xml-view":
+      return "XML 视图";
+    case "compose-screen":
+      return "Compose";
+    case "navigation-destination":
+      return "导航";
+    case "kotlin-type":
+      return "Kotlin";
+    case "java-type":
+      return "Java";
+  }
 }
 
 export function ProjectManagerPanel(): React.JSX.Element {
@@ -36,13 +67,21 @@ export function ProjectManagerPanel(): React.JSX.Element {
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
     },
   });
+  const reindexMutation = useMutation({
+    mutationFn: reindexProject,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
   const submitting = createMutation.isPending;
   const value = source === "local" ? localPath : remoteUrl;
   const error = projectsQuery.isError
     ? projectsQuery.error.message
     : createMutation.isError
       ? createMutation.error?.message
-      : undefined;
+      : reindexMutation.isError
+        ? reindexMutation.error?.message
+        : undefined;
 
   const submit = (event: React.FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -112,7 +151,7 @@ export function ProjectManagerPanel(): React.JSX.Element {
         </button>
       </form>
       <p className="project-connect-hint">
-        接入时仅扫描 Gradle 与 Manifest，不会执行构建或修改源码。
+        接入和重新索引均为只读静态扫描：不会执行 Gradle、构建或修改源码。
       </p>
 
       {error !== undefined && (
@@ -172,6 +211,96 @@ export function ProjectManagerPanel(): React.JSX.Element {
                   </span>
                 ))}
               </div>
+              <section className="project-source-index" aria-label={`${project.name} 的源码索引`}>
+                <header>
+                  <div>
+                    <strong>源码索引</strong>
+                    <span
+                      className={
+                        project.sourceIndex === undefined
+                          ? "project-index-state"
+                          : "project-index-state ready"
+                      }
+                    >
+                      {sourceIndexLabel(project)}
+                    </span>
+                    {sourceIndexTime(project) !== undefined && (
+                      <small>扫描于 {sourceIndexTime(project)}</small>
+                    )}
+                  </div>
+                  <button
+                    className="project-index-button"
+                    type="button"
+                    disabled={reindexMutation.isPending}
+                    onClick={() => reindexMutation.mutate(project.id)}
+                  >
+                    <RefreshCw aria-hidden="true" size={13} strokeWidth={1.9} />
+                    {reindexMutation.isPending && reindexMutation.variables === project.id
+                      ? "正在索引"
+                      : "重新索引"}
+                  </button>
+                </header>
+                {project.sourceIndex === undefined ? (
+                  <p>尚未保存源码索引。重新索引后将提取 XML、Compose、导航和 Kotlin/Java 结构。</p>
+                ) : (
+                  <>
+                    <div className="project-index-summary">
+                      <span>
+                        <strong>{project.sourceIndex.summary.filesScanned}</strong> 已扫描文件
+                      </span>
+                      <span>
+                        <strong>{project.sourceIndex.summary.xmlViewCount}</strong> XML 视图
+                      </span>
+                      <span>
+                        <strong>{project.sourceIndex.summary.composeScreenCount}</strong> Compose
+                      </span>
+                      <span>
+                        <strong>{project.sourceIndex.summary.navigationDestinationCount}</strong>{" "}
+                        导航目标
+                      </span>
+                      <span>
+                        <strong>{project.sourceIndex.summary.typeCount}</strong> 代码类型
+                      </span>
+                    </div>
+                    <div className="project-index-modules" aria-label="模块索引摘要">
+                      {project.sourceIndex.modules.map((module) => (
+                        <span key={module.path}>
+                          <strong>{module.path === "." ? "根项目" : module.path}</strong>
+                          <small>
+                            {module.sourceFileCount} 源文件 · {module.xmlViewCount} XML ·{" "}
+                            {module.composeScreenCount} Compose ·{" "}
+                            {module.navigationDestinationCount} 导航
+                          </small>
+                        </span>
+                      ))}
+                    </div>
+                    {project.sourceIndex.evidence.length > 0 && (
+                      <details className="project-index-evidence">
+                        <summary>
+                          索引证据（
+                          {project.sourceIndex.evidence.length > 16
+                            ? `显示前 16 / ${project.sourceIndex.evidence.length}`
+                            : project.sourceIndex.evidence.length}
+                          条）
+                        </summary>
+                        <ul>
+                          {project.sourceIndex.evidence.slice(0, 16).map((evidence) => (
+                            <li
+                              key={`${evidence.kind}-${evidence.filePath}-${evidence.line}-${evidence.name}`}
+                            >
+                              <span>{evidenceKindLabel(evidence.kind)}</span>
+                              <strong>{evidence.name}</strong>
+                              <code>
+                                {evidence.filePath}:{evidence.line}
+                              </code>
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
+                  </>
+                )}
+              </section>
             </article>
           ))}
         </div>

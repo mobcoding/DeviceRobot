@@ -40,7 +40,7 @@ describe("DeviceRobot Agent", () => {
     const migrationCount = reopened.database.sqlite
       .prepare("SELECT COUNT(*) AS count FROM schema_migrations")
       .get() as { count: number };
-    expect(migrationCount.count).toBe(4);
+    expect(migrationCount.count).toBe(5);
     await reopened.app.close();
   });
 
@@ -141,9 +141,10 @@ describe("DeviceRobot Agent", () => {
       updatedAt: "2026-07-21T10:00:00.000Z",
     };
     const add = vi.fn(async () => project);
+    const reindex = vi.fn(async () => project);
     const { app } = await createAgentApp({
       localAppData: createTemporaryRoot(),
-      projectService: { list: async () => [project], add },
+      projectService: { list: async () => [project], add, reindex },
     });
     const headers = { host: "127.0.0.1:43110" };
 
@@ -155,12 +156,19 @@ describe("DeviceRobot Agent", () => {
         headers,
         payload: { source: "local", rootPath: "C:\\Github\\Example" },
       });
+      const indexed = await app.inject({
+        method: "POST",
+        url: `/api/v1/projects/${project.id}/index`,
+        headers,
+      });
 
       expect(listed.statusCode).toBe(200);
       expect(listed.json()).toMatchObject({ projects: [{ name: "Example" }] });
       expect(created.statusCode).toBe(200);
+      expect(indexed.statusCode).toBe(200);
       expect(created.json()).toMatchObject({ modules: [{ packageName: "com.example.app" }] });
       expect(add).toHaveBeenCalledWith({ source: "local", rootPath: "C:\\Github\\Example" });
+      expect(reindex).toHaveBeenCalledWith(project.id);
     } finally {
       await app.close();
     }

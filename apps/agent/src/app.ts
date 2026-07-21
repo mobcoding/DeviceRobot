@@ -139,6 +139,21 @@ function parseArtifactId(params: unknown): string {
   return artifactId;
 }
 
+function parseProjectId(params: unknown): string {
+  if (typeof params !== "object" || params === null) {
+    throw new ProjectError("缺少项目编号。", 400);
+  }
+
+  const projectId = (params as Record<string, unknown>).projectId;
+  if (
+    typeof projectId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(projectId)
+  ) {
+    throw new ProjectError("项目编号无效。", 400);
+  }
+  return projectId;
+}
+
 function controlErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
   if (error instanceof DeviceControlError) {
     return reply.code(error.statusCode).send({ error: error.message });
@@ -328,6 +343,16 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     try {
       return androidProjectSchema.parse(
         await projectService.add(createProjectRequestSchema.parse(request.body)),
+      );
+    } catch (error) {
+      return projectErrorReply(reply, error);
+    }
+  });
+
+  app.post("/api/v1/projects/:projectId/index", async (request, reply) => {
+    try {
+      return androidProjectSchema.parse(
+        await projectService.reindex(parseProjectId(request.params)),
       );
     } catch (error) {
       return projectErrorReply(reply, error);

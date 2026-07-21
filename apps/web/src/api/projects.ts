@@ -50,3 +50,14 @@ export async function createProject(request: CreateProjectRequest): Promise<Andr
     androidProjectSchema,
   );
 }
+
+export async function reindexProject(projectId: string): Promise<AndroidProject> {
+  return await projectRequest(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/index`,
+    {
+      method: "POST",
+      headers: { Accept: "application/json" },
+    },
+    androidProjectSchema,
+  );
+}

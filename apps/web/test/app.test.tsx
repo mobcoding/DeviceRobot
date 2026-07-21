@@ -241,6 +241,41 @@ const projectsResponse = {
   ],
 };
 
+const indexedProjectResponse = {
+  ...projectsResponse.projects[0],
+  sourceIndex: {
+    schemaVersion: 1,
+    scannedAt: "2026-07-21T10:01:00.000Z",
+    summary: {
+      filesScanned: 4,
+      kotlinJavaFileCount: 2,
+      xmlViewCount: 2,
+      composeScreenCount: 1,
+      navigationDestinationCount: 2,
+      typeCount: 2,
+    },
+    modules: [
+      {
+        path: "app",
+        sourceFileCount: 2,
+        xmlViewCount: 2,
+        composeScreenCount: 1,
+        navigationDestinationCount: 2,
+        typeCount: 2,
+      },
+    ],
+    evidence: [
+      {
+        kind: "compose-screen",
+        name: "HomeScreen",
+        filePath: "app/src/main/java/com/example/app/HomeScreen.kt",
+        line: 1,
+        modulePath: "app",
+      },
+    ],
+  },
+};
+
 const apkArtifactResponse = {
   id: "123e4567-e89b-12d3-a456-426614174000",
   fileName: "sample.apk",
@@ -264,6 +299,7 @@ function mockApis(options: { healthError?: Error } = {}): {
   getInstallRequests: () => number;
   getFileUploadRequests: () => number;
   getProjectCreateRequests: () => number;
+  getProjectReindexRequests: () => number;
 } {
   let deviceRequests = 0;
   let actionRequests = 0;
@@ -271,6 +307,8 @@ function mockApis(options: { healthError?: Error } = {}): {
   let installRequests = 0;
   let fileUploadRequests = 0;
   let projectCreateRequests = 0;
+  let projectReindexRequests = 0;
+  let projectSourceIndexed = false;
   const actionHistory = {
     serial: "8B3Y0THX0",
     actions: [] as Array<{
@@ -295,12 +333,29 @@ function mockApis(options: { healthError?: Error } = {}): {
       });
     }
 
+    if (url.endsWith(`/projects/${indexedProjectResponse.id}/index`) && method === "POST") {
+      projectReindexRequests += 1;
+      projectSourceIndexed = true;
+      return new Response(JSON.stringify(indexedProjectResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     if (url === "/api/v1/projects") {
       if (method === "POST") {
         projectCreateRequests += 1;
       }
       return new Response(
-        JSON.stringify(method === "POST" ? projectsResponse.projects[0] : projectsResponse),
+        JSON.stringify(
+          method === "POST"
+            ? projectsResponse.projects[0]
+            : {
+                projects: [
+                  projectSourceIndexed ? indexedProjectResponse : projectsResponse.projects[0],
+                ],
+              },
+        ),
         {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -422,6 +477,7 @@ function mockApis(options: { healthError?: Error } = {}): {
     getInstallRequests: () => installRequests,
     getFileUploadRequests: () => fileUploadRequests,
     getProjectCreateRequests: () => projectCreateRequests,
+    getProjectReindexRequests: () => projectReindexRequests,
   };
 }
 
@@ -477,6 +533,24 @@ describe("DeviceRobot Web UI", () => {
     await user.click(screen.getByRole("button", { name: "接入项目" }));
 
     await vi.waitFor(() => expect(getProjectCreateRequests()).toBe(1));
+  });
+
+  it("rebuilds and displays the project's source index", async () => {
+    const { getProjectReindexRequests } = mockApis();
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
+    await user.click(screen.getByRole("button", { name: "项目" }));
+    await screen.findByText("未建立索引");
+    await user.click(screen.getByRole("button", { name: "重新索引" }));
+
+    await vi.waitFor(() => expect(getProjectReindexRequests()).toBe(1));
+    expect(await screen.findByText("索引已就绪")).toBeInTheDocument();
+    expect(screen.getByText("HomeScreen")).toBeInTheDocument();
+    expect(
+      screen.getByText("app/src/main/java/com/example/app/HomeScreen.kt:1"),
+    ).toBeInTheDocument();
   });
 
   it("opens device files from the default file manager tab", async () => {

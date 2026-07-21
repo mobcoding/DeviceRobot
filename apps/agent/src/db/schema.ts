@@ -40,6 +40,7 @@ export const projects = sqliteTable("projects", {
   revision: text("revision"),
   gradleWrapper: integer("gradle_wrapper", { mode: "boolean" }).notNull(),
   modulesJson: text("modules_json").notNull(),
+  sourceIndexJson: text("source_index_json"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });

@@ -13,6 +13,7 @@ import {
 } from "@device-robot/contracts";
 
 import type { ProjectStore } from "./project-store.js";
+import { indexAndroidProjectSource } from "./source-indexer.js";
 
 const execFileAsync = promisify(execFile);
 const MAX_PROJECT_DEPTH = 8;
@@ -32,7 +33,7 @@ const ignoredDirectories = new Set([
 export class ProjectError extends Error {
   public constructor(
     message: string,
-    public readonly statusCode: 400 | 409 | 422 | 502 | 503,
+    public readonly statusCode: 400 | 404 | 409 | 422 | 502 | 503,
   ) {
     super(message);
   }
@@ -49,6 +50,7 @@ export interface ProjectCommandRunner {
 export interface ProjectService {
   list(): Promise<AndroidProject[]>;
   add(request: CreateProjectRequest): Promise<AndroidProject>;
+  reindex(id: string): Promise<AndroidProject>;
 }
 
 export type LocalProjectServiceOptions = {
@@ -289,6 +291,25 @@ export class LocalProjectService implements ProjectService {
     }
   }
 
+  public async reindex(id: string): Promise<AndroidProject> {
+    const project = this.#store.findById(id);
+    if (project === undefined) {
+      throw new ProjectError("未找到要重新索引的项目。", 404);
+    }
+    if (!existsSync(project.rootPath)) {
+      throw new ProjectError("项目目录已不存在或无法访问。", 422);
+    }
+
+    const sourceIndex = await indexAndroidProjectSource(project.rootPath, project.modules);
+    const indexedProject = androidProjectSchema.parse({
+      ...project,
+      sourceIndex,
+      updatedAt: new Date().toISOString(),
+    });
+    this.#store.updateSourceIndex(indexedProject);
+    return indexedProject;
+  }
+
   async #resolveLocalRoot(value: string): Promise<string> {
     const requestedPath = value.trim();
     if (!isAbsolute(requestedPath)) {
@@ -317,9 +338,10 @@ export class LocalProjectService implements ProjectService {
       throw new ProjectError("该项目目录已经接入。", 409);
     }
 
-    const [scan, revision] = await Promise.all([
-      scanAndroidProject(rootPath),
+    const scan = await scanAndroidProject(rootPath);
+    const [revision, sourceIndex] = await Promise.all([
       this.#readGitRevision(rootPath),
+      indexAndroidProjectSource(rootPath, scan.modules),
     ]);
     const now = new Date().toISOString();
     const project = androidProjectSchema.parse({
@@ -330,6 +352,7 @@ export class LocalProjectService implements ProjectService {
       ...(remoteUrl === undefined ? {} : { remoteUrl }),
       ...(revision === undefined ? {} : { revision }),
       ...scan,
+      sourceIndex,
       createdAt: now,
       updatedAt: now,
     });

@@ -717,7 +717,8 @@ summary:focus-visible {
 
 .manager-toolbar,
 .application-toolbar,
-.logcat-toolbar {
+.logcat-toolbar,
+.project-connect-form {
   display: flex;
   min-height: 40px;
   align-items: center;
@@ -758,7 +759,9 @@ summary:focus-visible {
 .application-search input,
 .application-filter select,
 .logcat-search input,
-.logcat-level-filter select {
+.logcat-level-filter select,
+.project-connect-form input,
+.project-connect-form select {
   min-width: 0;
   height: 32px;
   border: 1px solid #444;
@@ -820,6 +823,197 @@ summary:focus-visible {
   color: #aeb7bb;
   font-size: 11px;
   white-space: nowrap;
+}
+
+.project-connect-form {
+  display: grid;
+  grid-template-columns: 128px minmax(220px, 1fr) auto;
+  align-items: end;
+  margin-bottom: 7px;
+}
+
+.project-connect-form label {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  color: #aeb8bc;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.project-connect-form select,
+.project-connect-form input {
+  width: 100%;
+  padding: 0 8px;
+}
+
+.project-connect-form input {
+  font-family: "Cascadia Code", Consolas, monospace;
+}
+
+.project-connect-form .primary-command {
+  min-width: 78px;
+}
+
+.project-connect-hint {
+  margin: 0 0 17px;
+  color: #8e999e;
+  font-size: 11px;
+}
+
+.project-list {
+  display: grid;
+  gap: 10px;
+}
+
+.project-item {
+  overflow: hidden;
+  border: 1px solid #303030;
+  border-radius: 6px;
+  background: #171717;
+}
+
+.project-item > header {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 14px;
+  border-bottom: 1px solid #303030;
+  background: #1c1c1c;
+}
+
+.project-item > header > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-item > header svg {
+  flex: 0 0 auto;
+  color: #8fc6c9;
+}
+
+.project-item > header strong {
+  overflow: hidden;
+  color: #e5eaeb;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-source,
+.project-wrapper {
+  display: inline-flex;
+  min-height: 21px;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 0 6px;
+  border: 1px solid #405b61;
+  border-radius: 3px;
+  color: #9ed1d4;
+  background: #17282a;
+  font-size: 9px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.project-source.git {
+  border-color: #514c69;
+  color: #c6bcea;
+  background: #242133;
+}
+
+.project-wrapper {
+  border-color: #4b4b4b;
+  color: #9ba5a9;
+  background: #222;
+}
+
+.project-wrapper.ready {
+  border-color: #2f6b63;
+  color: #88d8c0;
+  background: #173029;
+}
+
+.project-item > dl {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 150px 90px;
+  margin: 0;
+  border-bottom: 1px solid #303030;
+}
+
+.project-item > dl > div {
+  min-width: 0;
+  padding: 9px 14px;
+  border-right: 1px solid #303030;
+}
+
+.project-item > dl > div:last-child {
+  border-right: 0;
+}
+
+.project-item dt {
+  color: #89949a;
+  font-size: 10px;
+}
+
+.project-item dd {
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: #ccd4d7;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-item dd code {
+  color: #aebbc0;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 10px;
+}
+
+.project-module-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 14px;
+}
+
+.project-module-list > span {
+  display: grid;
+  min-width: 0;
+  max-width: 280px;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid #363636;
+  border-radius: 4px;
+  background: #1d1d1d;
+}
+
+.project-module-list strong {
+  overflow: hidden;
+  color: #dce4e6;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-module-list small,
+.project-module-list em {
+  overflow: hidden;
+  color: #949fa4;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 9px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-module-list em {
+  color: #8ac4c8;
 }
 
 .manager-path-form button {

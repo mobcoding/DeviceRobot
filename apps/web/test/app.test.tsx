@@ -217,6 +217,30 @@ const logcatResponse = {
   readAt: "2026-07-21T10:00:00.000Z",
 };
 
+const projectsResponse = {
+  projects: [
+    {
+      id: "123e4567-e89b-12d3-a456-426614174000",
+      name: "Example",
+      source: "local",
+      rootPath: "C:\\Github\\Example",
+      gradleWrapper: true,
+      modules: [
+        {
+          name: "app",
+          path: "app",
+          buildFile: "app/build.gradle.kts",
+          manifestPath: "app/src/main/AndroidManifest.xml",
+          packageName: "com.example.app",
+          variants: ["debug", "release"],
+        },
+      ],
+      createdAt: "2026-07-21T10:00:00.000Z",
+      updatedAt: "2026-07-21T10:00:00.000Z",
+    },
+  ],
+};
+
 const apkArtifactResponse = {
   id: "123e4567-e89b-12d3-a456-426614174000",
   fileName: "sample.apk",
@@ -239,12 +263,14 @@ function mockApis(options: { healthError?: Error } = {}): {
   getLastAction: () => unknown;
   getInstallRequests: () => number;
   getFileUploadRequests: () => number;
+  getProjectCreateRequests: () => number;
 } {
   let deviceRequests = 0;
   let actionRequests = 0;
   let lastAction: unknown;
   let installRequests = 0;
   let fileUploadRequests = 0;
+  let projectCreateRequests = 0;
   const actionHistory = {
     serial: "8B3Y0THX0",
     actions: [] as Array<{
@@ -267,6 +293,19 @@ function mockApis(options: { healthError?: Error } = {}): {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
+    }
+
+    if (url === "/api/v1/projects") {
+      if (method === "POST") {
+        projectCreateRequests += 1;
+      }
+      return new Response(
+        JSON.stringify(method === "POST" ? projectsResponse.projects[0] : projectsResponse),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     }
 
     if (url === "/api/v1/apks" && method === "POST") {
@@ -382,6 +421,7 @@ function mockApis(options: { healthError?: Error } = {}): {
     getLastAction: () => lastAction,
     getInstallRequests: () => installRequests,
     getFileUploadRequests: () => fileUploadRequests,
+    getProjectCreateRequests: () => projectCreateRequests,
   };
 }
 
@@ -420,9 +460,23 @@ describe("DeviceRobot Web UI", () => {
     await user.click(screen.getByRole("button", { name: "添加工作页签" }));
     await user.click(screen.getByRole("button", { name: "项目" }));
 
-    expect(screen.getByRole("heading", { level: 1, name: "项目" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "项目管理" })).toBeInTheDocument();
     expect(globalThis.location.hash).toBe("#projects");
     expect(screen.getByRole("button", { name: "项目" })).toBeInTheDocument();
+    expect(await screen.findByText("Example")).toBeInTheDocument();
+  });
+
+  it("creates a project from the project-management form", async () => {
+    const { getProjectCreateRequests } = mockApis();
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
+    await user.click(screen.getByRole("button", { name: "项目" }));
+    await user.type(screen.getByRole("textbox", { name: "本地项目目录" }), "C:\\Github\\Example");
+    await user.click(screen.getByRole("button", { name: "接入项目" }));
+
+    await vi.waitFor(() => expect(getProjectCreateRequests()).toBe(1));
   });
 
   it("opens device files from the default file manager tab", async () => {

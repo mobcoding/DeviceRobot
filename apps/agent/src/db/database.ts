@@ -64,6 +64,27 @@ const migrations: Migration[] = [
         ON apk_install_audits (serial, finished_at DESC);
     `,
   },
+  {
+    version: 4,
+    name: "projects",
+    sql: `
+      CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        source TEXT NOT NULL,
+        root_path TEXT NOT NULL UNIQUE,
+        remote_url TEXT,
+        revision TEXT,
+        gradle_wrapper INTEGER NOT NULL,
+        modules_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS projects_updated_at
+        ON projects (updated_at DESC);
+    `,
+  },
 ];
 
 export type DatabaseHandle = {

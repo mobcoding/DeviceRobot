@@ -20,6 +20,9 @@ import {
   deviceUiTreeResponseSchema,
   healthResponseSchema,
   appiumRuntimeSchema,
+  androidProjectSchema,
+  createProjectRequestSchema,
+  projectListResponseSchema,
 } from "@device-robot/contracts";
 import Fastify, {
   type FastifyInstance,
@@ -62,6 +65,12 @@ import {
   parseScrcpyControlCommand,
   type ScrcpyStreamService,
 } from "./scrcpy/scrcpy-stream-service.js";
+import {
+  LocalProjectService,
+  ProjectError,
+  type ProjectService,
+} from "./projects/project-service.js";
+import { SqliteProjectStore } from "./projects/project-store.js";
 
 export const AGENT_VERSION = "0.1.0";
 const WEBSOCKET_OPEN = 1;
@@ -76,6 +85,7 @@ export type CreateAgentAppOptions = {
   deviceControlService?: DeviceControlService;
   deviceManagementService?: DeviceManagementService;
   deviceFileTransferService?: DeviceFileTransferService;
+  projectService?: ProjectService;
   apkArtifactService?: ApkArtifactService;
   deviceActionAuditStore?: DeviceActionAuditStore;
   appiumRuntimeService?: AppiumRuntimeService;
@@ -90,6 +100,7 @@ export type AgentApp = {
   deviceControlService: DeviceControlService;
   deviceManagementService: DeviceManagementService;
   deviceFileTransferService: DeviceFileTransferService;
+  projectService: ProjectService;
   apkArtifactService: ApkArtifactService;
   deviceActionAuditStore: DeviceActionAuditStore;
   appiumRuntimeService: AppiumRuntimeService;
@@ -230,6 +241,15 @@ function fileTransferErrorReply(reply: FastifyReply, error: unknown): FastifyRep
   return reply.code(500).send({ error: message });
 }
 
+function projectErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
+  if (error instanceof ProjectError) {
+    return reply.code(error.statusCode).send({ error: error.message });
+  }
+
+  const message = error instanceof Error ? error.message : "项目请求失败。";
+  return reply.code(500).send({ error: message });
+}
+
 export async function createAgentApp(options: CreateAgentAppOptions = {}): Promise<AgentApp> {
   const paths = options.paths ?? resolveAgentPaths(options.localAppData);
   ensureAgentDirectories(paths);
@@ -245,6 +265,9 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     options.deviceManagementService ?? new AdbDeviceManagementService({ deviceService });
   const deviceFileTransferService =
     options.deviceFileTransferService ?? new AdbDeviceFileTransferService({ paths, deviceService });
+  const projectService =
+    options.projectService ??
+    new LocalProjectService({ paths, store: new SqliteProjectStore(database.sqlite) });
   const apkArtifactService =
     options.apkArtifactService ??
     new LocalApkArtifactService({
@@ -295,6 +318,20 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
 
   app.get("/api/v1/devices", async () => {
     return deviceListResponseSchema.parse(await deviceService.listDevices());
+  });
+
+  app.get("/api/v1/projects", async () => {
+    return projectListResponseSchema.parse({ projects: await projectService.list() });
+  });
+
+  app.post("/api/v1/projects", async (request, reply) => {
+    try {
+      return androidProjectSchema.parse(
+        await projectService.add(createProjectRequestSchema.parse(request.body)),
+      );
+    } catch (error) {
+      return projectErrorReply(reply, error);
+    }
   });
 
   app.post("/api/v1/apks", async (request, reply) => {
@@ -681,6 +718,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     deviceControlService,
     deviceManagementService,
     deviceFileTransferService,
+    projectService,
     apkArtifactService,
     deviceActionAuditStore,
     appiumRuntimeService,

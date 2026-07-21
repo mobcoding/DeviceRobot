@@ -22,6 +22,7 @@ import { DeviceControlPanel } from "./components/DeviceControlPanel";
 import { DeviceLogcatPanel } from "./components/DeviceLogcatPanel";
 import { DeviceMirrorPanel } from "./components/DeviceMirrorPanel";
 import { FileManagerPanel } from "./components/FileManagerPanel";
+import { ProjectManagerPanel } from "./components/ProjectManagerPanel";
 
 const viewIds = [
   "devices",
@@ -613,6 +614,8 @@ export function App(): React.JSX.Element {
             />
           ) : activeView === "logs" && selectedDevice !== undefined ? (
             <DeviceLogcatPanel device={selectedDevice} />
+          ) : activeView === "projects" ? (
+            <ProjectManagerPanel />
           ) : (
             <PlannedView content={plannedViews[activeView as PlannedViewId]} />
           )}

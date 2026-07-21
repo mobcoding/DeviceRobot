@@ -30,3 +30,16 @@ export const apkInstallAudits = sqliteTable("apk_install_audits", {
   startedAt: text("started_at").notNull(),
   finishedAt: text("finished_at").notNull(),
 });
+
+export const projects = sqliteTable("projects", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  source: text("source").notNull(),
+  rootPath: text("root_path").notNull().unique(),
+  remoteUrl: text("remote_url"),
+  revision: text("revision"),
+  gradleWrapper: integer("gradle_wrapper", { mode: "boolean" }).notNull(),
+  modulesJson: text("modules_json").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});

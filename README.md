@@ -4,7 +4,7 @@ DeviceRobot is a Windows-first, local Android AI testing workspace. The current 
 
 ## Current status
 
-The repository discovers locally connected Android devices through ADB and reports authorized, unauthorized, offline, USB, TCP, and emulator states using real device data. For an authorized device, the device workspace provides a live scrcpy stream, manual input, directory browsing, controlled file upload/download, installed-package management, a bounded read-only Logcat viewer, and audited structured controls. APK files can be selected from the application manager or dropped onto the live screen; the Agent stages the file, validates its format and size, calculates SHA-256, reads package metadata with `aapt`, asks for installation confirmation, and records the result. It also diagnoses the local Appium, UiAutomator2, Java, and Android SDK runtime, and starts or stops an Appium server restricted to `127.0.0.1:4723`. Source analysis, AI execution, DSL test-case execution, and test reporting remain future work.
+The repository discovers locally connected Android devices through ADB and reports authorized, unauthorized, offline, USB, TCP, and emulator states using real device data. For an authorized device, the device workspace provides a live scrcpy stream, manual input, directory browsing, controlled file upload/download, installed-package management, a bounded read-only Logcat viewer, and audited structured controls. APK files can be selected from the application manager or dropped onto the live screen; the Agent stages the file, validates its format and size, calculates SHA-256, reads package metadata with `aapt`, asks for installation confirmation, and records the result. The project workspace can register local Android directories or clone public HTTPS Git repositories, then read Gradle and Manifest metadata to discover modules, package names, application IDs, variants, revisions, and Gradle Wrapper availability. It also diagnoses the local Appium, UiAutomator2, Java, and Android SDK runtime, and starts or stops an Appium server restricted to `127.0.0.1:4723`. Deep source indexing, AI execution, DSL test-case execution, and test reporting remain future work.
 
 ## Requirements
 
@@ -69,6 +69,7 @@ Runtime data is stored under `%LOCALAPPDATA%\AIMobileTester` and is not committe
 - AI-requested APK installs can only reference a locally staged artifact and always require explicit approval.
 - Logcat is read through a fixed, bounded ADB command; arbitrary Shell filters and arguments are not exposed.
 - File transfer uses fixed, bounded ADB push/pull commands; uploads require confirmation and temporary download files are removed after delivery.
+- Project registration never runs Gradle; Git registration accepts only credential-free HTTPS remotes and uses a depth-one clone.
 - Direct device controls use an allowlisted action schema and are persisted to a local audit trail.
 - No telemetry is implemented or enabled.
 

@@ -5,6 +5,7 @@ import {
   apkArtifactSchema,
   apkInstallResponseSchema,
   appiumRuntimeSchema,
+  createProjectRequestSchema,
   deviceApplicationListResponseSchema,
   deviceControlActionSchema,
   deviceFileListResponseSchema,
@@ -13,6 +14,7 @@ import {
   deviceLogcatResponseSchema,
   deviceUiTreeResponseSchema,
   healthResponseSchema,
+  projectListResponseSchema,
 } from "../src/index.js";
 
 describe("shared contracts", () => {
@@ -25,6 +27,40 @@ describe("shared contracts", () => {
         dataDirectory: "C:\\Users\\tester\\AppData\\Local\\AIMobileTester",
       }),
     ).toBeDefined();
+  });
+
+  it("accepts a scanned Android project and safe project registration requests", () => {
+    expect(
+      projectListResponseSchema.parse({
+        projects: [
+          {
+            id: "123e4567-e89b-12d3-a456-426614174000",
+            name: "Example",
+            source: "local",
+            rootPath: "C:\\Github\\Example",
+            gradleWrapper: true,
+            modules: [
+              {
+                name: "app",
+                path: "app",
+                buildFile: "app/build.gradle.kts",
+                manifestPath: "app/src/main/AndroidManifest.xml",
+                packageName: "com.example.app",
+                variants: ["debug", "release"],
+              },
+            ],
+            createdAt: "2026-07-21T10:00:00.000Z",
+            updatedAt: "2026-07-21T10:00:00.000Z",
+          },
+        ],
+      }),
+    ).toMatchObject({ projects: [{ modules: [{ name: "app" }] }] });
+    expect(
+      createProjectRequestSchema.parse({
+        source: "git",
+        remoteUrl: "https://github.com/mobcoding/device-robot.git",
+      }),
+    ).toMatchObject({ source: "git" });
   });
 
   it("rejects an action plan without a usable selector", () => {

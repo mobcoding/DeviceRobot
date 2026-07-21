@@ -40,7 +40,7 @@ describe("DeviceRobot Agent", () => {
     const migrationCount = reopened.database.sqlite
       .prepare("SELECT COUNT(*) AS count FROM schema_migrations")
       .get() as { count: number };
-    expect(migrationCount.count).toBe(3);
+    expect(migrationCount.count).toBe(4);
     await reopened.app.close();
   });
 
@@ -119,6 +119,51 @@ describe("DeviceRobot Agent", () => {
       devices: [{ serial: "device-1", model: "Pixel 3 XL" }],
     });
     await app.close();
+  });
+
+  it("lists and registers projects through contract-validated routes", async () => {
+    const project = {
+      id: "123e4567-e89b-12d3-a456-426614174000",
+      name: "Example",
+      source: "local" as const,
+      rootPath: "C:\\Github\\Example",
+      gradleWrapper: true,
+      modules: [
+        {
+          name: "app",
+          path: "app",
+          buildFile: "app/build.gradle.kts",
+          packageName: "com.example.app",
+          variants: ["debug", "release"],
+        },
+      ],
+      createdAt: "2026-07-21T10:00:00.000Z",
+      updatedAt: "2026-07-21T10:00:00.000Z",
+    };
+    const add = vi.fn(async () => project);
+    const { app } = await createAgentApp({
+      localAppData: createTemporaryRoot(),
+      projectService: { list: async () => [project], add },
+    });
+    const headers = { host: "127.0.0.1:43110" };
+
+    try {
+      const listed = await app.inject({ method: "GET", url: "/api/v1/projects", headers });
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/v1/projects",
+        headers,
+        payload: { source: "local", rootPath: "C:\\Github\\Example" },
+      });
+
+      expect(listed.statusCode).toBe(200);
+      expect(listed.json()).toMatchObject({ projects: [{ name: "Example" }] });
+      expect(created.statusCode).toBe(200);
+      expect(created.json()).toMatchObject({ modules: [{ packageName: "com.example.app" }] });
+      expect(add).toHaveBeenCalledWith({ source: "local", rootPath: "C:\\Github\\Example" });
+    } finally {
+      await app.close();
+    }
   });
 
   it("serves read-only file, application, and Logcat management data", async () => {

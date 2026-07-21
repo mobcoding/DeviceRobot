@@ -7,6 +7,18 @@ export {
   type Selector,
 } from "./action-plan.js";
 export { healthResponseSchema, type HealthResponse } from "./health.js";
+export {
+  androidProjectModuleSchema,
+  androidProjectSchema,
+  createProjectRequestSchema,
+  projectListResponseSchema,
+  projectSourceSchema,
+  type AndroidProject,
+  type AndroidProjectModule,
+  type CreateProjectRequest,
+  type ProjectListResponse,
+  type ProjectSource,
+} from "./projects.js";
 export { appiumRuntimeSchema, type AppiumRuntime } from "./appium.js";
 export {
   apkArtifactSchema,

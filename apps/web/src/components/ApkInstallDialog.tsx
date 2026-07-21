@@ -76,7 +76,11 @@ export function ApkInstallDialog({
       if (artifact === undefined) {
         throw new Error("APK 尚未完成上传。");
       }
-      return await installApk(device.serial, artifact.id, { replaceExisting, allowTestPackage });
+      return await installApk(device.serial, artifact.id, {
+        replaceExisting,
+        allowTestPackage,
+        uninstallExisting: false,
+      });
     },
     onSuccess: async () => {
       installedRef.current = true;

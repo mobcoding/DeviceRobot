@@ -1,8 +1,10 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, rmdir } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, rmdir } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
+import type { AgentPaths } from "@device-robot/config";
 import type { AndroidProject } from "@device-robot/contracts";
 
 const execFileAsync = promisify(execFile);
@@ -42,6 +44,7 @@ export interface ProjectTemporarySigningService {
 
 export type LocalProjectTemporarySigningServiceOptions = {
   runner?: SigningKeyCommandRunner;
+  paths?: AgentPaths;
 };
 
 function stringAssignment(contents: string, name: string): string | undefined {
@@ -155,11 +158,29 @@ async function disposeGeneratedKeys(keys: readonly GeneratedSigningKey[]): Promi
   }
 }
 
+function persistentKeyPath(
+  paths: AgentPaths,
+  project: AndroidProject,
+  configuration: SigningConfiguration,
+): string {
+  const identity = JSON.stringify({
+    projectId: project.id,
+    keyStorePath: relative(project.rootPath, configuration.keyStorePath).split(sep).join("/"),
+    keyAlias: configuration.keyAlias,
+    storePassword: configuration.storePassword,
+    keyPassword: configuration.keyPassword,
+  });
+  const fingerprint = createHash("sha256").update(identity).digest("hex").slice(0, 24);
+  return join(paths.root, "signing-keys", `${project.id}-${fingerprint}.jks`);
+}
+
 export class LocalProjectTemporarySigningService implements ProjectTemporarySigningService {
   readonly #runner: SigningKeyCommandRunner;
+  readonly #paths: AgentPaths | undefined;
 
   public constructor(options: LocalProjectTemporarySigningServiceOptions = {}) {
     this.#runner = options.runner ?? createDefaultRunner();
+    this.#paths = options.paths;
   }
 
   public async prepare(project: AndroidProject): Promise<TemporarySigningMaterial | undefined> {
@@ -179,30 +200,43 @@ export class LocalProjectTemporarySigningService implements ProjectTemporarySign
         );
         const generatedKey = { path: configuration.keyStorePath, createdDirectories };
         generated.push(generatedKey);
-        await this.#runner.run("keytool", [
-          "-genkeypair",
-          "-keystore",
-          configuration.keyStorePath,
-          "-storetype",
-          "JKS",
-          "-storepass",
-          configuration.storePassword,
-          "-alias",
-          configuration.keyAlias,
-          "-keypass",
-          configuration.keyPassword,
-          "-keyalg",
-          "RSA",
-          "-keysize",
-          "2048",
-          "-validity",
-          String(KEY_VALIDITY_DAYS),
-          "-dname",
-          "CN=DeviceRobot Temporary Build, OU=Local, O=DeviceRobot, L=Local, ST=Local, C=CN",
-          "-noprompt",
-        ]);
-        if (!existsSync(configuration.keyStorePath)) {
+        const generatedPath =
+          this.#paths === undefined
+            ? configuration.keyStorePath
+            : persistentKeyPath(this.#paths, project, configuration);
+        if (this.#paths !== undefined) {
+          await mkdir(dirname(generatedPath), { recursive: true });
+        }
+        const needsGeneration = !existsSync(generatedPath);
+        if (needsGeneration) {
+          await this.#runner.run("keytool", [
+            "-genkeypair",
+            "-keystore",
+            generatedPath,
+            "-storetype",
+            "JKS",
+            "-storepass",
+            configuration.storePassword,
+            "-alias",
+            configuration.keyAlias,
+            "-keypass",
+            configuration.keyPassword,
+            "-keyalg",
+            "RSA",
+            "-keysize",
+            "2048",
+            "-validity",
+            String(KEY_VALIDITY_DAYS),
+            "-dname",
+            "CN=DeviceRobot Temporary Build, OU=Local, O=DeviceRobot, L=Local, ST=Local, C=CN",
+            "-noprompt",
+          ]);
+        }
+        if (needsGeneration && !existsSync(generatedPath)) {
           throw new ProjectTemporarySigningError("keytool 未生成预期的临时签名文件。");
+        }
+        if (this.#paths !== undefined) {
+          await copyFile(generatedPath, configuration.keyStorePath);
         }
       }
     } catch (error) {

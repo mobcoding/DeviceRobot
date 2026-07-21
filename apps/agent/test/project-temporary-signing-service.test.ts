@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { resolveAgentPaths } from "@device-robot/config";
 import type { AndroidProject } from "@device-robot/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -94,6 +95,36 @@ describe("temporary project signing service", () => {
     await expect(service.prepare(createProject(root))).resolves.toBeUndefined();
     expect(run).not.toHaveBeenCalled();
     expect(existsSync(keyStorePath)).toBe(true);
+  });
+
+  it("reuses a persistent fallback key while removing its project-local copy", async () => {
+    const root = mkdtempSync(join(tmpdir(), "device-robot-signing-"));
+    temporaryDirectories.push(root);
+    mkdirSync(join(root, "app"), { recursive: true });
+    writeSigningBuildFile(root);
+    const keyStorePath = join(root, "doc", "example.jks");
+    const run = vi.fn(async (_executable: string, args: readonly string[]) => {
+      writeFileSync(args[args.indexOf("-keystore") + 1]!, "persistent-key");
+    });
+    const service = new LocalProjectTemporarySigningService({
+      paths: resolveAgentPaths(join(root, "agent-data")),
+      runner: { run },
+    });
+
+    const first = await service.prepare(createProject(root));
+    await first?.dispose();
+    const persistentDirectory = join(root, "agent-data", "AIMobileTester", "signing-keys");
+
+    expect(existsSync(keyStorePath)).toBe(false);
+    expect(existsSync(persistentDirectory)).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+
+    const second = await service.prepare(createProject(root));
+
+    expect(existsSync(keyStorePath)).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+    await second?.dispose();
+    expect(existsSync(keyStorePath)).toBe(false);
   });
 
   it("cleans a partially generated JKS when keytool fails", async () => {

@@ -575,6 +575,7 @@ describe("DeviceRobot Agent", () => {
       expect(install).toHaveBeenCalledWith("device-1", artifact.id, {
         replaceExisting: true,
         allowTestPackage: true,
+        uninstallExisting: false,
       });
       expect(deletion.statusCode).toBe(204);
       expect(discard).toHaveBeenCalledWith(artifact.id);
@@ -666,6 +667,7 @@ describe("DeviceRobot Agent", () => {
       expect(install).toHaveBeenCalledWith("device-1", artifact.id, {
         replaceExisting: true,
         allowTestPackage: true,
+        uninstallExisting: false,
       });
     } finally {
       await app.close();

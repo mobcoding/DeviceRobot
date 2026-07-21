@@ -111,6 +111,7 @@ describe("APK artifact service", () => {
     const result = await service.install("device-1", artifact.id, {
       replaceExisting: true,
       allowTestPackage: true,
+      uninstallExisting: false,
     });
 
     expect(result).toMatchObject({
@@ -135,5 +136,55 @@ describe("APK artifact service", () => {
       statusCode: 422,
       message: "文件不是有效的 APK 压缩包。",
     });
+  });
+
+  it("maps incompatible package signatures to a confirmation-required error", async () => {
+    const { service, runner, auditStore } = createFixture();
+    vi.mocked(runner.run).mockImplementation(async (_executable, args) => {
+      if (args[0] === "dump") {
+        return {
+          stdout: "package: name='com.example.app' versionCode='42' versionName='1.2.3'",
+          stderr: "",
+        };
+      }
+      throw new Error("Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match]");
+    });
+    const artifact = await service.stage("sample.apk", validApkStream());
+
+    await expect(
+      service.install("device-1", artifact.id, {
+        replaceExisting: true,
+        allowTestPackage: true,
+        uninstallExisting: false,
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      message: expect.stringContaining("签名不同"),
+    });
+    expect(auditStore.record).toHaveBeenCalledWith(
+      expect.objectContaining({ success: false, message: expect.stringContaining("签名不同") }),
+    );
+  });
+
+  it("uninstalls the existing package only when explicitly requested", async () => {
+    const { service, runner } = createFixture();
+    const artifact = await service.stage("sample.apk", validApkStream());
+
+    await service.install("device-1", artifact.id, {
+      replaceExisting: true,
+      allowTestPackage: true,
+      uninstallExisting: true,
+    });
+
+    expect(runner.run).toHaveBeenCalledWith(
+      "adb",
+      ["-s", "device-1", "uninstall", "com.example.app"],
+      60_000,
+    );
+    expect(runner.run).toHaveBeenCalledWith(
+      "adb",
+      ["-s", "device-1", "install", "-r", "-t", expect.stringMatching(/\.apk$/u)],
+      300_000,
+    );
   });
 });

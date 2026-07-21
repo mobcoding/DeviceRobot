@@ -299,7 +299,8 @@ export class LocalProjectBuildService implements ProjectBuildService {
     this.#runner = options.runner ?? createDefaultRunner();
     this.#sdkService = options.sdkService ?? new AndroidSdkService({ paths: options.paths });
     this.#temporarySigningService =
-      options.temporarySigningService ?? new LocalProjectTemporarySigningService();
+      options.temporarySigningService ??
+      new LocalProjectTemporarySigningService({ paths: options.paths });
     this.#buildStore.recoverInterruptedRuns(new Date().toISOString());
   }
 
@@ -341,7 +342,9 @@ export class LocalProjectBuildService implements ProjectBuildService {
     if (!Number.isSafeInteger(artifactIndex) || artifactIndex < 0) {
       throw new ProjectBuildError("构建产物编号无效。", 400);
     }
-    const run = this.#buildStore.listByProject(projectId).find((candidate) => candidate.id === runId);
+    const run = this.#buildStore
+      .listByProject(projectId)
+      .find((candidate) => candidate.id === runId);
     if (run === undefined) {
       throw new ProjectBuildError("未找到构建记录。", 404);
     }

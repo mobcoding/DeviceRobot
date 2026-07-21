@@ -47,6 +47,7 @@ type ProjectArtifactInstall = {
   projectId: string;
   buildId: string;
   artifactIndex: number;
+  uninstallExisting: boolean;
 };
 
 type InstalledProjectArtifact = ProjectArtifactInstall & {
@@ -312,6 +313,8 @@ export function ProjectManagerPanel({
   const [pendingBuild, setPendingBuild] = useState<PendingBuild>();
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>();
   const [installedArtifact, setInstalledArtifact] = useState<InstalledProjectArtifact>();
+  const [pendingSignatureConflict, setPendingSignatureConflict] =
+    useState<ProjectArtifactInstall>();
   const projectsQuery = useQuery({
     queryKey: ["projects"],
     queryFn: ({ signal }) => fetchProjects(signal),
@@ -376,11 +379,21 @@ export function ProjectManagerPanel({
         request.projectId,
         request.buildId,
         request.artifactIndex,
-        { replaceExisting: true, allowTestPackage: true },
+        {
+          replaceExisting: true,
+          allowTestPackage: true,
+          uninstallExisting: request.uninstallExisting,
+        },
       ),
     onSuccess: async (response, request) => {
+      setPendingSignatureConflict(undefined);
       setInstalledArtifact({ ...request, packageName: response.packageName });
       await queryClient.invalidateQueries({ queryKey: ["device-applications", request.serial] });
+    },
+    onError: (error, request) => {
+      if (error.message.includes("签名不同")) {
+        setPendingSignatureConflict(request);
+      }
     },
   });
   const submitting = createMutation.isPending;
@@ -395,9 +408,9 @@ export function ProjectManagerPanel({
           ? buildMutation.error?.message
           : installSdkMutation.isError
             ? installSdkMutation.error?.message
-            : installArtifactMutation.isError
+            : installArtifactMutation.isError && pendingSignatureConflict === undefined
               ? installArtifactMutation.error?.message
-            : undefined;
+              : undefined;
 
   const submit = (event: React.FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -406,16 +419,30 @@ export function ProjectManagerPanel({
     }
   };
 
-  const installArtifact = (project: AndroidProject, run: ProjectBuildRun, artifactIndex: number): void => {
+  const installArtifact = (
+    project: AndroidProject,
+    run: ProjectBuildRun,
+    artifactIndex: number,
+  ): void => {
     if (device === undefined) {
       return;
     }
+    installArtifactMutation.reset();
     installArtifactMutation.mutate({
       serial: device.serial,
       projectId: project.id,
       buildId: run.id,
       artifactIndex,
+      uninstallExisting: false,
     });
+  };
+
+  const uninstallAndInstallArtifact = (): void => {
+    if (pendingSignatureConflict === undefined) {
+      return;
+    }
+    installArtifactMutation.reset();
+    installArtifactMutation.mutate({ ...pendingSignatureConflict, uninstallExisting: true });
   };
 
   return (
@@ -542,7 +569,8 @@ export function ProjectManagerPanel({
                 building={buildMutation.isPending}
                 installing={installSdkMutation.isPending}
                 device={device}
-                {...(installArtifactMutation.isPending && installArtifactMutation.variables !== undefined
+                {...(installArtifactMutation.isPending &&
+                installArtifactMutation.variables !== undefined
                   ? {
                       installingArtifact: {
                         buildId: installArtifactMutation.variables.buildId,
@@ -591,6 +619,42 @@ export function ProjectManagerPanel({
                 onClick={() => buildMutation.mutate(pendingBuild)}
               >
                 {buildMutation.isPending ? "正在启动构建" : "确认构建"}
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+      {pendingSignatureConflict !== undefined && (
+        <div className="modal-backdrop" role="presentation">
+          <section
+            className="project-build-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="确认卸载旧版本后安装"
+          >
+            <h2>签名不一致</h2>
+            <p>
+              当前设备已安装同包名但签名不同的应用。继续将先卸载旧版本，再安装本次构建的
+              APK；旧应用的本地数据将被删除。
+            </p>
+            <footer>
+              <button
+                type="button"
+                disabled={installArtifactMutation.isPending}
+                onClick={() => {
+                  setPendingSignatureConflict(undefined);
+                  installArtifactMutation.reset();
+                }}
+              >
+                取消
+              </button>
+              <button
+                className="primary-command"
+                type="button"
+                disabled={installArtifactMutation.isPending}
+                onClick={uninstallAndInstallArtifact}
+              >
+                {installArtifactMutation.isPending ? "正在卸载并安装" : "卸载旧版本后安装"}
               </button>
             </footer>
           </section>

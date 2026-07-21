@@ -85,6 +85,17 @@ function commandOutput(result: { stdout: string; stderr: string }): string {
   return `${result.stdout}\n${result.stderr}`.trim();
 }
 
+function isSignatureMismatch(message: string): boolean {
+  return /INSTALL_FAILED_UPDATE_INCOMPATIBLE/iu.test(message);
+}
+
+function signatureMismatchError(): ApkArtifactError {
+  return new ApkArtifactError(
+    "APK 安装失败：设备中已安装同包名但签名不同的版本。请确认卸载旧版本后再安装；卸载会删除该应用的本地数据。",
+    409,
+  );
+}
+
 function safeFileName(value: string): string {
   const fileName = basename(value).trim();
   if (
@@ -294,6 +305,17 @@ export class LocalApkArtifactService implements ApkArtifactService {
     const startedAt = new Date().toISOString();
 
     try {
+      if (options.uninstallExisting) {
+        const uninstallResult = await this.#runner.run(
+          this.#adbExecutable,
+          ["-s", serial, "uninstall", artifact.metadata.packageName],
+          60_000,
+        );
+        const uninstallMessage = commandOutput(uninstallResult);
+        if (!/(?:^|\s)Success(?:\s|$)/u.test(uninstallMessage)) {
+          throw new ApkArtifactError(uninstallMessage || "ADB 未返回卸载成功状态。", 502);
+        }
+      }
       const args = ["-s", serial, "install"];
       if (options.replaceExisting) {
         args.push("-r");
@@ -332,7 +354,13 @@ export class LocalApkArtifactService implements ApkArtifactService {
       });
     } catch (error) {
       const finishedAt = new Date().toISOString();
-      const message = toErrorMessage(error);
+      const originalMessage = toErrorMessage(error);
+      const normalizedError = isSignatureMismatch(originalMessage)
+        ? signatureMismatchError()
+        : error instanceof ApkArtifactError
+          ? error
+          : new ApkArtifactError(`APK 安装失败：${originalMessage}`, 502);
+      const message = normalizedError.message;
       this.#auditStore.record({
         artifactId,
         serial,
@@ -344,10 +372,7 @@ export class LocalApkArtifactService implements ApkArtifactService {
         startedAt,
         finishedAt,
       });
-      if (error instanceof ApkArtifactError) {
-        throw error;
-      }
-      throw new ApkArtifactError(`APK 安装失败：${message}`, 502);
+      throw normalizedError;
     }
   }
 

@@ -25,6 +25,8 @@ export const apkArtifactSchema = z.object({
 export const apkInstallRequestSchema = z.object({
   replaceExisting: z.boolean().default(true),
   allowTestPackage: z.boolean().default(true),
+  // This is deliberately opt-in because uninstalling removes the application's local data.
+  uninstallExisting: z.boolean().default(false),
 });
 
 export const apkInstallResponseSchema = z.object({

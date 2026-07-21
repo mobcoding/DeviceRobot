@@ -609,7 +609,7 @@ export function App(): React.JSX.Element {
           ) : activeView === "logs" && selectedDevice !== undefined ? (
             <DeviceLogcatPanel device={selectedDevice} />
           ) : activeView === "projects" ? (
-            <ProjectManagerPanel />
+            <ProjectManagerPanel device={selectedDevice} />
           ) : activeView === "conversations" ? (
             <AiPlanPanel device={selectedDevice} />
           ) : (

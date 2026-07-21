@@ -201,6 +201,23 @@ describe("Android project build service", () => {
         artifactPaths: ["app/build/outputs/apk/free/debug/app-free-debug.apk"],
       });
     });
+
+    await expect(service.getArtifact(project.id, running.id, 0)).resolves.toMatchObject({
+      fileName: "app-free-debug.apk",
+      filePath: join(root, "app", "build", "outputs", "apk", "free", "debug", "app-free-debug.apk"),
+      sizeBytes: 3,
+    });
+    await expect(service.getArtifact(project.id, running.id, 1)).rejects.toMatchObject({
+      statusCode: 404,
+    });
+
+    store.runs[0] = {
+      ...store.runs[0]!,
+      artifactPaths: ["../outside.apk"],
+    };
+    await expect(service.getArtifact(project.id, running.id, 0)).rejects.toMatchObject({
+      statusCode: 422,
+    });
   });
 
   it.skipIf(process.platform !== "win32")(

@@ -1,4 +1,5 @@
 import {
+  apkInstallResponseSchema,
   androidProjectSchema,
   androidSdkInfoSchema,
   androidBuildTargetListResponseSchema,
@@ -10,6 +11,8 @@ import {
   type CreateProjectRequest,
   type InstallAndroidSdkRequest,
   type AndroidBuildTargetListResponse,
+  type ApkInstallRequest,
+  type ApkInstallResponse,
   type ProjectBuildRun,
   type ProjectBuildRunListResponse,
   type StartProjectBuildRequest,
@@ -127,5 +130,35 @@ export async function startProjectBuild(
       body: JSON.stringify(request),
     },
     projectBuildRunSchema,
+  );
+}
+
+export function projectBuildArtifactDownloadUrl(
+  projectId: string,
+  buildId: string,
+  artifactIndex: number,
+): string {
+  return `/api/v1/projects/${encodeURIComponent(projectId)}/builds/${encodeURIComponent(
+    buildId,
+  )}/artifacts/${artifactIndex}/download`;
+}
+
+export async function installProjectBuildArtifact(
+  serial: string,
+  projectId: string,
+  buildId: string,
+  artifactIndex: number,
+  request: ApkInstallRequest,
+): Promise<ApkInstallResponse> {
+  return await projectRequest(
+    `/api/v1/devices/${encodeURIComponent(serial)}/projects/${encodeURIComponent(
+      projectId,
+    )}/builds/${encodeURIComponent(buildId)}/artifacts/${artifactIndex}/install`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(request),
+    },
+    apkInstallResponseSchema,
   );
 }

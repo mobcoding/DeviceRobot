@@ -310,6 +310,15 @@ const runningProjectBuildResponse = {
   startedAt: "2026-07-21T10:01:00.000Z",
 };
 
+const completedProjectBuildResponse = {
+  ...runningProjectBuildResponse,
+  status: "succeeded",
+  artifactPaths: ["app/build/outputs/apk/debug/app-debug.apk"],
+  message: "构建完成，发现 1 个 APK 输出。",
+  exitCode: 0,
+  finishedAt: "2026-07-21T10:02:00.000Z",
+};
+
 const aiModelStatusResponse = {
   configured: true,
   provider: "openai-compatible",
@@ -361,6 +370,7 @@ function mockApis(
       model?: string;
       reason?: string;
     };
+    completedProjectBuild?: boolean;
   } = {},
 ): {
   getDeviceRequests: () => number;
@@ -371,6 +381,7 @@ function mockApis(
   getProjectCreateRequests: () => number;
   getProjectReindexRequests: () => number;
   getProjectBuildRequests: () => number;
+  getProjectArtifactInstallRequests: () => number;
   getAiPlanRequests: () => number;
   getAiModelListRequests: () => number;
   getAiConfigurationTestRequests: () => number;
@@ -384,7 +395,8 @@ function mockApis(
   let projectReindexRequests = 0;
   let projectSourceIndexed = false;
   let projectBuildRequests = 0;
-  let projectBuildStarted = false;
+  let projectBuildStarted = options.completedProjectBuild ?? false;
+  let projectArtifactInstallRequests = 0;
   let aiPlanRequests = 0;
   let aiModelListRequests = 0;
   let aiConfigurationTestRequests = 0;
@@ -487,7 +499,29 @@ function mockApis(
       return new Response(
         JSON.stringify({
           projectId: projectBuildTargetResponse.projectId,
-          runs: projectBuildStarted ? [runningProjectBuildResponse] : [],
+          runs: projectBuildStarted
+            ? [options.completedProjectBuild ? completedProjectBuildResponse : runningProjectBuildResponse]
+            : [],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    if (
+      url.includes(`/projects/${projectBuildTargetResponse.projectId}/builds/`) &&
+      url.endsWith("/install") &&
+      method === "POST"
+    ) {
+      projectArtifactInstallRequests += 1;
+      return new Response(
+        JSON.stringify({
+          status: "installed",
+          serial: "8B3Y0THX0",
+          artifactId: apkArtifactResponse.id,
+          packageName: "com.example.app",
+          startedAt: "2026-07-22T10:01:00.000Z",
+          finishedAt: "2026-07-22T10:01:02.000Z",
+          message: "Success",
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
@@ -630,6 +664,7 @@ function mockApis(
     getProjectCreateRequests: () => projectCreateRequests,
     getProjectReindexRequests: () => projectReindexRequests,
     getProjectBuildRequests: () => projectBuildRequests,
+    getProjectArtifactInstallRequests: () => projectArtifactInstallRequests,
     getAiPlanRequests: () => aiPlanRequests,
     getAiModelListRequests: () => aiModelListRequests,
     getAiConfigurationTestRequests: () => aiConfigurationTestRequests,
@@ -709,6 +744,32 @@ describe("DeviceRobot Web UI", () => {
 
     await vi.waitFor(() => expect(getProjectBuildRequests()).toBe(1));
     expect(await screen.findByText("构建中")).toBeInTheDocument();
+  });
+
+  it("exports and installs an APK from a completed project build", async () => {
+    const { getProjectArtifactInstallRequests } = mockApis({ completedProjectBuild: true });
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
+    await user.click(screen.getByRole("button", { name: "项目" }));
+    const output = await screen.findByText("app-debug.apk");
+    const artifact = output.closest(".project-build-artifact");
+    expect(artifact).not.toBeNull();
+    expect(within(artifact as HTMLElement).getByRole("link", { name: "导出 app-debug.apk" }))
+      .toHaveAttribute(
+        "href",
+        `/api/v1/projects/${projectBuildTargetResponse.projectId}/builds/${completedProjectBuildResponse.id}/artifacts/0/download`,
+      );
+
+    await user.click(
+      within(artifact as HTMLElement).getByRole("button", {
+        name: "安装 app-debug.apk 到当前设备",
+      }),
+    );
+
+    await vi.waitFor(() => expect(getProjectArtifactInstallRequests()).toBe(1));
+    expect(await within(artifact as HTMLElement).findByText("已安装 com.example.app")).toBeInTheDocument();
   });
 
   it("uses the configured model to generate a preview-only AI ActionPlan", async () => {

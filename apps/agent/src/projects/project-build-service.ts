@@ -1,8 +1,8 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createWriteStream, existsSync, type WriteStream } from "node:fs";
-import { mkdir, readdir } from "node:fs/promises";
-import { join, relative, sep } from "node:path";
+import { mkdir, readdir, realpath, stat } from "node:fs/promises";
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { AgentPaths } from "@device-robot/config";
 import {
@@ -47,6 +47,12 @@ export type ProjectBuildProcessResult = {
   errorMessage?: string;
 };
 
+export type ProjectBuildArtifact = {
+  fileName: string;
+  filePath: string;
+  sizeBytes: number;
+};
+
 export interface ProjectBuildProcess {
   readonly completed: Promise<ProjectBuildProcessResult>;
   stop(): Promise<void>;
@@ -66,6 +72,11 @@ export interface ProjectBuildService {
   listTargets(projectId: string): Promise<AndroidBuildTargetListResponse>;
   installSdk(projectId: string): Promise<AndroidSdkInfo>;
   listRuns(projectId: string): Promise<ProjectBuildRunListResponse>;
+  getArtifact(
+    projectId: string,
+    runId: string,
+    artifactIndex: number,
+  ): Promise<ProjectBuildArtifact>;
   start(projectId: string, request: StartProjectBuildRequest): Promise<ProjectBuildRun>;
   dispose(): Promise<void>;
 }
@@ -97,6 +108,16 @@ function errorMessage(error: unknown): string {
 function relativeProjectPath(rootPath: string, path: string): string {
   const value = relative(rootPath, path).split(sep).join("/");
   return value.length === 0 ? "." : value;
+}
+
+function isPathWithin(rootPath: string, path: string): boolean {
+  const pathRelative = relative(rootPath, path);
+  return (
+    pathRelative.length > 0 &&
+    pathRelative !== ".." &&
+    !pathRelative.startsWith(`..${sep}`) &&
+    !isAbsolute(pathRelative)
+  );
 }
 
 function capitalize(value: string): string {
@@ -309,6 +330,60 @@ export class LocalProjectBuildService implements ProjectBuildService {
       projectId,
       runs: this.#buildStore.listByProject(projectId),
     });
+  }
+
+  public async getArtifact(
+    projectId: string,
+    runId: string,
+    artifactIndex: number,
+  ): Promise<ProjectBuildArtifact> {
+    const project = this.#requireProject(projectId);
+    if (!Number.isSafeInteger(artifactIndex) || artifactIndex < 0) {
+      throw new ProjectBuildError("构建产物编号无效。", 400);
+    }
+    const run = this.#buildStore.listByProject(projectId).find((candidate) => candidate.id === runId);
+    if (run === undefined) {
+      throw new ProjectBuildError("未找到构建记录。", 404);
+    }
+    if (run.status !== "succeeded") {
+      throw new ProjectBuildError("构建尚未完成，暂时不能使用其 APK 产物。", 409);
+    }
+    const artifactRelativePath = run.artifactPaths[artifactIndex];
+    if (artifactRelativePath === undefined) {
+      throw new ProjectBuildError("未找到指定的 APK 构建产物。", 404);
+    }
+
+    const requestedPath = resolve(project.rootPath, artifactRelativePath);
+    if (
+      !isPathWithin(project.rootPath, requestedPath) ||
+      extname(requestedPath).toLocaleLowerCase() !== ".apk"
+    ) {
+      throw new ProjectBuildError("构建产物路径无效。", 422);
+    }
+
+    try {
+      const [projectRoot, artifactPath] = await Promise.all([
+        realpath(project.rootPath),
+        realpath(requestedPath),
+      ]);
+      if (!isPathWithin(projectRoot, artifactPath)) {
+        throw new ProjectBuildError("构建产物路径无效。", 422);
+      }
+      const metadata = await stat(artifactPath);
+      if (!metadata.isFile()) {
+        throw new ProjectBuildError("构建产物已不存在或不是文件。", 404);
+      }
+      return {
+        fileName: basename(artifactPath),
+        filePath: artifactPath,
+        sizeBytes: metadata.size,
+      };
+    } catch (error) {
+      if (error instanceof ProjectBuildError) {
+        throw error;
+      }
+      throw new ProjectBuildError("构建产物已不存在或无法访问。", 404);
+    }
   }
 
   public async start(

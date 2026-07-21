@@ -180,6 +180,37 @@ function parseProjectId(params: unknown): string {
   return projectId;
 }
 
+function parseBuildId(params: unknown): string {
+  if (typeof params !== "object" || params === null) {
+    throw new ProjectBuildError("缺少构建记录编号。", 400);
+  }
+  const buildId = (params as Record<string, unknown>).buildId;
+  if (
+    typeof buildId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+      buildId,
+    )
+  ) {
+    throw new ProjectBuildError("构建记录编号无效。", 400);
+  }
+  return buildId;
+}
+
+function parseBuildArtifactIndex(params: unknown): number {
+  if (typeof params !== "object" || params === null) {
+    throw new ProjectBuildError("缺少构建产物编号。", 400);
+  }
+  const value = (params as Record<string, unknown>).artifactIndex;
+  if (typeof value !== "string" || !/^\d+$/u.test(value)) {
+    throw new ProjectBuildError("构建产物编号无效。", 400);
+  }
+  const artifactIndex = Number.parseInt(value, 10);
+  if (!Number.isSafeInteger(artifactIndex) || artifactIndex > 99) {
+    throw new ProjectBuildError("构建产物编号无效。", 400);
+  }
+  return artifactIndex;
+}
+
 function controlErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
   if (error instanceof DeviceControlError) {
     return reply.code(error.statusCode).send({ error: error.message });
@@ -478,6 +509,56 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
       return projectBuildErrorReply(reply, error);
     }
   });
+
+  app.get(
+    "/api/v1/projects/:projectId/builds/:buildId/artifacts/:artifactIndex/download",
+    async (request, reply) => {
+      try {
+        const artifact = await projectBuildService.getArtifact(
+          parseProjectId(request.params),
+          parseBuildId(request.params),
+          parseBuildArtifactIndex(request.params),
+        );
+        reply.header("Content-Type", "application/vnd.android.package-archive");
+        reply.header(
+          "Content-Disposition",
+          `attachment; filename="build.apk"; filename*=UTF-8''${encodeURIComponent(artifact.fileName)}`,
+        );
+        reply.header("Content-Length", String(artifact.sizeBytes));
+        return reply.send(createReadStream(artifact.filePath));
+      } catch (error) {
+        return projectBuildErrorReply(reply, error);
+      }
+    },
+  );
+
+  app.post(
+    "/api/v1/devices/:serial/projects/:projectId/builds/:buildId/artifacts/:artifactIndex/install",
+    async (request, reply) => {
+      try {
+        const artifact = await projectBuildService.getArtifact(
+          parseProjectId(request.params),
+          parseBuildId(request.params),
+          parseBuildArtifactIndex(request.params),
+        );
+        const stagedArtifact = await apkArtifactService.stage(
+          artifact.fileName,
+          createReadStream(artifact.filePath),
+        );
+        return apkInstallResponseSchema.parse(
+          await apkArtifactService.install(
+            parseSerial(request.params),
+            stagedArtifact.id,
+            apkInstallRequestSchema.parse(request.body ?? {}),
+          ),
+        );
+      } catch (error) {
+        return error instanceof ProjectBuildError
+          ? projectBuildErrorReply(reply, error)
+          : apkErrorReply(reply, error);
+      }
+    },
+  );
 
   app.get("/api/v1/ai/status", async () => {
     return aiModelStatusSchema.parse(await aiPlanService.status());

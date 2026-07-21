@@ -1,8 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Download, FolderGit2, FolderOpen, GitBranch, RefreshCw } from "lucide-react";
+import {
+  ChevronRight,
+  Download,
+  FolderGit2,
+  FolderOpen,
+  GitBranch,
+  PackageCheck,
+  RefreshCw,
+} from "lucide-react";
 import { useState } from "react";
 import type {
   AndroidBuildTarget,
+  AndroidDevice,
   AndroidProject,
   AndroidSdkInfo,
   ProjectBuildRun,
@@ -15,6 +24,8 @@ import {
   fetchProjectBuildTargets,
   fetchProjects,
   installProjectAndroidSdk,
+  installProjectBuildArtifact,
+  projectBuildArtifactDownloadUrl,
   startProjectBuild,
 } from "../api/projects";
 
@@ -27,6 +38,17 @@ type ProjectBuildData = {
 type PendingBuild = {
   project: AndroidProject;
   target: AndroidBuildTarget;
+};
+
+type ProjectArtifactInstall = {
+  serial: string;
+  projectId: string;
+  buildId: string;
+  artifactIndex: number;
+};
+
+type InstalledProjectArtifact = ProjectArtifactInstall & {
+  packageName: string;
 };
 
 function sourceLabel(source: ProjectSource): string {
@@ -46,22 +68,34 @@ function buildStatusLabel(status: ProjectBuildRun["status"]): string {
   }
 }
 
+function artifactName(path: string): string {
+  return path.split("/").at(-1) ?? path;
+}
+
 function ProjectBuildSection({
   project,
   data,
   loading,
   building,
   installing,
+  device,
+  installingArtifact,
+  installedArtifact,
   onRequestBuild,
   onInstallSdk,
+  onInstallArtifact,
 }: {
   project: AndroidProject;
   data: ProjectBuildData | undefined;
   loading: boolean;
   building: boolean;
   installing: boolean;
+  device: AndroidDevice | undefined;
+  installingArtifact?: Pick<ProjectArtifactInstall, "buildId" | "artifactIndex">;
+  installedArtifact: InstalledProjectArtifact | undefined;
   onRequestBuild(target: AndroidBuildTarget): void;
   onInstallSdk(projectId: string): void;
+  onInstallArtifact(run: ProjectBuildRun, artifactIndex: number): void;
 }): React.JSX.Element {
   const sdkReady =
     data !== undefined && data.androidSdk.available && data.androidSdk.missingPackages.length === 0;
@@ -140,8 +174,63 @@ function ProjectBuildSection({
                       {latestRun === undefined ? "尚未构建" : buildStatusLabel(latestRun.status)}
                     </strong>
                     <small>{latestRun?.message ?? "暂无构建记录"}</small>
-                    {latestRun?.artifactPaths[0] !== undefined && (
-                      <em>{latestRun.artifactPaths[0]}</em>
+                    {latestRun !== undefined && latestRun.artifactPaths.length > 0 && (
+                      <div className="project-build-artifacts" aria-label="APK 构建产物">
+                        {latestRun.artifactPaths.map((artifactPath, artifactIndex) => {
+                          const name = artifactName(artifactPath);
+                          const installationMatches =
+                            installedArtifact?.serial === device?.serial &&
+                            installedArtifact?.buildId === latestRun.id &&
+                            installedArtifact.artifactIndex === artifactIndex;
+                          const installationInProgress =
+                            installingArtifact?.buildId === latestRun.id &&
+                            installingArtifact.artifactIndex === artifactIndex;
+                          return (
+                            <div className="project-build-artifact" key={artifactPath}>
+                              <code title={artifactPath}>{name}</code>
+                              <div>
+                                <a
+                                  className="project-artifact-command"
+                                  href={projectBuildArtifactDownloadUrl(
+                                    project.id,
+                                    latestRun.id,
+                                    artifactIndex,
+                                  )}
+                                  download={name}
+                                  aria-label={`导出 ${name}`}
+                                >
+                                  <Download aria-hidden="true" size={13} strokeWidth={1.9} />
+                                  <span>导出 APK</span>
+                                </a>
+                                <button
+                                  className="project-artifact-command"
+                                  type="button"
+                                  aria-label={`安装 ${name} 到当前设备`}
+                                  disabled={
+                                    device === undefined || installingArtifact !== undefined
+                                  }
+                                  title={
+                                    device === undefined
+                                      ? "请先在顶部选择可用设备"
+                                      : "安装到当前设备"
+                                  }
+                                  onClick={() => onInstallArtifact(latestRun, artifactIndex)}
+                                >
+                                  <PackageCheck aria-hidden="true" size={13} strokeWidth={1.9} />
+                                  <span>
+                                    {installationInProgress ? "正在安装" : "安装到当前设备"}
+                                  </span>
+                                </button>
+                              </div>
+                              {installationMatches && (
+                                <small className="project-artifact-installed" role="status">
+                                  已安装 {installedArtifact.packageName}
+                                </small>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
                 </article>
@@ -154,13 +243,18 @@ function ProjectBuildSection({
   );
 }
 
-export function ProjectManagerPanel(): React.JSX.Element {
+export function ProjectManagerPanel({
+  device,
+}: {
+  device: AndroidDevice | undefined;
+}): React.JSX.Element {
   const queryClient = useQueryClient();
   const [source, setSource] = useState<ProjectSource>("local");
   const [localPath, setLocalPath] = useState("");
   const [remoteUrl, setRemoteUrl] = useState("");
   const [pendingBuild, setPendingBuild] = useState<PendingBuild>();
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>();
+  const [installedArtifact, setInstalledArtifact] = useState<InstalledProjectArtifact>();
   const projectsQuery = useQuery({
     queryKey: ["projects"],
     queryFn: ({ signal }) => fetchProjects(signal),
@@ -218,6 +312,20 @@ export function ProjectManagerPanel(): React.JSX.Element {
       await queryClient.invalidateQueries({ queryKey: ["project-build-data"] });
     },
   });
+  const installArtifactMutation = useMutation({
+    mutationFn: async (request: ProjectArtifactInstall) =>
+      await installProjectBuildArtifact(
+        request.serial,
+        request.projectId,
+        request.buildId,
+        request.artifactIndex,
+        { replaceExisting: true, allowTestPackage: true },
+      ),
+    onSuccess: async (response, request) => {
+      setInstalledArtifact({ ...request, packageName: response.packageName });
+      await queryClient.invalidateQueries({ queryKey: ["device-applications", request.serial] });
+    },
+  });
   const submitting = createMutation.isPending;
   const value = source === "local" ? localPath : remoteUrl;
   const error = projectsQuery.isError
@@ -230,6 +338,8 @@ export function ProjectManagerPanel(): React.JSX.Element {
           ? buildMutation.error?.message
           : installSdkMutation.isError
             ? installSdkMutation.error?.message
+            : installArtifactMutation.isError
+              ? installArtifactMutation.error?.message
             : undefined;
 
   const submit = (event: React.FormEvent<HTMLFormElement>): void => {
@@ -237,6 +347,18 @@ export function ProjectManagerPanel(): React.JSX.Element {
     if (value.trim().length > 0) {
       createMutation.mutate();
     }
+  };
+
+  const installArtifact = (project: AndroidProject, run: ProjectBuildRun, artifactIndex: number): void => {
+    if (device === undefined) {
+      return;
+    }
+    installArtifactMutation.mutate({
+      serial: device.serial,
+      projectId: project.id,
+      buildId: run.id,
+      artifactIndex,
+    });
   };
 
   return (
@@ -362,8 +484,21 @@ export function ProjectManagerPanel(): React.JSX.Element {
                 loading={projectBuildsQuery.isFetching}
                 building={buildMutation.isPending}
                 installing={installSdkMutation.isPending}
+                device={device}
+                {...(installArtifactMutation.isPending && installArtifactMutation.variables !== undefined
+                  ? {
+                      installingArtifact: {
+                        buildId: installArtifactMutation.variables.buildId,
+                        artifactIndex: installArtifactMutation.variables.artifactIndex,
+                      },
+                    }
+                  : {})}
+                installedArtifact={installedArtifact}
                 onRequestBuild={(target) => setPendingBuild({ project, target })}
                 onInstallSdk={(projectId) => installSdkMutation.mutate(projectId)}
+                onInstallArtifact={(run, artifactIndex) =>
+                  installArtifact(project, run, artifactIndex)
+                }
               />
             </details>
           ))}

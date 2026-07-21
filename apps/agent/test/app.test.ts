@@ -213,6 +213,9 @@ describe("DeviceRobot Agent", () => {
           missingPackages: [],
         }),
         listRuns: async () => ({ projectId: project.id, runs: [buildRun] }),
+        getArtifact: async () => {
+          throw new Error("No build artifact is configured for this route test.");
+        },
         start: startBuild,
         dispose: async () => {},
       },
@@ -575,6 +578,95 @@ describe("DeviceRobot Agent", () => {
       });
       expect(deletion.statusCode).toBe(204);
       expect(discard).toHaveBeenCalledWith(artifact.id);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("downloads and installs only recorded APK artifacts from completed project builds", async () => {
+    const root = createTemporaryRoot();
+    const artifactPath = join(root, "app-debug.apk");
+    writeFileSync(artifactPath, "apk");
+    const projectId = "123e4567-e89b-12d3-a456-426614174000";
+    const buildId = "223e4567-e89b-12d3-a456-426614174000";
+    const getArtifact = vi.fn(async () => ({
+      fileName: "app-debug.apk",
+      filePath: artifactPath,
+      sizeBytes: 3,
+    }));
+    const artifact = {
+      id: "323e4567-e89b-12d3-a456-426614174000",
+      fileName: "app-debug.apk",
+      sizeBytes: 3,
+      sha256: "a".repeat(64),
+      uploadedAt: "2026-07-22T10:00:00.000Z",
+      metadata: { packageName: "com.example.app", versionCode: "42" },
+    };
+    const stage = vi.fn(async (_fileName: string, stream: NodeJS.ReadableStream) => {
+      for await (const chunk of stream) {
+        void chunk;
+      }
+      return artifact;
+    });
+    const install = vi.fn(async (serial: string, artifactId: string) => ({
+      status: "installed" as const,
+      serial,
+      artifactId,
+      packageName: "com.example.app",
+      startedAt: "2026-07-22T10:01:00.000Z",
+      finishedAt: "2026-07-22T10:01:02.000Z",
+      message: "Success",
+    }));
+    const { app } = await createAgentApp({
+      localAppData: root,
+      projectBuildService: {
+        listTargets: async () => {
+          throw new Error("Not used");
+        },
+        installSdk: async () => {
+          throw new Error("Not used");
+        },
+        listRuns: async () => ({ projectId, runs: [] }),
+        getArtifact,
+        start: async () => {
+          throw new Error("Not used");
+        },
+        dispose: async () => {},
+      },
+      apkArtifactService: { stage, install, discard: async () => {} },
+    });
+    const headers = { host: "127.0.0.1:43110" };
+
+    try {
+      const download = await app.inject({
+        method: "GET",
+        url: `/api/v1/projects/${projectId}/builds/${buildId}/artifacts/0/download`,
+        headers,
+      });
+      const installation = await app.inject({
+        method: "POST",
+        url: `/api/v1/devices/device-1/projects/${projectId}/builds/${buildId}/artifacts/0/install`,
+        headers,
+        payload: { replaceExisting: true, allowTestPackage: true },
+      });
+
+      expect(download.statusCode).toBe(200);
+      expect(download.body).toBe("apk");
+      expect(download.headers["content-type"]).toContain("application/vnd.android.package-archive");
+      expect(download.headers["content-disposition"]).toContain("attachment");
+      expect(installation.statusCode).toBe(200);
+      expect(installation.json()).toMatchObject({
+        status: "installed",
+        serial: "device-1",
+        packageName: "com.example.app",
+      });
+      expect(getArtifact).toHaveBeenNthCalledWith(1, projectId, buildId, 0);
+      expect(getArtifact).toHaveBeenNthCalledWith(2, projectId, buildId, 0);
+      expect(stage).toHaveBeenCalledWith("app-debug.apk", expect.anything());
+      expect(install).toHaveBeenCalledWith("device-1", artifact.id, {
+        replaceExisting: true,
+        allowTestPackage: true,
+      });
     } finally {
       await app.close();
     }

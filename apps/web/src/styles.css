@@ -1146,6 +1146,73 @@ summary:focus-visible {
   color: #8c979b;
 }
 
+.project-build-artifacts {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.project-build-artifact {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 8px;
+  align-items: center;
+  padding: 7px;
+  border: 1px solid #3a4548;
+  border-radius: 3px;
+  background: #1a2324;
+}
+
+.project-build-artifact > code {
+  overflow: hidden;
+  color: #c4d2d4;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-build-artifact > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.project-artifact-command {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 1px solid #3c7772;
+  border-radius: 3px;
+  color: #aff0e6;
+  background: #17312d;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.project-artifact-command:hover:not(:disabled) {
+  border-color: #69aaa2;
+  color: #fff;
+}
+
+.project-artifact-command:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.project-artifact-installed {
+  grid-column: 1 / -1;
+  color: #8de0bd;
+  font-size: 10px;
+}
+
 .project-build-dialog {
   width: min(470px, calc(100vw - 32px));
   padding: 20px;

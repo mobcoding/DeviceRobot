@@ -22,6 +22,10 @@ import {
   appiumRuntimeSchema,
   androidBuildTargetListResponseSchema,
   androidProjectSchema,
+  aiModelConnectionTestRequestSchema,
+  aiModelConnectionTestResponseSchema,
+  aiModelListRequestSchema,
+  aiModelListResponseSchema,
   aiModelStatusSchema,
   aiPlanResponseSchema,
   createProjectRequestSchema,
@@ -247,6 +251,24 @@ function parseLogcatLimit(query: unknown): number | undefined {
   return parsed;
 }
 
+function parseAiModelListRequest(body: unknown): ReturnType<typeof aiModelListRequestSchema.parse> {
+  try {
+    return aiModelListRequestSchema.parse(body);
+  } catch {
+    throw new AiPlanError("请填写有效的 Base URL 和 API Key。", 400);
+  }
+}
+
+function parseAiModelConnectionTestRequest(
+  body: unknown,
+): ReturnType<typeof aiModelConnectionTestRequestSchema.parse> {
+  try {
+    return aiModelConnectionTestRequestSchema.parse(body);
+  } catch {
+    throw new AiPlanError("请填写有效的 Base URL、API Key 并选择模型。", 400);
+  }
+}
+
 function appiumErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
   if (error instanceof AppiumRuntimeError) {
     return reply.code(error.statusCode).send({ error: error.message });
@@ -438,6 +460,28 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
 
   app.get("/api/v1/ai/status", async () => {
     return aiModelStatusSchema.parse(await aiPlanService.status());
+  });
+
+  app.post("/api/v1/ai/models", async (request, reply) => {
+    try {
+      reply.header("Cache-Control", "no-store");
+      return aiModelListResponseSchema.parse(
+        await aiPlanService.listModels(parseAiModelListRequest(request.body)),
+      );
+    } catch (error) {
+      return aiPlanErrorReply(reply, error);
+    }
+  });
+
+  app.post("/api/v1/ai/config/test", async (request, reply) => {
+    try {
+      reply.header("Cache-Control", "no-store");
+      return aiModelConnectionTestResponseSchema.parse(
+        await aiPlanService.testConfiguration(parseAiModelConnectionTestRequest(request.body)),
+      );
+    } catch (error) {
+      return aiPlanErrorReply(reply, error);
+    }
   });
 
   app.post("/api/v1/ai/plans", async (request, reply) => {

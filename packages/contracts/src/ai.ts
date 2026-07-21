@@ -11,6 +11,27 @@ export const aiModelStatusSchema = z.object({
   reason: z.string().min(1).optional(),
 });
 
+export const aiModelListRequestSchema = z.object({
+  baseUrl: z.string().trim().url().max(2_048),
+  apiKey: z.string().trim().min(1).max(4_096),
+});
+
+export const aiModelListResponseSchema = z.object({
+  provider: z.literal("openai-compatible"),
+  models: z.array(z.string().min(1).max(256)).min(1).max(1_000),
+});
+
+export const aiModelConnectionTestRequestSchema = aiModelListRequestSchema.extend({
+  model: z.string().trim().min(1).max(256),
+});
+
+export const aiModelConnectionTestResponseSchema = z.object({
+  provider: z.literal("openai-compatible"),
+  baseUrl: z.string().url(),
+  model: z.string().min(1),
+  message: z.string().min(1).max(1_000),
+});
+
 export const generateAiPlanRequestSchema = z.object({
   projectId: z.uuid(),
   deviceSerial: z.string().min(1).max(256).optional(),
@@ -39,6 +60,10 @@ export const aiPlanResponseSchema = z.object({
 });
 
 export type AiModelStatus = z.infer<typeof aiModelStatusSchema>;
+export type AiModelListRequest = z.infer<typeof aiModelListRequestSchema>;
+export type AiModelListResponse = z.infer<typeof aiModelListResponseSchema>;
+export type AiModelConnectionTestRequest = z.infer<typeof aiModelConnectionTestRequestSchema>;
+export type AiModelConnectionTestResponse = z.infer<typeof aiModelConnectionTestResponseSchema>;
 export type GenerateAiPlanRequest = z.infer<typeof generateAiPlanRequestSchema>;
 export type AiPlanPolicy = z.infer<typeof aiPlanPolicySchema>;
 export type AiPlanContext = z.infer<typeof aiPlanContextSchema>;

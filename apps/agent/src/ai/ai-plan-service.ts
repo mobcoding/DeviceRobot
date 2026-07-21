@@ -3,9 +3,15 @@ import { evaluateActionPlanPolicy } from "@device-robot/ai-core";
 import {
   actionPlanSchema,
   agentActionSchema,
+  aiModelConnectionTestResponseSchema,
+  aiModelListResponseSchema,
   aiModelStatusSchema,
   aiPlanResponseSchema,
   type AgentAction,
+  type AiModelConnectionTestRequest,
+  type AiModelConnectionTestResponse,
+  type AiModelListRequest,
+  type AiModelListResponse,
   type AiModelStatus,
   type AiPlanResponse,
   type AndroidProject,
@@ -16,6 +22,7 @@ import { z } from "zod";
 import type { ProjectStore } from "../projects/project-store.js";
 
 const MODEL_TIMEOUT_MS = 90_000;
+const MODEL_CONFIGURATION_TIMEOUT_MS = 30_000;
 const MAX_CONTEXT_EVIDENCE = 80;
 
 const modelPlanPayloadSchema = z.object({
@@ -41,6 +48,8 @@ export interface AiPlanModelProvider {
 
 export interface AiPlanService {
   status(): Promise<AiModelStatus>;
+  listModels(request: AiModelListRequest): Promise<AiModelListResponse>;
+  testConfiguration(request: AiModelConnectionTestRequest): Promise<AiModelConnectionTestResponse>;
   generate(request: GenerateAiPlanRequest): Promise<AiPlanResponse>;
 }
 
@@ -55,6 +64,10 @@ type OpenAiCompatibleConfiguration = {
   model?: string;
   invalidReason?: string;
 };
+
+type CompleteOpenAiCompatibleConfiguration = Required<
+  Pick<OpenAiCompatibleConfiguration, "baseUrl" | "apiKey" | "model">
+>;
 
 function resolveConfiguration(): OpenAiCompatibleConfiguration {
   const baseUrl = process.env.AIMOBILETESTER_AI_BASE_URL?.trim();
@@ -92,8 +105,142 @@ function unavailableStatus(reason: string): AiModelStatus {
   });
 }
 
+function modelApiEndpoint(baseUrl: string, path: string): string {
+  return new URL(path, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`).toString();
+}
+
 function modelEndpoint(baseUrl: string): string {
-  return new URL("chat/completions", baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`).toString();
+  return modelApiEndpoint(baseUrl, "chat/completions");
+}
+
+function modelsEndpoint(baseUrl: string): string {
+  return modelApiEndpoint(baseUrl, "models");
+}
+
+function configurationFromRequest(
+  request: AiModelListRequest | AiModelConnectionTestRequest,
+): CompleteOpenAiCompatibleConfiguration {
+  const baseUrl = request.baseUrl.trim();
+  const apiKey = request.apiKey.trim();
+  const model = "model" in request ? request.model.trim() : undefined;
+  try {
+    const parsed = new URL(baseUrl);
+    if (
+      !/^https?:$/u.test(parsed.protocol) ||
+      parsed.username.length > 0 ||
+      parsed.password.length > 0
+    ) {
+      throw new AiPlanError("模型地址必须是无凭据的 HTTP(S) 地址。", 400);
+    }
+  } catch (error) {
+    if (error instanceof AiPlanError) {
+      throw error;
+    }
+    throw new AiPlanError("模型地址格式无效。", 400);
+  }
+
+  if (model === undefined || model.length === 0) {
+    throw new AiPlanError("请选择要测试的模型。", 400);
+  }
+  return { baseUrl, apiKey, model };
+}
+
+function configurationForModelList(
+  request: AiModelListRequest,
+): Pick<CompleteOpenAiCompatibleConfiguration, "baseUrl" | "apiKey"> {
+  const baseUrl = request.baseUrl.trim();
+  const apiKey = request.apiKey.trim();
+  try {
+    const parsed = new URL(baseUrl);
+    if (
+      !/^https?:$/u.test(parsed.protocol) ||
+      parsed.username.length > 0 ||
+      parsed.password.length > 0
+    ) {
+      throw new AiPlanError("模型地址必须是无凭据的 HTTP(S) 地址。", 400);
+    }
+  } catch (error) {
+    if (error instanceof AiPlanError) {
+      throw error;
+    }
+    throw new AiPlanError("模型地址格式无效。", 400);
+  }
+  return { baseUrl, apiKey };
+}
+
+function remoteErrorMessage(payload: unknown): string | undefined {
+  if (typeof payload !== "object" || payload === null) {
+    return undefined;
+  }
+  const error = (payload as { error?: unknown }).error;
+  if (typeof error !== "object" || error === null) {
+    return undefined;
+  }
+  const message = (error as { message?: unknown }).message;
+  return typeof message === "string" && message.trim().length > 0 ? message.trim() : undefined;
+}
+
+async function callModelApi(
+  url: string,
+  apiKey: string,
+  init: RequestInit,
+  timeoutMs: number,
+  action: "拉取模型列表" | "测试模型连接" | "请求模型",
+): Promise<unknown> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...init.headers,
+      },
+      signal: controller.signal,
+    });
+    const payload = (await response.json().catch(() => undefined)) as unknown;
+    if (!response.ok) {
+      throw new AiPlanError(
+        `${action}失败：${remoteErrorMessage(payload) ?? "模型服务拒绝了请求。"}`,
+        502,
+      );
+    }
+    return payload;
+  } catch (error) {
+    if (error instanceof AiPlanError) {
+      throw error;
+    }
+    if (controller.signal.aborted) {
+      throw new AiPlanError(`${action}超时。`, 502);
+    }
+    throw new AiPlanError(`无法连接模型服务，${action}失败。`, 502);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function extractModelIds(payload: unknown): string[] {
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    !Array.isArray((payload as { data?: unknown }).data)
+  ) {
+    throw new AiPlanError("模型服务未返回可识别的模型列表。", 502);
+  }
+  const models = new Set<string>();
+  for (const entry of (payload as { data: unknown[] }).data) {
+    const id =
+      typeof entry === "object" && entry !== null ? (entry as { id?: unknown }).id : undefined;
+    if (typeof id === "string" && id.trim().length > 0 && id.trim().length <= 256) {
+      models.add(id.trim());
+    }
+  }
+  if (models.size === 0) {
+    throw new AiPlanError("模型服务未返回可选择的模型。", 502);
+  }
+  return [...models].sort((left, right) => left.localeCompare(right, "en"));
 }
 
 function extractContent(payload: unknown): string {
@@ -138,7 +285,7 @@ export class OpenAiCompatiblePlanProvider implements AiPlanModelProvider {
     }
     if (baseUrl === undefined || apiKey === undefined || model === undefined) {
       return unavailableStatus(
-        "请配置 AIMOBILETESTER_AI_BASE_URL、AIMOBILETESTER_AI_API_KEY 与 AIMOBILETESTER_AI_MODEL。",
+        "请在本页配置 OpenAI 兼容服务，或设置 AIMOBILETESTER_AI_BASE_URL、AIMOBILETESTER_AI_API_KEY 与 AIMOBILETESTER_AI_MODEL。",
       );
     }
     return aiModelStatusSchema.parse({
@@ -160,16 +307,11 @@ export class OpenAiCompatiblePlanProvider implements AiPlanModelProvider {
       throw new AiPlanError(status.reason ?? "模型尚未配置。", 503);
     }
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
-    try {
-      const response = await fetch(modelEndpoint(this.#configuration.baseUrl), {
+    const payload = await callModelApi(
+      modelEndpoint(this.#configuration.baseUrl),
+      this.#configuration.apiKey,
+      {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.#configuration.apiKey}`,
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
         body: JSON.stringify({
           model: this.#configuration.model,
           temperature: 0.2,
@@ -179,30 +321,40 @@ export class OpenAiCompatiblePlanProvider implements AiPlanModelProvider {
             { role: "user", content: input.user },
           ],
         }),
-        signal: controller.signal,
-      });
-      const payload = (await response.json().catch(() => undefined)) as unknown;
-      if (!response.ok) {
-        const remoteMessage =
-          typeof payload === "object" &&
-          payload !== null &&
-          typeof (payload as { error?: { message?: unknown } }).error?.message === "string"
-            ? (payload as { error: { message: string } }).error.message
-            : "模型服务拒绝了请求。";
-        throw new AiPlanError(`模型请求失败：${remoteMessage}`, 502);
-      }
-      return parseModelPlan(extractContent(payload));
-    } catch (error) {
-      if (error instanceof AiPlanError) {
-        throw error;
-      }
-      if (controller.signal.aborted) {
-        throw new AiPlanError("模型请求超时。", 502);
-      }
-      throw new AiPlanError("无法连接模型服务。", 502);
-    } finally {
-      clearTimeout(timer);
+      },
+      MODEL_TIMEOUT_MS,
+      "请求模型",
+    );
+    return parseModelPlan(extractContent(payload));
+  }
+
+  public async testConnection(): Promise<void> {
+    const status = this.status();
+    if (
+      !status.configured ||
+      this.#configuration.baseUrl === undefined ||
+      this.#configuration.apiKey === undefined ||
+      this.#configuration.model === undefined
+    ) {
+      throw new AiPlanError(status.reason ?? "模型尚未配置。", 503);
     }
+
+    const payload = await callModelApi(
+      modelEndpoint(this.#configuration.baseUrl),
+      this.#configuration.apiKey,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          model: this.#configuration.model,
+          temperature: 0,
+          max_tokens: 16,
+          messages: [{ role: "user", content: "请仅回复：连接成功" }],
+        }),
+      },
+      MODEL_CONFIGURATION_TIMEOUT_MS,
+      "测试模型连接",
+    );
+    extractContent(payload);
   }
 }
 
@@ -261,7 +413,7 @@ function containsRestrictedAction(action: AgentAction): boolean {
 
 export class LocalAiPlanService implements AiPlanService {
   readonly #projectStore: ProjectStore;
-  readonly #modelProvider: AiPlanModelProvider;
+  #modelProvider: AiPlanModelProvider;
 
   public constructor(options: LocalAiPlanServiceOptions) {
     this.#projectStore = options.projectStore;
@@ -270,6 +422,36 @@ export class LocalAiPlanService implements AiPlanService {
 
   public async status(): Promise<AiModelStatus> {
     return this.#modelProvider.status();
+  }
+
+  public async listModels(request: AiModelListRequest): Promise<AiModelListResponse> {
+    const configuration = configurationForModelList(request);
+    const payload = await callModelApi(
+      modelsEndpoint(configuration.baseUrl),
+      configuration.apiKey,
+      { method: "GET" },
+      MODEL_CONFIGURATION_TIMEOUT_MS,
+      "拉取模型列表",
+    );
+    return aiModelListResponseSchema.parse({
+      provider: "openai-compatible",
+      models: extractModelIds(payload),
+    });
+  }
+
+  public async testConfiguration(
+    request: AiModelConnectionTestRequest,
+  ): Promise<AiModelConnectionTestResponse> {
+    const configuration = configurationFromRequest(request);
+    const candidate = new OpenAiCompatiblePlanProvider(configuration);
+    await candidate.testConnection();
+    this.#modelProvider = candidate;
+    return aiModelConnectionTestResponseSchema.parse({
+      provider: "openai-compatible",
+      baseUrl: configuration.baseUrl,
+      model: configuration.model,
+      message: "模型连接成功，已应用到当前本地 Agent。",
+    });
   }
 
   public async generate(request: GenerateAiPlanRequest): Promise<AiPlanResponse> {

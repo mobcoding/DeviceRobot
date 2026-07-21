@@ -351,7 +351,18 @@ const apkArtifactResponse = {
   },
 };
 
-function mockApis(options: { healthError?: Error } = {}): {
+function mockApis(
+  options: {
+    healthError?: Error;
+    aiModelStatus?: {
+      configured: boolean;
+      provider: "openai-compatible";
+      baseUrl?: string;
+      model?: string;
+      reason?: string;
+    };
+  } = {},
+): {
   getDeviceRequests: () => number;
   getActionRequests: () => number;
   getLastAction: () => unknown;
@@ -361,6 +372,8 @@ function mockApis(options: { healthError?: Error } = {}): {
   getProjectReindexRequests: () => number;
   getProjectBuildRequests: () => number;
   getAiPlanRequests: () => number;
+  getAiModelListRequests: () => number;
+  getAiConfigurationTestRequests: () => number;
 } {
   let deviceRequests = 0;
   let actionRequests = 0;
@@ -373,6 +386,9 @@ function mockApis(options: { healthError?: Error } = {}): {
   let projectBuildRequests = 0;
   let projectBuildStarted = false;
   let aiPlanRequests = 0;
+  let aiModelListRequests = 0;
+  let aiConfigurationTestRequests = 0;
+  let currentAiModelStatus = options.aiModelStatus ?? aiModelStatusResponse;
   const actionHistory = {
     serial: "8B3Y0THX0",
     actions: [] as Array<{
@@ -398,10 +414,41 @@ function mockApis(options: { healthError?: Error } = {}): {
     }
 
     if (url === "/api/v1/ai/status") {
-      return new Response(JSON.stringify(aiModelStatusResponse), {
+      return new Response(JSON.stringify(currentAiModelStatus), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
+    }
+
+    if (url === "/api/v1/ai/models" && method === "POST") {
+      aiModelListRequests += 1;
+      return new Response(
+        JSON.stringify({ provider: "openai-compatible", models: ["gpt-4.1-mini", "gpt-4.1"] }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    if (url === "/api/v1/ai/config/test" && method === "POST") {
+      aiConfigurationTestRequests += 1;
+      const request = JSON.parse(String(init?.body ?? "{}")) as {
+        baseUrl: string;
+        model: string;
+      };
+      currentAiModelStatus = {
+        configured: true,
+        provider: "openai-compatible",
+        baseUrl: request.baseUrl,
+        model: request.model,
+      };
+      return new Response(
+        JSON.stringify({
+          provider: "openai-compatible",
+          baseUrl: request.baseUrl,
+          model: request.model,
+          message: "模型连接成功，已应用到当前本地 Agent。",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
     }
 
     if (url === "/api/v1/ai/plans" && method === "POST") {
@@ -584,6 +631,8 @@ function mockApis(options: { healthError?: Error } = {}): {
     getProjectReindexRequests: () => projectReindexRequests,
     getProjectBuildRequests: () => projectBuildRequests,
     getAiPlanRequests: () => aiPlanRequests,
+    getAiModelListRequests: () => aiModelListRequests,
+    getAiConfigurationTestRequests: () => aiConfigurationTestRequests,
   };
 }
 
@@ -696,6 +745,44 @@ describe("DeviceRobot Web UI", () => {
     expect(screen.getByText("ActionPlan 预览")).toBeInTheDocument();
     expect(screen.getByText("assert.visible")).toBeInTheDocument();
     expect(screen.getByText("执行前必须确认")).toBeInTheDocument();
+  });
+
+  it("fetches, selects, and tests an OpenAI-compatible model before enabling AI plans", async () => {
+    const { getAiConfigurationTestRequests, getAiModelListRequests } = mockApis({
+      aiModelStatus: {
+        configured: false,
+        provider: "openai-compatible",
+        reason: "请先配置本地 AI 服务。",
+      },
+    });
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
+    await user.click(screen.getByRole("button", { name: "AI 与用例" }));
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "连接 OpenAI 兼容服务" }),
+    ).toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: "Base URL" }), "https://model.example/v1");
+    await user.type(screen.getByLabelText("API Key"), "test-key");
+    await user.click(screen.getByRole("button", { name: "拉取模型" }));
+
+    await vi.waitFor(() => expect(getAiModelListRequests()).toBe(1));
+    expect(screen.getByRole("option", { name: "gpt-4.1-mini" })).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole("combobox", { name: "AI 模型" }), "gpt-4.1");
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: "我理解：生成操作计划时，测试目标、项目模块和源码索引证据会发送至所配置的 AI 服务。",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "测试并应用配置" }));
+
+    await vi.waitFor(() => expect(getAiConfigurationTestRequests()).toBe(1));
+    expect(await screen.findByText("模型已配置")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "描述你想验证的测试目标" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument();
   });
 
   it("opens device files from the default file manager tab", async () => {

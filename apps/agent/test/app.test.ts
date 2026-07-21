@@ -172,6 +172,16 @@ describe("DeviceRobot Agent", () => {
       generatedAt: "2026-07-21T10:00:00.000Z",
     };
     const generateAiPlan = vi.fn(async () => aiPlan);
+    const listAiModels = vi.fn(async () => ({
+      provider: "openai-compatible" as const,
+      models: ["test-model"],
+    }));
+    const testAiConfiguration = vi.fn(async () => ({
+      provider: "openai-compatible" as const,
+      baseUrl: "https://model.example/v1",
+      model: "test-model",
+      message: "模型连接成功，已应用到当前本地 Agent。",
+    }));
     const { app } = await createAgentApp({
       localAppData: createTemporaryRoot(),
       projectService: { list: async () => [project], add, reindex },
@@ -200,6 +210,8 @@ describe("DeviceRobot Agent", () => {
           baseUrl: "https://model.example/v1",
           model: "test-model",
         }),
+        listModels: listAiModels,
+        testConfiguration: testAiConfiguration,
         generate: generateAiPlan,
       },
     });
@@ -235,6 +247,28 @@ describe("DeviceRobot Agent", () => {
         payload: { modulePath: "app", variant: "debug", approved: true },
       });
       const aiStatus = await app.inject({ method: "GET", url: "/api/v1/ai/status", headers });
+      const aiModels = await app.inject({
+        method: "POST",
+        url: "/api/v1/ai/models",
+        headers,
+        payload: { baseUrl: "https://model.example/v1", apiKey: "test-key" },
+      });
+      const invalidAiModels = await app.inject({
+        method: "POST",
+        url: "/api/v1/ai/models",
+        headers,
+        payload: {},
+      });
+      const aiConfiguration = await app.inject({
+        method: "POST",
+        url: "/api/v1/ai/config/test",
+        headers,
+        payload: {
+          baseUrl: "https://model.example/v1",
+          apiKey: "test-key",
+          model: "test-model",
+        },
+      });
       const aiGenerated = await app.inject({
         method: "POST",
         url: "/api/v1/ai/plans",
@@ -250,7 +284,13 @@ describe("DeviceRobot Agent", () => {
       expect(runs.statusCode).toBe(200);
       expect(build.statusCode).toBe(200);
       expect(aiStatus.statusCode).toBe(200);
+      expect(aiModels.statusCode).toBe(200);
+      expect(invalidAiModels.statusCode).toBe(400);
+      expect(aiConfiguration.statusCode).toBe(200);
       expect(aiGenerated.statusCode).toBe(200);
+      expect(aiModels.headers["cache-control"]).toBe("no-store");
+      expect(aiConfiguration.headers["cache-control"]).toBe("no-store");
+      expect(invalidAiModels.json()).toEqual({ error: "请填写有效的 Base URL 和 API Key。" });
       expect(created.json()).toMatchObject({ modules: [{ packageName: "com.example.app" }] });
       expect(add).toHaveBeenCalledWith({ source: "local", rootPath: "C:\\Github\\Example" });
       expect(reindex).toHaveBeenCalledWith(project.id);
@@ -260,6 +300,16 @@ describe("DeviceRobot Agent", () => {
         approved: true,
       });
       expect(generateAiPlan).toHaveBeenCalledWith({ projectId: project.id, goal: "检查首页" });
+      expect(listAiModels).toHaveBeenCalledWith({
+        baseUrl: "https://model.example/v1",
+        apiKey: "test-key",
+      });
+      expect(testAiConfiguration).toHaveBeenCalledWith({
+        baseUrl: "https://model.example/v1",
+        apiKey: "test-key",
+        model: "test-model",
+      });
+      expect(aiConfiguration.json()).not.toHaveProperty("apiKey");
     } finally {
       await app.close();
     }

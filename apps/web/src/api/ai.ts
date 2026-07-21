@@ -1,6 +1,12 @@
 import {
+  aiModelConnectionTestResponseSchema,
+  aiModelListResponseSchema,
   aiModelStatusSchema,
   aiPlanResponseSchema,
+  type AiModelConnectionTestRequest,
+  type AiModelConnectionTestResponse,
+  type AiModelListRequest,
+  type AiModelListResponse,
   type AiModelStatus,
   type AiPlanResponse,
   type GenerateAiPlanRequest,
@@ -34,6 +40,32 @@ export async function fetchAiModelStatus(signal?: AbortSignal): Promise<AiModelS
       ...(signal === undefined ? {} : { signal }),
     },
     aiModelStatusSchema,
+  );
+}
+
+export async function fetchAiModels(request: AiModelListRequest): Promise<AiModelListResponse> {
+  return await aiRequest(
+    "/api/v1/ai/models",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(request),
+    },
+    aiModelListResponseSchema,
+  );
+}
+
+export async function testAiModelConfiguration(
+  request: AiModelConnectionTestRequest,
+): Promise<AiModelConnectionTestResponse> {
+  return await aiRequest(
+    "/api/v1/ai/config/test",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(request),
+    },
+    aiModelConnectionTestResponseSchema,
   );
 }
 

@@ -1,5 +1,5 @@
 import type { AgentAction, AiModelStatus, AndroidProject } from "@device-robot/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   AiPlanError,
@@ -184,5 +184,53 @@ describe("AI action plan service", () => {
       service.generate({ projectId: project.id, goal: "生成计划" }),
     ).rejects.toBeInstanceOf(AiPlanError);
     expect(provider.system).toBe("");
+  });
+
+  it("lists models and applies a tested local configuration without exposing its API key", async () => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      void _init;
+      if (url.endsWith("/models")) {
+        return new Response(JSON.stringify({ data: [{ id: "model-b" }, { id: "model-a" }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ choices: [{ message: { content: "连接成功" } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new LocalAiPlanService({
+      projectStore: new InMemoryProjectStore(createProject()),
+    });
+
+    try {
+      await expect(
+        service.listModels({ baseUrl: "https://model.example/v1", apiKey: "test-key" }),
+      ).resolves.toEqual({ provider: "openai-compatible", models: ["model-a", "model-b"] });
+      await expect(
+        service.testConfiguration({
+          baseUrl: "https://model.example/v1",
+          apiKey: "test-key",
+          model: "model-a",
+        }),
+      ).resolves.toMatchObject({
+        provider: "openai-compatible",
+        baseUrl: "https://model.example/v1",
+        model: "model-a",
+      });
+      await expect(service.status()).resolves.toMatchObject({
+        configured: true,
+        baseUrl: "https://model.example/v1",
+        model: "model-a",
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+        headers: expect.objectContaining({ Authorization: "Bearer test-key" }),
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

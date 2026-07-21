@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Bot, RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
+import { Bot, FolderGit2, RefreshCw, ShieldCheck, Smartphone, Sparkles } from "lucide-react";
 import { useState } from "react";
-import type { AiPlanResponse, AndroidDevice } from "@device-robot/contracts";
+import type { AiPlanResponse, AndroidDevice, AndroidProject } from "@device-robot/contracts";
 
 import { fetchAiModelStatus, generateAiPlan } from "../api/ai";
 import { fetchProjects } from "../api/projects";
@@ -15,6 +15,27 @@ type ConversationMessage = {
 
 function actionLabel(action: AiPlanResponse["plan"]["actions"][number]): string {
   return action.action;
+}
+
+function projectLabel(project: AndroidProject): string {
+  if (project.remoteUrl !== undefined) {
+    try {
+      const repositoryName = new URL(project.remoteUrl).pathname
+        .split("/")
+        .filter((segment) => segment.length > 0)
+        .at(-1)
+        ?.replace(/\.git$/iu, "");
+      if (repositoryName !== undefined && repositoryName.length > 0) {
+        return repositoryName;
+      }
+    } catch {
+      // 项目数据已由契约校验，此处仅保留本地名称作为界面降级显示。
+    }
+  }
+
+  return (
+    project.name.replace(/-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu, "") || project.name
+  );
 }
 
 export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): React.JSX.Element {
@@ -31,8 +52,9 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
     queryFn: ({ signal }) => fetchProjects(signal),
     retry: false,
   });
-  const projectId = selectedProjectId || projectsQuery.data?.projects[0]?.id || "";
-  const selectedProject = projectsQuery.data?.projects.find((project) => project.id === projectId);
+  const projects = projectsQuery.data?.projects ?? [];
+  const projectId = selectedProjectId || projects[0]?.id || "";
+  const selectedProject = projects.find((project) => project.id === projectId);
   const planMutation = useMutation({
     mutationFn: generateAiPlan,
     onSuccess: (response, request) => {
@@ -46,6 +68,18 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
   });
   const configured = statusQuery.data?.configured === true;
   const canGenerate = configured && projectId.length > 0 && goal.trim().length > 0;
+  const modelTitle = statusQuery.isError
+    ? "模型状态不可用"
+    : statusQuery.isPending
+      ? "正在检查模型配置"
+      : configured
+        ? "模型已配置"
+        : "模型尚未配置";
+  const modelDetail = statusQuery.isError
+    ? "无法读取本地 Agent 的模型配置。"
+    : configured
+      ? `${statusQuery.data?.provider} · ${statusQuery.data?.model}`
+      : (statusQuery.data?.reason ?? "正在读取本地 Agent 的模型配置。");
   const error = statusQuery.isError
     ? statusQuery.error.message
     : projectsQuery.isError
@@ -73,24 +107,29 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
         </button>
       </header>
 
-      <section className={`ai-model-status${configured ? " ready" : ""}`} aria-label="模型状态">
-        <ShieldCheck aria-hidden="true" size={18} strokeWidth={1.8} />
-        <div>
-          <strong>{configured ? "模型已配置" : "模型尚未配置"}</strong>
-          <span>
-            {configured
-              ? `${statusQuery.data?.provider} · ${statusQuery.data?.model}`
-              : (statusQuery.data?.reason ?? "正在检查本地模型配置。")}
-          </span>
+      <section
+        className={`ai-model-status${configured ? " ready" : ""}${statusQuery.isError ? " error" : ""}`}
+        aria-label="模型状态"
+      >
+        <div className="ai-model-status-main">
+          <ShieldCheck aria-hidden="true" size={19} strokeWidth={1.8} />
+          <div>
+            <span>AI 模型</span>
+            <strong>{modelTitle}</strong>
+          </div>
         </div>
+        <p>{modelDetail}</p>
+        {!configured && !statusQuery.isError && statusQuery.data !== undefined && (
+          <details className="ai-config-details">
+            <summary>查看 Agent 配置项</summary>
+            <p>
+              在启动 Agent 的环境中设置 <code>AIMOBILETESTER_AI_BASE_URL</code>、
+              <code>AIMOBILETESTER_AI_API_KEY</code> 和 <code>AIMOBILETESTER_AI_MODEL</code>。
+              密钥不会返回到网页。
+            </p>
+          </details>
+        )}
       </section>
-      {!configured && statusQuery.data !== undefined && (
-        <p className="ai-config-hint">
-          请在启动 Agent 的环境中设置 <code>AIMOBILETESTER_AI_BASE_URL</code>、
-          <code>AIMOBILETESTER_AI_API_KEY</code> 和 <code>AIMOBILETESTER_AI_MODEL</code>
-          。密钥不会返回到网页。
-        </p>
-      )}
 
       {error !== undefined && (
         <p className="management-error" role="alert">
@@ -111,32 +150,63 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
           }
         }}
       >
-        <label>
-          <span>项目上下文</span>
-          <select
-            aria-label="AI 项目上下文"
-            value={projectId}
-            disabled={planMutation.isPending || projectsQuery.data?.projects.length === 0}
-            onChange={(event) => setSelectedProjectId(event.target.value)}
-          >
-            {projectsQuery.data?.projects.length === 0 ? (
-              <option value="">请先接入 Android 项目</option>
-            ) : (
-              projectsQuery.data?.projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))
-            )}
-          </select>
-          {selectedProject !== undefined && (
+        <header className="ai-plan-form-heading">
+          <div>
+            <p className="eyebrow">新建计划</p>
+            <h2>描述你想验证的测试目标</h2>
+          </div>
+          <span className="ai-plan-safety-note">
+            <ShieldCheck aria-hidden="true" size={14} strokeWidth={1.8} />
+            仅生成草案，不操作设备
+          </span>
+        </header>
+        <div className="ai-context-grid">
+          <label className="ai-context-field">
+            <span>
+              <FolderGit2 aria-hidden="true" size={15} strokeWidth={1.8} />
+              项目上下文
+            </span>
+            <select
+              aria-label="AI 项目上下文"
+              value={projectId}
+              disabled={planMutation.isPending || projectsQuery.isPending || projects.length === 0}
+              onChange={(event) => setSelectedProjectId(event.target.value)}
+            >
+              {projectsQuery.isPending ? (
+                <option value="">正在加载项目…</option>
+              ) : projects.length === 0 ? (
+                <option value="">请先接入 Android 项目</option>
+              ) : (
+                projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {projectLabel(project)}
+                  </option>
+                ))
+              )}
+            </select>
             <small>
-              {selectedProject.sourceIndex === undefined
-                ? "尚无源码索引，AI 会明确标注证据不足。"
-                : `已加载 ${selectedProject.sourceIndex.evidence.length} 条源码索引证据。`}
+              {selectedProject === undefined
+                ? "选择项目后，AI 会读取已建立的源码索引。"
+                : selectedProject.sourceIndex === undefined
+                  ? "尚无源码索引，生成结果会标注证据不足。"
+                  : `已加载 ${selectedProject.sourceIndex.evidence.length} 条源码索引证据。`}
             </small>
-          )}
-        </label>
+          </label>
+          <section className="ai-device-context" aria-label="当前测试设备">
+            <span>
+              <Smartphone aria-hidden="true" size={15} strokeWidth={1.8} />
+              当前测试设备
+            </span>
+            <strong>
+              {device === undefined ? "暂未选择设备" : (device.model ?? device.serial)}
+            </strong>
+            <small>
+              {device === undefined
+                ? "可先生成计划，执行前再绑定设备。"
+                : `序列号：${device.serial}`}
+            </small>
+          </section>
+        </div>
         <label className="ai-goal-field">
           <span>测试目标</span>
           <textarea
@@ -148,12 +218,8 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
             onChange={(event) => setGoal(event.target.value)}
           />
         </label>
-        <div className="ai-plan-actions">
-          <span>
-            {device === undefined
-              ? "未绑定设备：仅生成计划"
-              : `已绑定设备：${device.model ?? device.serial}`}
-          </span>
+        <footer className="ai-plan-actions">
+          <span>计划生成后仍需人工确认，当前不会向手机发送操作。</span>
           <button
             className="primary-command"
             type="submit"
@@ -162,13 +228,17 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
             <Sparkles aria-hidden="true" size={15} strokeWidth={1.9} />
             {planMutation.isPending ? "正在生成计划" : "生成操作计划"}
           </button>
-        </div>
+        </footer>
       </form>
 
       {messages.length === 0 ? (
-        <p className="management-empty">
-          提交测试目标后，AI 将基于真实项目索引生成可审阅的操作计划。
-        </p>
+        <section className="ai-empty-state" aria-label="暂无 AI 计划">
+          <Bot aria-hidden="true" size={22} strokeWidth={1.6} />
+          <div>
+            <strong>暂无操作计划</strong>
+            <p>填写测试目标后，AI 将基于真实项目索引生成可审阅的操作计划。</p>
+          </div>
+        </section>
       ) : (
         <div className="ai-conversation" aria-label="AI 对话记录">
           {messages.map((message) => (

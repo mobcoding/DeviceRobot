@@ -29,6 +29,36 @@ class InMemoryProjectStore implements ProjectStore {
   public updateSourceIndex(): void {}
 }
 
+class InMemoryAiConfigurationStore {
+  public configuration:
+    | {
+        provider: "openai-compatible";
+        baseUrl: string;
+        model: string;
+        protectedApiKey: string;
+        updatedAt: string;
+      }
+    | undefined;
+
+  public load() {
+    return this.configuration;
+  }
+
+  public save(configuration: NonNullable<InMemoryAiConfigurationStore["configuration"]>): void {
+    this.configuration = configuration;
+  }
+}
+
+class PrefixSecretProtector {
+  public async protect(secret: string): Promise<string> {
+    return `protected:${secret}`;
+  }
+
+  public async reveal(protectedSecret: string): Promise<string> {
+    return protectedSecret.replace(/^protected:/u, "");
+  }
+}
+
 class FakeModelProvider implements AiPlanModelProvider {
   public system = "";
   public user = "";
@@ -243,6 +273,68 @@ describe("AI action plan service", () => {
       expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
         max_tokens: 256,
         model: "model-a",
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("restores a protected configuration after Agent restart and allows model switching", async () => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      void _init;
+      if (url.endsWith("/models")) {
+        return new Response(JSON.stringify({ data: [{ id: "model-a" }, { id: "model-b" }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ choices: [{ message: { content: "连接成功" } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryAiConfigurationStore();
+    const secretProtector = new PrefixSecretProtector();
+
+    try {
+      const firstAgent = new LocalAiPlanService({
+        projectStore: new InMemoryProjectStore(createProject()),
+        configurationStore: store,
+        secretProtector,
+      });
+      await expect(
+        firstAgent.testConfiguration({
+          baseUrl: "https://model.example/v1",
+          apiKey: "test-key",
+          model: "model-a",
+        }),
+      ).resolves.toMatchObject({ model: "model-a" });
+      expect(store.configuration).toMatchObject({
+        baseUrl: "https://model.example/v1",
+        model: "model-a",
+        protectedApiKey: "protected:test-key",
+      });
+
+      const restartedAgent = new LocalAiPlanService({
+        projectStore: new InMemoryProjectStore(createProject()),
+        configurationStore: store,
+        secretProtector,
+      });
+      await expect(restartedAgent.status()).resolves.toMatchObject({
+        configured: true,
+        baseUrl: "https://model.example/v1",
+        model: "model-a",
+      });
+      await expect(restartedAgent.listModels({})).resolves.toMatchObject({
+        models: ["model-a", "model-b"],
+      });
+      await expect(restartedAgent.testConfiguration({ model: "model-b" })).resolves.toMatchObject({
+        model: "model-b",
+      });
+      expect(store.configuration).toMatchObject({ model: "model-b" });
+      expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+        headers: expect.objectContaining({ Authorization: "Bearer test-key" }),
       });
     } finally {
       vi.unstubAllGlobals();

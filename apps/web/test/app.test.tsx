@@ -785,6 +785,29 @@ describe("DeviceRobot Web UI", () => {
     expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument();
   });
 
+  it("switches an already configured model without asking the user to re-enter its API key", async () => {
+    const { getAiConfigurationTestRequests, getAiModelListRequests } = mockApis();
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
+    await user.click(screen.getByRole("button", { name: "AI 与用例" }));
+    await user.click(await screen.findByRole("button", { name: "更换模型" }));
+    expect(screen.getByRole("textbox", { name: "Base URL" })).toHaveValue(
+      "https://model.example/v1",
+    );
+    expect(screen.getByLabelText("API Key")).toHaveValue("");
+
+    await user.click(screen.getByRole("button", { name: "拉取模型" }));
+    await vi.waitFor(() => expect(getAiModelListRequests()).toBe(1));
+    await user.selectOptions(screen.getByRole("combobox", { name: "AI 模型" }), "gpt-4.1");
+    await user.click(screen.getByRole("button", { name: "测试并应用配置" }));
+
+    await vi.waitFor(() => expect(getAiConfigurationTestRequests()).toBe(1));
+    expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument();
+    expect(await screen.findByText(/gpt-4\.1/)).toBeInTheDocument();
+  });
+
   it("opens device files from the default file manager tab", async () => {
     mockApis();
     const user = userEvent.setup();

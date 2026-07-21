@@ -89,6 +89,8 @@ import {
 } from "./projects/project-build-service.js";
 import { SqliteProjectBuildStore } from "./projects/project-build-store.js";
 import { AiPlanError, LocalAiPlanService, type AiPlanService } from "./ai/ai-plan-service.js";
+import { SqliteAiConfigurationStore } from "./ai/ai-configuration-store.js";
+import { WindowsDpapiSecretProtector } from "./ai/ai-secret-protector.js";
 
 export const AGENT_VERSION = "0.1.0";
 const WEBSOCKET_OPEN = 1;
@@ -348,7 +350,13 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
       projectStore,
       buildStore: new SqliteProjectBuildStore(database.sqlite),
     });
-  const aiPlanService = options.aiPlanService ?? new LocalAiPlanService({ projectStore });
+  const aiPlanService =
+    options.aiPlanService ??
+    new LocalAiPlanService({
+      projectStore,
+      configurationStore: new SqliteAiConfigurationStore(database.sqlite),
+      secretProtector: new WindowsDpapiSecretProtector(),
+    });
   const apkArtifactService =
     options.apkArtifactService ??
     new LocalApkArtifactService({

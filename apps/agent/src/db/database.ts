@@ -118,6 +118,20 @@ const migrations: Migration[] = [
         ON project_build_runs (project_id, status);
     `,
   },
+  {
+    version: 7,
+    name: "ai-model-configuration",
+    sql: `
+      CREATE TABLE IF NOT EXISTS ai_model_configurations (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        provider TEXT NOT NULL,
+        base_url TEXT NOT NULL,
+        model TEXT NOT NULL,
+        protected_api_key TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export type DatabaseHandle = {

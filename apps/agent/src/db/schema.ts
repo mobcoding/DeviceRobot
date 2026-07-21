@@ -59,3 +59,12 @@ export const projectBuildRuns = sqliteTable("project_build_runs", {
   startedAt: text("started_at").notNull(),
   finishedAt: text("finished_at"),
 });
+
+export const aiModelConfigurations = sqliteTable("ai_model_configurations", {
+  id: integer("id").primaryKey(),
+  provider: text("provider").notNull(),
+  baseUrl: text("base_url").notNull(),
+  model: text("model").notNull(),
+  protectedApiKey: text("protected_api_key").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});

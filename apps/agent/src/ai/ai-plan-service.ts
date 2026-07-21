@@ -19,6 +19,8 @@ import {
 } from "@device-robot/contracts";
 import { z } from "zod";
 
+import type { AiConfigurationStore } from "./ai-configuration-store.js";
+import type { AiSecretProtector } from "./ai-secret-protector.js";
 import type { ProjectStore } from "../projects/project-store.js";
 
 const MODEL_TIMEOUT_MS = 90_000;
@@ -61,6 +63,8 @@ export interface AiPlanService {
 export type LocalAiPlanServiceOptions = {
   projectStore: ProjectStore;
   modelProvider?: AiPlanModelProvider;
+  configurationStore?: AiConfigurationStore;
+  secretProtector?: AiSecretProtector;
 };
 
 type OpenAiCompatibleConfiguration = {
@@ -124,10 +128,14 @@ function modelsEndpoint(baseUrl: string): string {
 
 function configurationFromRequest(
   request: AiModelListRequest | AiModelConnectionTestRequest,
+  activeConfiguration?: CompleteOpenAiCompatibleConfiguration,
 ): CompleteOpenAiCompatibleConfiguration {
-  const baseUrl = request.baseUrl.trim();
-  const apiKey = request.apiKey.trim();
+  const baseUrl = request.baseUrl?.trim() ?? activeConfiguration?.baseUrl;
+  const apiKey = request.apiKey?.trim() ?? activeConfiguration?.apiKey;
   const model = "model" in request ? request.model.trim() : undefined;
+  if (baseUrl === undefined || apiKey === undefined) {
+    throw new AiPlanError("请填写有效的 Base URL 和 API Key。", 400);
+  }
   try {
     const parsed = new URL(baseUrl);
     if (
@@ -152,9 +160,13 @@ function configurationFromRequest(
 
 function configurationForModelList(
   request: AiModelListRequest,
+  activeConfiguration?: CompleteOpenAiCompatibleConfiguration,
 ): Pick<CompleteOpenAiCompatibleConfiguration, "baseUrl" | "apiKey"> {
-  const baseUrl = request.baseUrl.trim();
-  const apiKey = request.apiKey.trim();
+  const baseUrl = request.baseUrl?.trim() ?? activeConfiguration?.baseUrl;
+  const apiKey = request.apiKey?.trim() ?? activeConfiguration?.apiKey;
+  if (baseUrl === undefined || apiKey === undefined) {
+    throw new AiPlanError("请填写有效的 Base URL 和 API Key。", 400);
+  }
   try {
     const parsed = new URL(baseUrl);
     if (
@@ -477,6 +489,19 @@ export class OpenAiCompatiblePlanProvider implements AiPlanModelProvider {
     });
   }
 
+  public configuration(): CompleteOpenAiCompatibleConfiguration | undefined {
+    const { baseUrl, apiKey, model, invalidReason } = this.#configuration;
+    if (
+      invalidReason !== undefined ||
+      baseUrl === undefined ||
+      apiKey === undefined ||
+      model === undefined
+    ) {
+      return undefined;
+    }
+    return { baseUrl, apiKey, model };
+  }
+
   public async createPlan(input: { system: string; user: string }): Promise<ModelPlanPayload> {
     const status = this.status();
     if (
@@ -616,19 +641,82 @@ function containsRestrictedAction(action: AgentAction): boolean {
 
 export class LocalAiPlanService implements AiPlanService {
   readonly #projectStore: ProjectStore;
+  readonly #configurationStore: AiConfigurationStore | undefined;
+  readonly #secretProtector: AiSecretProtector | undefined;
+  readonly #usesCustomProvider: boolean;
   #modelProvider: AiPlanModelProvider;
+  #activeConfiguration: CompleteOpenAiCompatibleConfiguration | undefined;
+  #configurationRestored = false;
+  #restorePromise: Promise<void> | undefined;
+  #restoreReason: string | undefined;
 
   public constructor(options: LocalAiPlanServiceOptions) {
     this.#projectStore = options.projectStore;
     this.#modelProvider = options.modelProvider ?? new OpenAiCompatiblePlanProvider();
+    this.#configurationStore = options.configurationStore;
+    this.#secretProtector = options.secretProtector;
+    this.#usesCustomProvider = options.modelProvider !== undefined;
+    if (this.#modelProvider instanceof OpenAiCompatiblePlanProvider) {
+      this.#activeConfiguration = this.#modelProvider.configuration();
+    }
   }
 
   public async status(): Promise<AiModelStatus> {
+    await this.#ensureConfigurationRestored();
+    if (this.#restoreReason !== undefined) {
+      return unavailableStatus(this.#restoreReason);
+    }
     return this.#modelProvider.status();
   }
 
+  async #ensureConfigurationRestored(): Promise<void> {
+    if (this.#configurationRestored) {
+      return;
+    }
+    if (this.#restorePromise === undefined) {
+      this.#restorePromise = this.#restoreConfiguration().finally(() => {
+        this.#configurationRestored = true;
+        this.#restorePromise = undefined;
+      });
+    }
+    await this.#restorePromise;
+  }
+
+  async #restoreConfiguration(): Promise<void> {
+    if (
+      this.#usesCustomProvider ||
+      this.#modelProvider.status().configured ||
+      this.#configurationStore === undefined ||
+      this.#secretProtector === undefined
+    ) {
+      return;
+    }
+    const stored = this.#configurationStore.load();
+    if (stored === undefined) {
+      return;
+    }
+    try {
+      const apiKey = await this.#secretProtector.reveal(stored.protectedApiKey);
+      const configuration: CompleteOpenAiCompatibleConfiguration = {
+        baseUrl: stored.baseUrl,
+        apiKey,
+        model: stored.model,
+      };
+      const provider = new OpenAiCompatiblePlanProvider(configuration);
+      if (!provider.status().configured) {
+        this.#restoreReason = "保存的 AI 配置无效，请重新配置。";
+        return;
+      }
+      this.#modelProvider = provider;
+      this.#activeConfiguration = configuration;
+    } catch {
+      this.#restoreReason = "无法读取已保存的 AI API Key，请重新配置。";
+    }
+  }
+
   public async listModels(request: AiModelListRequest): Promise<AiModelListResponse> {
-    const configuration = configurationForModelList(request);
+    await this.#ensureConfigurationRestored();
+    const configuration = configurationForModelList(request, this.#activeConfiguration);
     const payload = await callModelApi(
       modelsEndpoint(configuration.baseUrl),
       configuration.apiKey,
@@ -645,10 +733,23 @@ export class LocalAiPlanService implements AiPlanService {
   public async testConfiguration(
     request: AiModelConnectionTestRequest,
   ): Promise<AiModelConnectionTestResponse> {
-    const configuration = configurationFromRequest(request);
+    await this.#ensureConfigurationRestored();
+    const configuration = configurationFromRequest(request, this.#activeConfiguration);
     const candidate = new OpenAiCompatiblePlanProvider(configuration);
     await candidate.testConnection();
+    if (this.#configurationStore !== undefined && this.#secretProtector !== undefined) {
+      const protectedApiKey = await this.#secretProtector.protect(configuration.apiKey);
+      this.#configurationStore.save({
+        provider: "openai-compatible",
+        baseUrl: configuration.baseUrl,
+        model: configuration.model,
+        protectedApiKey,
+        updatedAt: new Date().toISOString(),
+      });
+    }
     this.#modelProvider = candidate;
+    this.#activeConfiguration = configuration;
+    this.#restoreReason = undefined;
     return aiModelConnectionTestResponseSchema.parse({
       provider: "openai-compatible",
       baseUrl: configuration.baseUrl,
@@ -662,7 +763,7 @@ export class LocalAiPlanService implements AiPlanService {
     if (project === undefined) {
       throw new AiPlanError("未找到项目。", 404);
     }
-    const status = this.#modelProvider.status();
+    const status = await this.status();
     if (!status.configured) {
       throw new AiPlanError(status.reason ?? "模型尚未配置。", 503);
     }

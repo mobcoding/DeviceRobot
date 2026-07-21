@@ -10,7 +10,7 @@ import {
   Smartphone,
   Sparkles,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AiPlanResponse, AndroidDevice, AndroidProject } from "@device-robot/contracts";
 
 import {
@@ -60,6 +60,7 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
+  const [editingConfiguration, setEditingConfiguration] = useState(false);
   const [externalDataAcknowledged, setExternalDataAcknowledged] = useState(false);
   const queryClient = useQueryClient();
   const statusQuery = useQuery({
@@ -73,6 +74,14 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
     retry: false,
   });
   const projects = projectsQuery.data?.projects ?? [];
+  useEffect(() => {
+    if (statusQuery.data?.baseUrl !== undefined) {
+      setBaseUrl((current) => current || statusQuery.data?.baseUrl || "");
+    }
+    if (statusQuery.data?.model !== undefined) {
+      setSelectedModel((current) => current || statusQuery.data?.model || "");
+    }
+  }, [statusQuery.data?.baseUrl, statusQuery.data?.model]);
   const projectId = selectedProjectId || projects[0]?.id || "";
   const selectedProject = projects.find((project) => project.id === projectId);
   const planMutation = useMutation({
@@ -100,19 +109,23 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
     mutationFn: testAiModelConfiguration,
     onSuccess: async () => {
       setApiKey("");
+      setEditingConfiguration(false);
       await queryClient.invalidateQueries({ queryKey: ["ai-model-status"] });
     },
   });
   const configured = statusQuery.data?.configured === true;
   const canGenerate = configured && projectId.length > 0 && goal.trim().length > 0;
-  const showConfiguration = !configured && !statusQuery.isPending && !statusQuery.isError;
+  const showConfiguration =
+    (!configured || editingConfiguration) && !statusQuery.isPending && !statusQuery.isError;
   const availableModels = modelListMutation.data?.models ?? [];
   const canFetchModels =
-    baseUrl.trim().length > 0 && apiKey.trim().length > 0 && !modelListMutation.isPending;
+    baseUrl.trim().length > 0 &&
+    (apiKey.trim().length > 0 || configured) &&
+    !modelListMutation.isPending;
   const canTestConfiguration =
     canFetchModels &&
     selectedModel.length > 0 &&
-    externalDataAcknowledged &&
+    (externalDataAcknowledged || configured) &&
     !configurationTestMutation.isPending;
   const modelTitle = statusQuery.isError
     ? "模型状态不可用"
@@ -171,6 +184,18 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
             </div>
           </div>
           <p>{modelDetail}</p>
+          {configured && (
+            <button
+              className="ai-secondary-command"
+              type="button"
+              onClick={() => {
+                setEditingConfiguration(true);
+                configurationTestMutation.reset();
+              }}
+            >
+              更换模型
+            </button>
+          )}
         </section>
       )}
 
@@ -182,7 +207,7 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
             if (canTestConfiguration) {
               configurationTestMutation.mutate({
                 baseUrl: baseUrl.trim(),
-                apiKey: apiKey.trim(),
+                ...(apiKey.trim().length === 0 ? {} : { apiKey: apiKey.trim() }),
                 model: selectedModel,
               });
             }
@@ -195,12 +220,21 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
             </div>
             <span className="ai-configuration-status">
               <KeyRound aria-hidden="true" size={16} strokeWidth={1.8} />
-              <strong>模型尚未配置</strong>
+              <strong>{configured ? "切换已保存模型" : "模型尚未配置"}</strong>
             </span>
+            {configured && (
+              <button
+                className="ai-secondary-command"
+                type="button"
+                onClick={() => setEditingConfiguration(false)}
+              >
+                取消
+              </button>
+            )}
           </header>
           <p className="ai-configuration-intro">
-            填写服务地址与 API Key 后拉取可用模型。测试成功后，配置将在当前 Agent
-            运行期间用于生成计划；密钥不会返回网页、写入日志或项目文件。
+            填写服务地址与 API Key 后拉取可用模型。测试成功后，地址和模型会保存在本机；API Key
+            使用当前 Windows 用户的凭据保护，且不会返回网页、写入日志或项目文件。
           </p>
           <div className="ai-configuration-fields">
             <label className="ai-config-field">
@@ -237,6 +271,7 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
                   configurationTestMutation.reset();
                 }}
               />
+              {configured && apiKey.length === 0 && <small>已安全保存；留空即可切换模型。</small>}
             </label>
             <div className="ai-model-picker">
               <label className="ai-config-field">
@@ -266,7 +301,10 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
                 type="button"
                 disabled={!canFetchModels || configurationTestMutation.isPending}
                 onClick={() => {
-                  modelListMutation.mutate({ baseUrl: baseUrl.trim(), apiKey: apiKey.trim() });
+                  modelListMutation.mutate({
+                    baseUrl: baseUrl.trim(),
+                    ...(apiKey.trim().length === 0 ? {} : { apiKey: apiKey.trim() }),
+                  });
                 }}
               >
                 <ListRestart aria-hidden="true" size={16} strokeWidth={1.8} />

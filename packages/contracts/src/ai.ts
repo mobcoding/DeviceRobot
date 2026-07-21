@@ -12,8 +12,8 @@ export const aiModelStatusSchema = z.object({
 });
 
 export const aiModelListRequestSchema = z.object({
-  baseUrl: z.string().trim().url().max(2_048),
-  apiKey: z.string().trim().min(1).max(4_096),
+  baseUrl: z.string().trim().url().max(2_048).optional(),
+  apiKey: z.string().trim().min(1).max(4_096).optional(),
 });
 
 export const aiModelListResponseSchema = z.object({

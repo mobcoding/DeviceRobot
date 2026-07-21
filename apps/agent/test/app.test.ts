@@ -40,7 +40,7 @@ describe("DeviceRobot Agent", () => {
     const migrationCount = reopened.database.sqlite
       .prepare("SELECT COUNT(*) AS count FROM schema_migrations")
       .get() as { count: number };
-    expect(migrationCount.count).toBe(6);
+    expect(migrationCount.count).toBe(7);
     await reopened.app.close();
   });
 
@@ -257,7 +257,7 @@ describe("DeviceRobot Agent", () => {
         method: "POST",
         url: "/api/v1/ai/models",
         headers,
-        payload: {},
+        payload: { baseUrl: "not a url" },
       });
       const aiConfiguration = await app.inject({
         method: "POST",

@@ -101,6 +101,13 @@ function ProjectBuildSection({
 }): React.JSX.Element {
   const sdkReady =
     data !== undefined && data.androidSdk.available && data.androidSdk.missingPackages.length === 0;
+  const latestRunsByTask = new Map<string, ProjectBuildRun>();
+  for (const run of data?.runs ?? []) {
+    const current = latestRunsByTask.get(run.taskName);
+    if (current === undefined || new Date(run.startedAt) > new Date(current.startedAt)) {
+      latestRunsByTask.set(run.taskName, run);
+    }
+  }
   return (
     <section className="project-build" aria-label={`${project.name} 的构建`}>
       <header>
@@ -143,33 +150,40 @@ function ProjectBuildSection({
             </p>
           )}
           <div className="project-build-targets" aria-label="可构建 Variant">
-            {data.targets.map((target) => (
-              <span key={`${target.modulePath}-${target.variant}`}>
-                <strong>{target.moduleName}</strong>
-                <em>{target.variant}</em>
-                <code>{target.taskName}</code>
-                <button
-                  type="button"
-                  disabled={building || installing || !sdkReady}
-                  onClick={() => onRequestBuild(target)}
+            {data.targets.map((target) => {
+              const latestRun = latestRunsByTask.get(target.taskName);
+              return (
+                <article
+                  key={`${target.modulePath}-${target.variant}`}
+                  className="project-build-target"
                 >
-                  构建
-                </button>
-              </span>
-            ))}
+                  <header>
+                    <div>
+                      <strong>{target.moduleName}</strong>
+                      <em>{target.variant}</em>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={building || installing || !sdkReady}
+                      onClick={() => onRequestBuild(target)}
+                    >
+                      构建
+                    </button>
+                  </header>
+                  <code>{target.taskName}</code>
+                  <div className={`project-build-status ${latestRun?.status ?? "idle"}`}>
+                    <strong>
+                      {latestRun === undefined ? "尚未构建" : buildStatusLabel(latestRun.status)}
+                    </strong>
+                    <small>{latestRun?.message ?? "暂无构建记录"}</small>
+                    {latestRun?.artifactPaths[0] !== undefined && (
+                      <em>{latestRun.artifactPaths[0]}</em>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
           </div>
-          {data.runs.length > 0 && (
-            <div className="project-build-runs" aria-label="构建记录">
-              {data.runs.slice(0, 3).map((run) => (
-                <span key={run.id} className={`project-build-run ${run.status}`}>
-                  <strong>{buildStatusLabel(run.status)}</strong>
-                  <code>{run.taskName}</code>
-                  {run.message !== undefined && <small>{run.message}</small>}
-                  {run.artifactPaths.length > 0 && <em>{run.artifactPaths[0]}</em>}
-                </span>
-              ))}
-            </div>
-          )}
         </>
       )}
     </section>
@@ -349,7 +363,9 @@ export function ProjectManagerPanel(): React.JSX.Element {
             <details
               key={project.id}
               className="project-item"
-              open={expandedProjectIds === undefined ? index === 0 : expandedProjectIds.has(project.id)}
+              open={
+                expandedProjectIds === undefined ? index === 0 : expandedProjectIds.has(project.id)
+              }
               onToggle={(event) => {
                 const open = event.currentTarget.open;
                 setExpandedProjectIds((current) => {
@@ -479,10 +495,13 @@ export function ProjectManagerPanel(): React.JSX.Element {
                             <strong>{project.sourceIndex.summary.xmlViewCount}</strong> XML 视图
                           </span>
                           <span>
-                            <strong>{project.sourceIndex.summary.composeScreenCount}</strong> Compose
+                            <strong>{project.sourceIndex.summary.composeScreenCount}</strong>{" "}
+                            Compose
                           </span>
                           <span>
-                            <strong>{project.sourceIndex.summary.navigationDestinationCount}</strong>{" "}
+                            <strong>
+                              {project.sourceIndex.summary.navigationDestinationCount}
+                            </strong>{" "}
                             导航目标
                           </span>
                           <span>

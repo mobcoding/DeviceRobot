@@ -837,7 +837,7 @@ summary:focus-visible {
   min-width: 0;
   gap: 5px;
   color: #aeb8bc;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -858,7 +858,7 @@ summary:focus-visible {
 .project-connect-hint {
   margin: 0 0 17px;
   color: #8e999e;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .project-list {
@@ -906,7 +906,7 @@ summary:focus-visible {
 .project-summary-heading > strong {
   overflow: hidden;
   color: #e5eaeb;
-  font-size: 13px;
+  font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -951,7 +951,7 @@ summary:focus-visible {
 .project-summary-stat small,
 .project-summary-revision small {
   color: #89949a;
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1;
 }
 
@@ -959,7 +959,7 @@ summary:focus-visible {
 .project-summary-revision code {
   color: #cbd5d8;
   font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   line-height: 1.1;
 }
@@ -978,7 +978,7 @@ summary:focus-visible {
 .project-source,
 .project-wrapper {
   display: inline-flex;
-  min-height: 21px;
+  min-height: 23px;
   flex: 0 0 auto;
   align-items: center;
   padding: 0 6px;
@@ -986,7 +986,7 @@ summary:focus-visible {
   border-radius: 3px;
   color: #9ed1d4;
   background: #17282a;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
   white-space: nowrap;
 }
@@ -1028,14 +1028,14 @@ summary:focus-visible {
 
 .project-details dt {
   color: #89949a;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .project-details dd {
   margin: 4px 0 0;
   overflow: hidden;
   color: #ccd4d7;
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1043,7 +1043,7 @@ summary:focus-visible {
 .project-details dd code {
   color: #aebbc0;
   font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .project-module-list {
@@ -1067,7 +1067,7 @@ summary:focus-visible {
 .project-module-list strong {
   overflow: hidden;
   color: #dce4e6;
-  font-size: 10px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1077,7 +1077,7 @@ summary:focus-visible {
   overflow: hidden;
   color: #949fa4;
   font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 9px;
+  font-size: 10px;
   font-style: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1110,13 +1110,13 @@ summary:focus-visible {
 
 .project-section-heading > strong {
   color: #dce4e6;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .project-section-heading > small {
   overflow: hidden;
   color: #8c979b;
-  font-size: 10px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1124,7 +1124,7 @@ summary:focus-visible {
 .project-disclosure-label {
   flex: 0 0 auto;
   color: #879398;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .project-source-index[open] > summary .project-disclosure-label {
@@ -1137,14 +1137,14 @@ summary:focus-visible {
 
 .project-index-state {
   display: inline-flex;
-  min-height: 19px;
+  min-height: 21px;
   align-items: center;
   padding: 0 5px;
   border: 1px solid #4a4a4a;
   border-radius: 3px;
   color: #a0a8ab;
   background: #252525;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
   white-space: nowrap;
 }
@@ -1157,7 +1157,7 @@ summary:focus-visible {
 
 .project-index-button {
   display: inline-flex;
-  min-height: 27px;
+  min-height: 30px;
   flex: 0 0 auto;
   align-items: center;
   gap: 5px;
@@ -1166,7 +1166,7 @@ summary:focus-visible {
   border-radius: 4px;
   color: #d9dfe1;
   background: #222;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -1192,7 +1192,7 @@ summary:focus-visible {
   margin: 0;
   max-width: 740px;
   color: #8e999e;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.55;
 }
 
@@ -1209,14 +1209,14 @@ summary:focus-visible {
   border-radius: 3px;
   color: #9ea8ac;
   background: #202020;
-  font-size: 9px;
+  font-size: 10px;
   white-space: nowrap;
 }
 
 .project-index-summary strong {
   margin-right: 3px;
   color: #b7e3df;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .project-index-modules {
@@ -1238,12 +1238,12 @@ summary:focus-visible {
 .project-index-modules strong {
   color: #dce4e6;
   font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .project-index-modules small {
   color: #909b9f;
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .project-index-evidence {
@@ -1255,7 +1255,7 @@ summary:focus-visible {
   padding: 9px 14px;
   color: #aeb8bc;
   cursor: pointer;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -1278,7 +1278,7 @@ summary:focus-visible {
 
 .project-index-evidence li > span {
   color: #8fc6c9;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
 }
 
@@ -1286,7 +1286,7 @@ summary:focus-visible {
 .project-index-evidence li > code {
   overflow: hidden;
   color: #cbd5d8;
-  font-size: 10px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1294,7 +1294,7 @@ summary:focus-visible {
 .project-index-evidence li > code {
   color: #929da1;
   font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .project-build {
@@ -1304,7 +1304,7 @@ summary:focus-visible {
 
 .project-build > header {
   display: flex;
-  min-height: 40px;
+  min-height: 46px;
   align-items: center;
   padding: 0 14px;
 }
@@ -1317,24 +1317,24 @@ summary:focus-visible {
 
 .project-build > header strong {
   color: #dce4e6;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .project-build > header small {
   color: #8e999e;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .project-sdk-state {
   display: inline-flex;
-  min-height: 18px;
+  min-height: 21px;
   align-items: center;
   padding: 0 5px;
   border: 1px solid #5b4d37;
   border-radius: 3px;
   color: #d6bb82;
   background: #2c271c;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
 }
 
@@ -1346,7 +1346,7 @@ summary:focus-visible {
 
 .project-sdk-install {
   display: inline-flex;
-  min-height: 24px;
+  min-height: 28px;
   flex: 0 0 auto;
   align-items: center;
   gap: 4px;
@@ -1355,7 +1355,7 @@ summary:focus-visible {
   border-radius: 3px;
   color: #a9deda;
   background: #17312d;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -1373,119 +1373,125 @@ summary:focus-visible {
   margin: 0;
   padding: 0 14px 12px;
   color: #8e999e;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .project-build-targets {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 8px;
   padding: 0 14px 10px;
 }
 
-.project-build-targets > span {
+.project-build-target {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 3px 7px;
+  gap: 5px;
   min-width: 0;
-  padding: 7px 8px;
+  padding: 10px;
   border: 1px solid #363636;
   border-radius: 4px;
   background: #202020;
 }
 
-.project-build-targets strong,
-.project-build-targets em {
+.project-build-target > header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.project-build-target > header > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.project-build-target > header strong,
+.project-build-target > header em {
   overflow: hidden;
   color: #dce4e6;
-  font-size: 10px;
+  font-size: 12px;
   font-style: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.project-build-targets em {
+.project-build-target > header em {
   color: #a9deda;
   font-family: "Cascadia Code", Consolas, monospace;
 }
 
-.project-build-targets code {
-  grid-column: 1;
+.project-build-target > code {
   overflow: hidden;
   color: #919da1;
   font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 9px;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.project-build-targets button {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  min-width: 43px;
+.project-build-target button {
+  min-width: 51px;
+  min-height: 30px;
   border: 1px solid #3c7772;
   border-radius: 3px;
   color: #aff0e6;
   background: #17312d;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 
-.project-build-targets button:hover:not(:disabled) {
+.project-build-target button:hover:not(:disabled) {
   border-color: #69aaa2;
   color: #fff;
 }
 
-.project-build-targets button:disabled {
+.project-build-target button:disabled {
   cursor: wait;
   opacity: 0.55;
 }
 
-.project-build-runs {
+.project-build-status {
   display: grid;
-  gap: 1px;
-  border-top: 1px solid #303030;
-  padding: 8px 14px 10px;
-}
-
-.project-build-run {
-  display: grid;
-  grid-template-columns: 48px minmax(130px, 220px) minmax(0, 1fr);
-  gap: 7px;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 8px;
   min-width: 0;
-  padding: 5px 6px;
-  background: #202020;
+  padding-top: 7px;
+  border-top: 1px solid #343434;
 }
 
-.project-build-run > strong {
+.project-build-status > strong {
   color: #8fc6c9;
-  font-size: 9px;
+  font-size: 11px;
 }
 
-.project-build-run.failed > strong {
+.project-build-status.failed > strong {
   color: #e09aa1;
 }
 
-.project-build-run.cancelled > strong {
+.project-build-status.cancelled > strong {
   color: #b6a6d9;
 }
 
-.project-build-run > code,
-.project-build-run > small,
-.project-build-run > em {
+.project-build-status.idle > strong {
+  color: #aeb8bc;
+}
+
+.project-build-status > small,
+.project-build-status > em {
   overflow: hidden;
   color: #aeb8bc;
-  font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 9px;
+  font-size: 11px;
   font-style: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.project-build-run > small,
-.project-build-run > em {
+.project-build-status > em {
+  grid-column: 1 / -1;
   color: #8c979b;
-  font-family: inherit;
 }
 
 .project-build-dialog {

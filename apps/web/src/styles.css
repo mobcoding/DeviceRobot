@@ -1030,19 +1030,21 @@ summary:focus-visible {
 
 .project-build-targets {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 8px;
-  padding: 0 14px 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 2px 14px 14px;
 }
 
 .project-build-target {
   display: grid;
-  gap: 5px;
+  min-height: 194px;
+  align-content: start;
+  gap: 12px;
   min-width: 0;
-  padding: 10px;
-  border: 1px solid #363636;
-  border-radius: 4px;
-  background: #202020;
+  padding: 14px;
+  border: 1px solid #3a3d42;
+  border-radius: 8px;
+  background: #202124;
 }
 
 .project-build-target > header {
@@ -1053,56 +1055,94 @@ summary:focus-visible {
   gap: 10px;
 }
 
-.project-build-target > header > div {
+.project-build-target-heading {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 7px;
+  gap: 10px;
 }
 
-.project-build-target > header strong,
-.project-build-target > header em {
+.project-build-target-heading > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.project-build-target-heading strong {
   overflow: hidden;
-  color: #dce4e6;
-  font-size: 12px;
-  font-style: normal;
+  color: #f0f3f4;
+  font-size: 15px;
+  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.project-build-target > header em {
-  color: #a9deda;
-  font-family: "Cascadia Code", Consolas, monospace;
-}
-
-.project-build-target > code {
+.project-build-target-heading small {
   overflow: hidden;
-  color: #919da1;
+  color: #919a9e;
   font-family: "Cascadia Code", Consolas, monospace;
   font-size: 10px;
+  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.project-build-target button {
-  min-width: 51px;
-  min-height: 30px;
-  border: 1px solid #3c7772;
-  border-radius: 3px;
-  color: #aff0e6;
-  background: #17312d;
-  font-size: 11px;
+.project-build-module-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border: 1px solid #46555a;
+  border-radius: 7px;
+  color: #9ad3d6;
+  background: #182b2d;
+}
+
+.project-build-launch {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #1672df;
+  border-radius: 6px;
+  color: #fff;
+  background: #0867d7;
+}
+
+.project-build-launch:hover:not(:disabled) {
+  border-color: #5fa5ff;
+  background: #1579ef;
+}
+
+.project-build-launch:disabled {
+  cursor: wait;
+  opacity: 0.52;
+}
+
+.project-build-variant {
+  display: grid;
+  gap: 5px;
+  padding: 9px 0 11px;
+  border-bottom: 1px solid #34383c;
+}
+
+.project-build-variant > span {
+  color: #9fa8ad;
+  font-size: 10px;
   font-weight: 700;
 }
 
-.project-build-target button:hover:not(:disabled) {
-  border-color: #69aaa2;
-  color: #fff;
-}
-
-.project-build-target button:disabled {
-  cursor: wait;
-  opacity: 0.55;
+.project-build-variant select {
+  width: 100%;
+  min-height: 31px;
+  border: 1px solid #4a5358;
+  border-radius: 4px;
+  color: #e6edef;
+  background: #181a1d;
+  font-size: 12px;
 }
 
 .project-build-status {
@@ -1110,8 +1150,6 @@ summary:focus-visible {
   grid-template-columns: auto minmax(0, 1fr);
   gap: 4px 8px;
   min-width: 0;
-  padding-top: 7px;
-  border-top: 1px solid #343434;
 }
 
 .project-build-status > strong {
@@ -3162,6 +3200,18 @@ h3 {
 
   .project-summary-heading {
     width: 100%;
+  }
+
+  .project-build-targets {
+    grid-template-columns: 1fr;
+  }
+
+  .project-build-artifact {
+    grid-template-columns: 1fr;
+  }
+
+  .project-build-artifact > div {
+    justify-content: flex-start;
   }
 
   .primary-command {

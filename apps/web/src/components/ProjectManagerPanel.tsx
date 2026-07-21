@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Box,
   ChevronRight,
   Download,
   FolderGit2,
   FolderOpen,
   GitBranch,
   PackageCheck,
+  Play,
   RefreshCw,
 } from "lucide-react";
 import { useState } from "react";
@@ -51,6 +53,12 @@ type InstalledProjectArtifact = ProjectArtifactInstall & {
   packageName: string;
 };
 
+type ProjectBuildModule = {
+  modulePath: string;
+  moduleName: string;
+  targets: AndroidBuildTarget[];
+};
+
 function sourceLabel(source: ProjectSource): string {
   return source === "local" ? "本地目录" : "Git 仓库";
 }
@@ -70,6 +78,23 @@ function buildStatusLabel(status: ProjectBuildRun["status"]): string {
 
 function artifactName(path: string): string {
   return path.split("/").at(-1) ?? path;
+}
+
+function groupBuildTargets(targets: AndroidBuildTarget[]): ProjectBuildModule[] {
+  const modules = new Map<string, ProjectBuildModule>();
+  for (const target of targets) {
+    const current = modules.get(target.modulePath);
+    if (current === undefined) {
+      modules.set(target.modulePath, {
+        modulePath: target.modulePath,
+        moduleName: target.moduleName,
+        targets: [target],
+      });
+    } else {
+      current.targets.push(target);
+    }
+  }
+  return [...modules.values()];
 }
 
 function ProjectBuildSection({
@@ -97,6 +122,7 @@ function ProjectBuildSection({
   onInstallSdk(projectId: string): void;
   onInstallArtifact(run: ProjectBuildRun, artifactIndex: number): void;
 }): React.JSX.Element {
+  const [selectedTaskByModule, setSelectedTaskByModule] = useState<Record<string, string>>({});
   const sdkReady =
     data !== undefined && data.androidSdk.available && data.androidSdk.missingPackages.length === 0;
   const latestRunsByTask = new Map<string, ProjectBuildRun>();
@@ -147,28 +173,59 @@ function ProjectBuildSection({
                 : `构建需要：${data.androidSdk.missingPackages.join("、")}`}
             </p>
           )}
-          <div className="project-build-targets" aria-label="可构建 Variant">
-            {data.targets.map((target) => {
-              const latestRun = latestRunsByTask.get(target.taskName);
+          <div className="project-build-targets" aria-label="可构建模块">
+            {groupBuildTargets(data.targets).map((module) => {
+              const selectedTarget =
+                module.targets.find(
+                  (target) => target.taskName === selectedTaskByModule[module.modulePath],
+                ) ?? module.targets[0];
+              if (selectedTarget === undefined) {
+                return null;
+              }
+              const latestRun = latestRunsByTask.get(selectedTarget.taskName);
               return (
-                <article
-                  key={`${target.modulePath}-${target.variant}`}
-                  className="project-build-target"
-                >
+                <article key={module.modulePath} className="project-build-target">
                   <header>
-                    <div>
-                      <strong>{target.moduleName}</strong>
-                      <em>{target.variant}</em>
+                    <div className="project-build-target-heading">
+                      <span className="project-build-module-icon" aria-hidden="true">
+                        <Box size={18} strokeWidth={1.7} />
+                      </span>
+                      <span>
+                        <strong>{module.moduleName}</strong>
+                        <small>{module.modulePath === "." ? "根模块" : module.modulePath}</small>
+                      </span>
                     </div>
                     <button
+                      className="project-build-launch"
                       type="button"
                       disabled={building || installing || !sdkReady}
-                      onClick={() => onRequestBuild(target)}
+                      aria-label={`构建 ${module.moduleName} ${selectedTarget.variant}`}
+                      title={`构建 ${selectedTarget.variant}`}
+                      onClick={() => onRequestBuild(selectedTarget)}
                     >
-                      构建
+                      <Play aria-hidden="true" size={16} strokeWidth={2} fill="currentColor" />
                     </button>
                   </header>
-                  <code>{target.taskName}</code>
+                  <label className="project-build-variant">
+                    <span>构建变体</span>
+                    <select
+                      aria-label={`${module.moduleName} 构建变体`}
+                      value={selectedTarget.taskName}
+                      disabled={building || installing}
+                      onChange={(event) =>
+                        setSelectedTaskByModule((current) => ({
+                          ...current,
+                          [module.modulePath]: event.target.value,
+                        }))
+                      }
+                    >
+                      {module.targets.map((target) => (
+                        <option key={target.taskName} value={target.taskName}>
+                          {target.variant}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <div className={`project-build-status ${latestRun?.status ?? "idle"}`}>
                     <strong>
                       {latestRun === undefined ? "尚未构建" : buildStatusLabel(latestRun.status)}

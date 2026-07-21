@@ -396,6 +396,7 @@ function mockApis(
   let projectSourceIndexed = false;
   let projectBuildRequests = 0;
   let projectBuildStarted = options.completedProjectBuild ?? false;
+  let currentProjectBuildRun = runningProjectBuildResponse;
   let projectArtifactInstallRequests = 0;
   let aiPlanRequests = 0;
   let aiModelListRequests = 0;
@@ -491,7 +492,25 @@ function mockApis(
       if (method === "POST") {
         projectBuildRequests += 1;
         projectBuildStarted = true;
-        return new Response(JSON.stringify(runningProjectBuildResponse), {
+        const request = JSON.parse(String(init?.body ?? "{}")) as {
+          modulePath?: string;
+          variant?: string;
+        };
+        const target = projectBuildTargetResponse.targets.find(
+          (candidate) =>
+            candidate.modulePath === request.modulePath && candidate.variant === request.variant,
+        );
+        currentProjectBuildRun = {
+          ...runningProjectBuildResponse,
+          ...(target === undefined
+            ? {}
+            : {
+                modulePath: target.modulePath,
+                variant: target.variant,
+                taskName: target.taskName,
+              }),
+        };
+        return new Response(JSON.stringify(currentProjectBuildRun), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
@@ -500,7 +519,7 @@ function mockApis(
         JSON.stringify({
           projectId: projectBuildTargetResponse.projectId,
           runs: projectBuildStarted
-            ? [options.completedProjectBuild ? completedProjectBuildResponse : runningProjectBuildResponse]
+            ? [options.completedProjectBuild ? completedProjectBuildResponse : currentProjectBuildRun]
             : [],
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -732,13 +751,14 @@ describe("DeviceRobot Web UI", () => {
 
     await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
     await user.click(screen.getByRole("button", { name: "项目" }));
-    const task = await screen.findByText(":app:assembleDebug");
-    const target = task.parentElement;
-    expect(target).not.toBeNull();
-    await user.click(within(target as HTMLElement).getByRole("button", { name: "构建" }));
+    const variantSelector = await screen.findByRole("combobox", { name: "app 构建变体" });
+    expect(within(variantSelector).getByRole("option", { name: "debug" })).toBeInTheDocument();
+    expect(within(variantSelector).getByRole("option", { name: "release" })).toBeInTheDocument();
+    await user.selectOptions(variantSelector, ":app:assembleRelease");
+    await user.click(screen.getByRole("button", { name: "构建 app release" }));
 
     const dialog = await screen.findByRole("dialog", { name: "确认构建" });
-    expect(within(dialog).getByText(":app:assembleDebug")).toBeInTheDocument();
+    expect(within(dialog).getByText(":app:assembleRelease")).toBeInTheDocument();
     expect(getProjectBuildRequests()).toBe(0);
     await user.click(within(dialog).getByRole("button", { name: "确认构建" }));
 

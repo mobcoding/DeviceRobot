@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, FolderGit2, FolderOpen, GitBranch, RefreshCw } from "lucide-react";
+import { ChevronRight, Download, FolderGit2, FolderOpen, GitBranch, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import type {
   AndroidBuildTarget,
@@ -182,6 +182,7 @@ export function ProjectManagerPanel(): React.JSX.Element {
   const [localPath, setLocalPath] = useState("");
   const [remoteUrl, setRemoteUrl] = useState("");
   const [pendingBuild, setPendingBuild] = useState<PendingBuild>();
+  const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>();
   const projectsQuery = useQuery({
     queryKey: ["projects"],
     queryFn: ({ signal }) => fetchProjects(signal),
@@ -344,151 +345,201 @@ export function ProjectManagerPanel(): React.JSX.Element {
         <p className="management-empty">尚未接入 Android 项目。</p>
       ) : (
         <div className="project-list">
-          {projectsQuery.data?.projects.map((project) => (
-            <article key={project.id} className="project-item">
-              <header>
-                <div>
+          {projectsQuery.data?.projects.map((project, index) => (
+            <details
+              key={project.id}
+              className="project-item"
+              open={expandedProjectIds === undefined ? index === 0 : expandedProjectIds.has(project.id)}
+              onToggle={(event) => {
+                const open = event.currentTarget.open;
+                setExpandedProjectIds((current) => {
+                  const next = new Set(
+                    current ?? projectsQuery.data?.projects.slice(0, 1).map(({ id }) => id),
+                  );
+                  if (open) {
+                    next.add(project.id);
+                  } else {
+                    next.delete(project.id);
+                  }
+                  return next;
+                });
+              }}
+            >
+              <summary className="project-summary">
+                <span className="project-summary-heading">
+                  <ChevronRight
+                    className="project-disclosure-icon"
+                    aria-hidden="true"
+                    size={16}
+                    strokeWidth={2}
+                  />
                   {project.source === "local" ? (
                     <FolderOpen aria-hidden="true" size={20} strokeWidth={1.7} />
                   ) : (
                     <GitBranch aria-hidden="true" size={20} strokeWidth={1.7} />
                   )}
-                  <strong>{project.name}</strong>
+                  <strong title={project.name}>{project.name}</strong>
                   <span className={`project-source ${project.source}`}>
                     {sourceLabel(project.source)}
                   </span>
-                </div>
-                <span
-                  className={project.gradleWrapper ? "project-wrapper ready" : "project-wrapper"}
-                >
-                  {project.gradleWrapper ? "Gradle Wrapper" : "未检测到 Wrapper"}
                 </span>
-              </header>
-              <dl>
-                <div>
-                  <dt>位置</dt>
-                  <dd>
-                    <code>{project.rootPath}</code>
-                  </dd>
-                </div>
-                <div>
-                  <dt>版本</dt>
-                  <dd>{revisionLabel(project)}</dd>
-                </div>
-                <div>
-                  <dt>模块</dt>
-                  <dd>{project.modules.length} 个</dd>
-                </div>
-              </dl>
-              <div className="project-module-list" aria-label={`${project.name} 的模块`}>
-                {project.modules.map((module) => (
-                  <span key={module.path}>
-                    <strong>{module.name}</strong>
-                    <small>{module.packageName ?? module.applicationId ?? module.path}</small>
-                    {module.variants.length > 0 && <em>{module.variants.join(" · ")}</em>}
+                <span className="project-summary-meta" aria-label={`${project.name} 的项目摘要`}>
+                  <span
+                    className={project.gradleWrapper ? "project-wrapper ready" : "project-wrapper"}
+                  >
+                    {project.gradleWrapper ? "Gradle Wrapper" : "未检测到 Wrapper"}
                   </span>
-                ))}
-              </div>
-              <section className="project-source-index" aria-label={`${project.name} 的源码索引`}>
-                <header>
+                  <span className="project-summary-stat">
+                    <small>模块</small>
+                    <strong>{project.modules.length} 个</strong>
+                  </span>
+                  <span className="project-summary-revision">
+                    <small>版本</small>
+                    <code>{revisionLabel(project)}</code>
+                  </span>
+                </span>
+              </summary>
+              <div className="project-details">
+                <dl>
                   <div>
-                    <strong>源码索引</strong>
-                    <span
-                      className={
-                        project.sourceIndex === undefined
-                          ? "project-index-state"
-                          : "project-index-state ready"
-                      }
-                    >
-                      {sourceIndexLabel(project)}
+                    <dt>位置</dt>
+                    <dd>
+                      <code>{project.rootPath}</code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>版本</dt>
+                    <dd>{revisionLabel(project)}</dd>
+                  </div>
+                  <div>
+                    <dt>模块</dt>
+                    <dd>{project.modules.length} 个</dd>
+                  </div>
+                </dl>
+                <div className="project-module-list" aria-label={`${project.name} 的模块`}>
+                  {project.modules.map((module) => (
+                    <span key={module.path}>
+                      <strong>{module.name}</strong>
+                      <small>{module.packageName ?? module.applicationId ?? module.path}</small>
+                      {module.variants.length > 0 && <em>{module.variants.join(" · ")}</em>}
                     </span>
-                    {sourceIndexTime(project) !== undefined && (
-                      <small>扫描于 {sourceIndexTime(project)}</small>
+                  ))}
+                </div>
+                <details className="project-source-index" aria-label={`${project.name} 的源码索引`}>
+                  <summary>
+                    <span className="project-section-heading">
+                      <ChevronRight
+                        className="project-disclosure-icon"
+                        aria-hidden="true"
+                        size={14}
+                        strokeWidth={2}
+                      />
+                      <strong>源码索引</strong>
+                      <span
+                        className={
+                          project.sourceIndex === undefined
+                            ? "project-index-state"
+                            : "project-index-state ready"
+                        }
+                      >
+                        {sourceIndexLabel(project)}
+                      </span>
+                      {sourceIndexTime(project) !== undefined && (
+                        <small>扫描于 {sourceIndexTime(project)}</small>
+                      )}
+                    </span>
+                    <span className="project-disclosure-label">查看详情</span>
+                  </summary>
+                  <div className="project-source-index-content">
+                    <div className="project-source-index-actions">
+                      <p>
+                        {project.sourceIndex === undefined
+                          ? "尚未保存源码索引。重新索引后将提取 XML、Compose、导航和 Kotlin/Java 结构。"
+                          : "查看扫描摘要、模块范围和已提取的源码证据。"}
+                      </p>
+                      <button
+                        className="project-index-button"
+                        type="button"
+                        disabled={reindexMutation.isPending}
+                        onClick={() => reindexMutation.mutate(project.id)}
+                      >
+                        <RefreshCw aria-hidden="true" size={13} strokeWidth={1.9} />
+                        {reindexMutation.isPending && reindexMutation.variables === project.id
+                          ? "正在索引"
+                          : "重新索引"}
+                      </button>
+                    </div>
+                    {project.sourceIndex !== undefined && (
+                      <>
+                        <div className="project-index-summary">
+                          <span>
+                            <strong>{project.sourceIndex.summary.filesScanned}</strong> 已扫描文件
+                          </span>
+                          <span>
+                            <strong>{project.sourceIndex.summary.xmlViewCount}</strong> XML 视图
+                          </span>
+                          <span>
+                            <strong>{project.sourceIndex.summary.composeScreenCount}</strong> Compose
+                          </span>
+                          <span>
+                            <strong>{project.sourceIndex.summary.navigationDestinationCount}</strong>{" "}
+                            导航目标
+                          </span>
+                          <span>
+                            <strong>{project.sourceIndex.summary.typeCount}</strong> 代码类型
+                          </span>
+                        </div>
+                        <div className="project-index-modules" aria-label="模块索引摘要">
+                          {project.sourceIndex.modules.map((module) => (
+                            <span key={module.path}>
+                              <strong>{module.path === "." ? "根项目" : module.path}</strong>
+                              <small>
+                                {module.sourceFileCount} 源文件 · {module.xmlViewCount} XML ·{" "}
+                                {module.composeScreenCount} Compose ·{" "}
+                                {module.navigationDestinationCount} 导航
+                              </small>
+                            </span>
+                          ))}
+                        </div>
+                        {project.sourceIndex.evidence.length > 0 && (
+                          <details className="project-index-evidence">
+                            <summary>
+                              索引证据（
+                              {project.sourceIndex.evidence.length > 16
+                                ? `显示前 16 / ${project.sourceIndex.evidence.length}`
+                                : project.sourceIndex.evidence.length}
+                              条）
+                            </summary>
+                            <ul>
+                              {project.sourceIndex.evidence.slice(0, 16).map((evidence) => (
+                                <li
+                                  key={`${evidence.kind}-${evidence.filePath}-${evidence.line}-${evidence.name}`}
+                                >
+                                  <span>{evidenceKindLabel(evidence.kind)}</span>
+                                  <strong>{evidence.name}</strong>
+                                  <code>
+                                    {evidence.filePath}:{evidence.line}
+                                  </code>
+                                </li>
+                              ))}
+                            </ul>
+                          </details>
+                        )}
+                      </>
                     )}
                   </div>
-                  <button
-                    className="project-index-button"
-                    type="button"
-                    disabled={reindexMutation.isPending}
-                    onClick={() => reindexMutation.mutate(project.id)}
-                  >
-                    <RefreshCw aria-hidden="true" size={13} strokeWidth={1.9} />
-                    {reindexMutation.isPending && reindexMutation.variables === project.id
-                      ? "正在索引"
-                      : "重新索引"}
-                  </button>
-                </header>
-                {project.sourceIndex === undefined ? (
-                  <p>尚未保存源码索引。重新索引后将提取 XML、Compose、导航和 Kotlin/Java 结构。</p>
-                ) : (
-                  <>
-                    <div className="project-index-summary">
-                      <span>
-                        <strong>{project.sourceIndex.summary.filesScanned}</strong> 已扫描文件
-                      </span>
-                      <span>
-                        <strong>{project.sourceIndex.summary.xmlViewCount}</strong> XML 视图
-                      </span>
-                      <span>
-                        <strong>{project.sourceIndex.summary.composeScreenCount}</strong> Compose
-                      </span>
-                      <span>
-                        <strong>{project.sourceIndex.summary.navigationDestinationCount}</strong>{" "}
-                        导航目标
-                      </span>
-                      <span>
-                        <strong>{project.sourceIndex.summary.typeCount}</strong> 代码类型
-                      </span>
-                    </div>
-                    <div className="project-index-modules" aria-label="模块索引摘要">
-                      {project.sourceIndex.modules.map((module) => (
-                        <span key={module.path}>
-                          <strong>{module.path === "." ? "根项目" : module.path}</strong>
-                          <small>
-                            {module.sourceFileCount} 源文件 · {module.xmlViewCount} XML ·{" "}
-                            {module.composeScreenCount} Compose ·{" "}
-                            {module.navigationDestinationCount} 导航
-                          </small>
-                        </span>
-                      ))}
-                    </div>
-                    {project.sourceIndex.evidence.length > 0 && (
-                      <details className="project-index-evidence">
-                        <summary>
-                          索引证据（
-                          {project.sourceIndex.evidence.length > 16
-                            ? `显示前 16 / ${project.sourceIndex.evidence.length}`
-                            : project.sourceIndex.evidence.length}
-                          条）
-                        </summary>
-                        <ul>
-                          {project.sourceIndex.evidence.slice(0, 16).map((evidence) => (
-                            <li
-                              key={`${evidence.kind}-${evidence.filePath}-${evidence.line}-${evidence.name}`}
-                            >
-                              <span>{evidenceKindLabel(evidence.kind)}</span>
-                              <strong>{evidence.name}</strong>
-                              <code>
-                                {evidence.filePath}:{evidence.line}
-                              </code>
-                            </li>
-                          ))}
-                        </ul>
-                      </details>
-                    )}
-                  </>
-                )}
-              </section>
-              <ProjectBuildSection
-                project={project}
-                data={projectBuildsQuery.data?.[project.id]}
-                loading={projectBuildsQuery.isFetching}
-                building={buildMutation.isPending}
-                installing={installSdkMutation.isPending}
-                onRequestBuild={(target) => setPendingBuild({ project, target })}
-                onInstallSdk={(projectId) => installSdkMutation.mutate(projectId)}
-              />
-            </article>
+                </details>
+                <ProjectBuildSection
+                  project={project}
+                  data={projectBuildsQuery.data?.[project.id]}
+                  loading={projectBuildsQuery.isFetching}
+                  building={buildMutation.isPending}
+                  installing={installSdkMutation.isPending}
+                  onRequestBuild={(target) => setPendingBuild({ project, target })}
+                  onInstallSdk={(projectId) => installSdkMutation.mutate(projectId)}
+                />
+              </div>
+            </details>
           ))}
         </div>
       )}

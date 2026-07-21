@@ -698,6 +698,7 @@ describe("DeviceRobot Web UI", () => {
     await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
     await user.click(screen.getByRole("button", { name: "项目" }));
     await screen.findByText("未建立索引");
+    await user.click(screen.getByText("源码索引"));
     await user.click(screen.getByRole("button", { name: "重新索引" }));
 
     await vi.waitFor(() => expect(getProjectReindexRequests()).toBe(1));

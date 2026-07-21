@@ -873,33 +873,104 @@ summary:focus-visible {
   background: #171717;
 }
 
-.project-item > header {
+.project-summary {
   display: flex;
-  min-height: 46px;
+  min-height: 52px;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   padding: 0 14px;
-  border-bottom: 1px solid #303030;
   background: #1c1c1c;
+  cursor: pointer;
+  list-style: none;
 }
 
-.project-item > header > div {
+.project-summary::-webkit-details-marker,
+.project-source-index > summary::-webkit-details-marker {
+  display: none;
+}
+
+.project-summary-heading,
+.project-section-heading {
   display: flex;
   min-width: 0;
   align-items: center;
   gap: 8px;
 }
 
-.project-item > header svg {
+.project-summary-heading > svg:not(.project-disclosure-icon) {
   flex: 0 0 auto;
   color: #8fc6c9;
 }
 
-.project-item > header strong {
+.project-summary-heading > strong {
   overflow: hidden;
   color: #e5eaeb;
   font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-disclosure-icon {
+  flex: 0 0 auto;
+  color: #87959a;
+  transition: transform 160ms ease;
+}
+
+.project-item[open] > .project-summary .project-disclosure-icon,
+.project-source-index[open] > summary .project-disclosure-icon {
+  transform: rotate(90deg);
+}
+
+.project-item[open] > .project-summary {
+  border-bottom: 1px solid #303030;
+}
+
+.project-summary:focus-visible,
+.project-source-index > summary:focus-visible,
+.project-index-evidence summary:focus-visible {
+  outline: 2px solid #6faeb2;
+  outline-offset: -2px;
+}
+
+.project-summary-meta {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.project-summary-stat,
+.project-summary-revision {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.project-summary-stat small,
+.project-summary-revision small {
+  color: #89949a;
+  font-size: 9px;
+  line-height: 1;
+}
+
+.project-summary-stat strong,
+.project-summary-revision code {
+  color: #cbd5d8;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.project-summary-revision {
+  width: 96px;
+}
+
+.project-summary-revision code {
+  overflow: hidden;
+  color: #aebbc0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -938,29 +1009,29 @@ summary:focus-visible {
   background: #173029;
 }
 
-.project-item > dl {
+.project-details > dl {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) 150px 90px;
   margin: 0;
   border-bottom: 1px solid #303030;
 }
 
-.project-item > dl > div {
+.project-details > dl > div {
   min-width: 0;
   padding: 9px 14px;
   border-right: 1px solid #303030;
 }
 
-.project-item > dl > div:last-child {
+.project-details > dl > div:last-child {
   border-right: 0;
 }
 
-.project-item dt {
+.project-details dt {
   color: #89949a;
   font-size: 10px;
 }
 
-.project-item dd {
+.project-details dd {
   margin: 4px 0 0;
   overflow: hidden;
   color: #ccd4d7;
@@ -969,7 +1040,7 @@ summary:focus-visible {
   white-space: nowrap;
 }
 
-.project-item dd code {
+.project-details dd code {
   color: #aebbc0;
   font-family: "Cascadia Code", Consolas, monospace;
   font-size: 10px;
@@ -1021,33 +1092,47 @@ summary:focus-visible {
   background: #191919;
 }
 
-.project-source-index > header {
+.project-source-index > summary {
   display: flex;
-  min-height: 40px;
+  min-height: 42px;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   padding: 0 14px;
+  cursor: pointer;
+  list-style: none;
 }
 
-.project-source-index > header > div {
-  display: flex;
+.project-section-heading {
   min-width: 0;
-  align-items: center;
   gap: 7px;
 }
 
-.project-source-index > header strong {
+.project-section-heading > strong {
   color: #dce4e6;
   font-size: 11px;
 }
 
-.project-source-index > header small {
+.project-section-heading > small {
   overflow: hidden;
   color: #8c979b;
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.project-disclosure-label {
+  flex: 0 0 auto;
+  color: #879398;
+  font-size: 10px;
+}
+
+.project-source-index[open] > summary .project-disclosure-label {
+  color: #aebbbf;
+}
+
+.project-source-index-content {
+  border-top: 1px solid #303030;
 }
 
 .project-index-state {
@@ -1095,9 +1180,17 @@ summary:focus-visible {
   opacity: 0.68;
 }
 
-.project-source-index > p {
+.project-source-index-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 14px;
+}
+
+.project-source-index-actions > p {
   margin: 0;
-  padding: 0 14px 12px;
+  max-width: 740px;
   color: #8e999e;
   font-size: 10px;
   line-height: 1.55;
@@ -3333,6 +3426,56 @@ h3 {
 
   .management-heading-actions {
     gap: 5px;
+  }
+
+  .project-summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+    padding-block: 10px;
+  }
+
+  .project-summary-heading {
+    width: 100%;
+  }
+
+  .project-summary-meta {
+    width: 100%;
+    padding-left: 24px;
+    gap: 10px;
+  }
+
+  .project-summary-revision {
+    flex: 1 1 auto;
+    width: auto;
+  }
+
+  .project-details > dl {
+    grid-template-columns: 1fr;
+  }
+
+  .project-details > dl > div {
+    border-right: 0;
+    border-bottom: 1px solid #303030;
+  }
+
+  .project-details > dl > div:last-child {
+    border-bottom: 0;
+  }
+
+  .project-source-index > summary {
+    align-items: flex-start;
+    padding-block: 11px;
+  }
+
+  .project-section-heading > small {
+    display: none;
+  }
+
+  .project-source-index-actions {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
   }
 
   .primary-command {

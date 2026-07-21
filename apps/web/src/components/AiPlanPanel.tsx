@@ -158,19 +158,21 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
         </button>
       </header>
 
-      <section
-        className={`ai-model-status${configured ? " ready" : ""}${statusQuery.isError ? " error" : ""}`}
-        aria-label="模型状态"
-      >
-        <div className="ai-model-status-main">
-          <ShieldCheck aria-hidden="true" size={19} strokeWidth={1.8} />
-          <div>
-            <span>AI 模型</span>
-            <strong>{modelTitle}</strong>
+      {!showConfiguration && (
+        <section
+          className={`ai-model-status${configured ? " ready" : ""}${statusQuery.isError ? " error" : ""}`}
+          aria-label="模型状态"
+        >
+          <div className="ai-model-status-main">
+            <ShieldCheck aria-hidden="true" size={19} strokeWidth={1.8} />
+            <div>
+              <span>AI 模型</span>
+              <strong>{modelTitle}</strong>
+            </div>
           </div>
-        </div>
-        <p>{modelDetail}</p>
-      </section>
+          <p>{modelDetail}</p>
+        </section>
+      )}
 
       {showConfiguration ? (
         <form
@@ -191,9 +193,9 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
               <p className="eyebrow">配置模型</p>
               <h2>连接 OpenAI 兼容服务</h2>
             </div>
-            <span className="ai-plan-safety-note">
-              <KeyRound aria-hidden="true" size={14} strokeWidth={1.8} />
-              密钥仅用于当前本地 Agent
+            <span className="ai-configuration-status">
+              <KeyRound aria-hidden="true" size={16} strokeWidth={1.8} />
+              <strong>模型尚未配置</strong>
             </span>
           </header>
           <p className="ai-configuration-intro">

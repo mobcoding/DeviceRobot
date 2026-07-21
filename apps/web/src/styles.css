@@ -1565,6 +1565,23 @@ summary:focus-visible {
   line-height: 1.65;
 }
 
+.ai-configuration-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  color: #d7be86;
+}
+
+.ai-configuration-status > svg {
+  flex: 0 0 auto;
+}
+
+.ai-configuration-status strong {
+  color: #ecd59e;
+  font-size: 12px;
+}
+
 .ai-configuration-fields {
   display: grid;
   gap: 12px;

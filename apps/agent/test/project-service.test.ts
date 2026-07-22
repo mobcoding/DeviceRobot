@@ -238,6 +238,37 @@ describe("Android project service", () => {
     );
   });
 
+  it("recognizes Android application and library plugin aliases in Kotlin DSL", async () => {
+    const { root, service } = createFixture();
+    const projectRoot = join(root, "VersionCatalogExample");
+    mkdirSync(projectRoot);
+    createAndroidProject(projectRoot);
+    writeFileSync(
+      join(projectRoot, "app", "build.gradle.kts"),
+      [
+        "plugins { alias(libs.plugins.android.application) }",
+        "android { buildTypes { debug { } release { } } }",
+      ].join("\n"),
+    );
+    mkdirSync(join(projectRoot, "shared"), { recursive: true });
+    writeFileSync(
+      join(projectRoot, "shared", "build.gradle.kts"),
+      [
+        "plugins { alias(libs.plugins.android.library) }",
+        "android { buildTypes { release { } } }",
+      ].join("\n"),
+    );
+
+    const project = await service.add({ source: "local", rootPath: projectRoot });
+
+    expect(project.modules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "app", moduleType: "application" }),
+        expect.objectContaining({ path: "shared", moduleType: "library" }),
+      ]),
+    );
+  });
+
   it("updates module variants when a project is reindexed", async () => {
     const { root, service } = createFixture();
     const projectRoot = join(root, "ReindexKotlinDslExample");

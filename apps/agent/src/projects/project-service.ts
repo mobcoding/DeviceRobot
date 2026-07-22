@@ -203,10 +203,10 @@ function moduleVariants(content: string | undefined): string[] {
 
 function moduleType(content: string | undefined): "application" | "library" | "unknown" {
   const source = content ?? "";
-  if (/\bcom\.android\.application\b/u.test(source)) {
+  if (/\b(?:com\.android\.application|android\.application)\b/u.test(source)) {
     return "application";
   }
-  if (/\bcom\.android\.library\b/u.test(source)) {
+  if (/\b(?:com\.android\.library|android\.library)\b/u.test(source)) {
     return "library";
   }
   return "unknown";

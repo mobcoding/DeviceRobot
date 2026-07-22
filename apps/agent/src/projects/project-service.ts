@@ -19,6 +19,11 @@ const execFileAsync = promisify(execFile);
 const MAX_PROJECT_DEPTH = 8;
 const MAX_PROJECT_MODULES = 200;
 const MAX_READ_FILE_SIZE_BYTES = 2 * 1_024 * 1_024;
+const GIT_CLONE_MAX_ATTEMPTS = 3;
+const GIT_CLONE_RETRY_DELAY_MS = 800;
+const GIT_PARTIAL_CLONE_BLOB_LIMIT = "2m";
+const gitHttpConfiguration = ["-c", "http.version=HTTP/1.1"] as const;
+const gitFallbackSparsePatterns = ["/*", "!/.idea/", "!/docs/", "!/tools/"] as const;
 const ignoredDirectories = new Set([
   ".git",
   ".gradle",
@@ -58,6 +63,7 @@ export type LocalProjectServiceOptions = {
   store: ProjectStore;
   gitExecutable?: string;
   runner?: ProjectCommandRunner;
+  retryDelay?: (milliseconds: number) => Promise<void>;
 };
 
 function toErrorMessage(error: unknown): string {
@@ -76,6 +82,17 @@ function createDefaultRunner(): ProjectCommandRunner {
       return { stdout: String(stdout), stderr: String(stderr) };
     },
   };
+}
+
+function defaultRetryDelay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function isTransientGitTransportError(error: unknown): boolean {
+  const message = toErrorMessage(error);
+  return /(?:curl\s+\d+|recv failure|connection (?:was )?reset|early eof|unexpected disconnect|remote end hung up|fetch-pack|index-pack|could not fetch .* promisor remote|timed out|etimedout|econnreset|http\s+5\d\d)/iu.test(
+    message,
+  );
 }
 
 function relativeProjectPath(rootPath: string, path: string): string {
@@ -261,12 +278,14 @@ export class LocalProjectService implements ProjectService {
   readonly #store: ProjectStore;
   readonly #gitExecutable: string;
   readonly #runner: ProjectCommandRunner;
+  readonly #retryDelay: (milliseconds: number) => Promise<void>;
 
   public constructor(options: LocalProjectServiceOptions) {
     this.#paths = options.paths;
     this.#store = options.store;
     this.#gitExecutable = options.gitExecutable ?? process.env.GIT_PATH ?? "git";
     this.#runner = options.runner ?? createDefaultRunner();
+    this.#retryDelay = options.retryDelay ?? defaultRetryDelay;
   }
 
   public async list(): Promise<AndroidProject[]> {
@@ -293,16 +312,18 @@ export class LocalProjectService implements ProjectService {
     await mkdir(this.#paths.repositories, { recursive: true });
     const checkoutPath = join(this.#paths.repositories, cloneDirectoryName(remoteUrl));
     try {
-      await this.#runner.run(
-        this.#gitExecutable,
-        ["clone", "--depth", "1", remoteUrl, checkoutPath],
-        5 * 60_000,
-      );
+      await this.#cloneRemote(remoteUrl, checkoutPath);
       return await this.#recordProject(await realpath(checkoutPath), "git", remoteUrl);
     } catch (error) {
       await rm(checkoutPath, { force: true, recursive: true });
       if (error instanceof ProjectError) {
         throw error;
+      }
+      if (isTransientGitTransportError(error)) {
+        throw new ProjectError(
+          `克隆 Git 仓库时网络连接中断，已自动重试 ${GIT_CLONE_MAX_ATTEMPTS} 次仍未完成。请检查网络或代理后重试。`,
+          502,
+        );
       }
       throw new ProjectError(`克隆 Git 仓库失败：${toErrorMessage(error)}`, 502);
     }
@@ -344,6 +365,110 @@ export class LocalProjectService implements ProjectService {
       }
       throw new ProjectError("本地项目目录不存在或无法访问。", 422);
     }
+  }
+
+  async #cloneRemote(remoteUrl: string, checkoutPath: string): Promise<void> {
+    let fullCloneError: unknown;
+    for (let attempt = 1; attempt <= GIT_CLONE_MAX_ATTEMPTS; attempt += 1) {
+      await rm(checkoutPath, { force: true, recursive: true });
+      try {
+        await this.#runner.run(
+          this.#gitExecutable,
+          [
+            ...gitHttpConfiguration,
+            "clone",
+            "--depth",
+            "1",
+            "--no-tags",
+            remoteUrl,
+            checkoutPath,
+          ],
+          5 * 60_000,
+        );
+        return;
+      } catch (error) {
+        fullCloneError = error;
+        if (!isTransientGitTransportError(error)) {
+          throw error;
+        }
+        if (attempt < GIT_CLONE_MAX_ATTEMPTS) {
+          await this.#retryDelay(GIT_CLONE_RETRY_DELAY_MS * attempt);
+        }
+      }
+    }
+
+    if (!isTransientGitTransportError(fullCloneError)) {
+      throw fullCloneError;
+    }
+    await this.#cloneRemoteWithFilteredObjects(remoteUrl, checkoutPath);
+  }
+
+  async #cloneRemoteWithFilteredObjects(remoteUrl: string, checkoutPath: string): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= GIT_CLONE_MAX_ATTEMPTS; attempt += 1) {
+      await rm(checkoutPath, { force: true, recursive: true });
+      try {
+        await this.#runner.run(
+          this.#gitExecutable,
+          [
+            ...gitHttpConfiguration,
+            "clone",
+            "--depth",
+            "1",
+            "--no-tags",
+            "--filter=blob:none",
+            "--no-checkout",
+            remoteUrl,
+            checkoutPath,
+          ],
+          5 * 60_000,
+        );
+        await this.#runner.run(
+          this.#gitExecutable,
+          ["-C", checkoutPath, "sparse-checkout", "init", "--no-cone"],
+          30_000,
+        );
+        await this.#runner.run(
+          this.#gitExecutable,
+          [
+            "-C",
+            checkoutPath,
+            "sparse-checkout",
+            "set",
+            "--no-cone",
+            ...gitFallbackSparsePatterns,
+          ],
+          30_000,
+        );
+        await this.#runner.run(
+          this.#gitExecutable,
+          [
+            "-C",
+            checkoutPath,
+            ...gitHttpConfiguration,
+            "fetch",
+            "--refetch",
+            `--filter=blob:limit=${GIT_PARTIAL_CLONE_BLOB_LIMIT}`,
+            "origin",
+            "HEAD",
+          ],
+          5 * 60_000,
+        );
+        await this.#runner.run(
+          this.#gitExecutable,
+          ["-C", checkoutPath, "checkout", "--force", "HEAD"],
+          5 * 60_000,
+        );
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!isTransientGitTransportError(error) || attempt === GIT_CLONE_MAX_ATTEMPTS) {
+          throw error;
+        }
+        await this.#retryDelay(GIT_CLONE_RETRY_DELAY_MS * attempt);
+      }
+    }
+    throw lastError;
   }
 
   async #recordProject(

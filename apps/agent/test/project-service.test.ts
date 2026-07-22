@@ -94,7 +94,10 @@ class InMemoryProjectStore implements ProjectStore {
   }
 }
 
-function createFixture(runner?: ProjectCommandRunner): {
+function createFixture(
+  runner?: ProjectCommandRunner,
+  retryDelay?: (milliseconds: number) => Promise<void>,
+): {
   root: string;
   store: InMemoryProjectStore;
   service: LocalProjectService;
@@ -116,6 +119,7 @@ function createFixture(runner?: ProjectCommandRunner): {
       store,
       gitExecutable: "git",
       runner: commandRunner,
+      ...(retryDelay === undefined ? {} : { retryDelay }),
     }),
   };
 }
@@ -204,8 +208,8 @@ describe("Android project service", () => {
   it("clones a HTTPS repository with fixed Git arguments before scanning it", async () => {
     const runner: ProjectCommandRunner = {
       run: vi.fn().mockImplementation(async (_executable, args: readonly string[]) => {
-        if (args[0] === "clone") {
-          const destination = args[4];
+        if (args[2] === "clone") {
+          const destination = args[7];
           if (destination === undefined) {
             throw new Error("Missing clone target");
           }
@@ -232,12 +236,113 @@ describe("Android project service", () => {
     expect(injectedRunner.run).toHaveBeenCalledWith(
       "git",
       [
+        "-c",
+        "http.version=HTTP/1.1",
         "clone",
         "--depth",
         "1",
+        "--no-tags",
         "https://github.com/example/android-app.git",
         expect.stringContaining("android-app-"),
       ],
+      300_000,
+    );
+  });
+
+  it("retries a transient Git transport failure after clearing the incomplete checkout", async () => {
+    let cloneAttempts = 0;
+    const retryDelay = vi.fn(async () => {});
+    const runner: ProjectCommandRunner = {
+      run: vi.fn().mockImplementation(async (_executable, args: readonly string[]) => {
+        if (args[2] === "clone") {
+          cloneAttempts += 1;
+          const destination = args.at(-1);
+          if (cloneAttempts === 1) {
+            if (destination !== undefined) {
+              mkdirSync(destination, { recursive: true });
+              writeFileSync(join(destination, "partial"), "incomplete");
+            }
+            throw new Error("curl 56 Recv failure: Connection was reset");
+          }
+          if (destination === undefined) {
+            throw new Error("Missing clone target");
+          }
+          mkdirSync(destination, { recursive: true });
+          createAndroidProject(destination);
+          return { stdout: "", stderr: "" };
+        }
+        return { stdout: "abcdef012345\n", stderr: "" };
+      }),
+    };
+    const { service, runner: injectedRunner } = createFixture(runner, retryDelay);
+
+    await expect(
+      service.add({ source: "git", remoteUrl: "https://github.com/example/android-app.git" }),
+    ).resolves.toMatchObject({ name: "android-app", source: "git" });
+    expect(retryDelay).toHaveBeenCalledWith(800);
+    expect(injectedRunner.run).toHaveBeenCalledTimes(3);
+  });
+
+  it("falls back to a filtered checkout when complete Git pack transfers keep disconnecting", async () => {
+    let fullCloneAttempts = 0;
+    const retryDelay = vi.fn(async () => {});
+    const runner: ProjectCommandRunner = {
+      run: vi.fn().mockImplementation(async (_executable, args: readonly string[]) => {
+        const isClone = args.includes("clone");
+        const isFilteredClone = args.includes("--filter=blob:none");
+        if (isClone && !isFilteredClone) {
+          fullCloneAttempts += 1;
+          throw new Error("curl 56 Recv failure: Connection was reset");
+        }
+        if (isClone) {
+          const destination = args.at(-1);
+          if (destination === undefined) {
+            throw new Error("Missing clone target");
+          }
+          mkdirSync(destination, { recursive: true });
+          return { stdout: "", stderr: "" };
+        }
+        if (args.includes("checkout")) {
+          const destination = args[1];
+          if (destination === undefined) {
+            throw new Error("Missing checkout target");
+          }
+          createAndroidProject(destination);
+          return { stdout: "", stderr: "" };
+        }
+        return { stdout: "abcdef012345\n", stderr: "" };
+      }),
+    };
+    const { service, runner: injectedRunner } = createFixture(runner, retryDelay);
+
+    await expect(
+      service.add({ source: "git", remoteUrl: "https://github.com/example/android-app.git" }),
+    ).resolves.toMatchObject({ name: "android-app", source: "git" });
+
+    expect(fullCloneAttempts).toBe(3);
+    expect(retryDelay).toHaveBeenNthCalledWith(1, 800);
+    expect(retryDelay).toHaveBeenNthCalledWith(2, 1_600);
+    expect(injectedRunner.run).toHaveBeenCalledWith(
+      "git",
+      expect.arrayContaining(["clone", "--filter=blob:none", "--no-checkout"]),
+      300_000,
+    );
+    expect(injectedRunner.run).toHaveBeenCalledWith(
+      "git",
+      expect.arrayContaining([
+        "sparse-checkout",
+        "set",
+        "--no-cone",
+        "/*",
+        "!/.idea/",
+        "!/docs/",
+        "!/tools/",
+      ]),
+      30_000,
+    );
+    expect(injectedRunner.run).toHaveBeenCalledWith(
+      "git",
+      expect.arrayContaining(["fetch", "--refetch", "--filter=blob:limit=2m", "origin", "HEAD"]),
       300_000,
     );
   });

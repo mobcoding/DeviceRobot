@@ -6,6 +6,7 @@ import type { AndroidProject, ProjectBuildRun } from "@device-robot/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  extractGradleFailureSummary,
   LocalProjectBuildService,
   ProjectBuildError,
   purgeCorruptGradleWrapperCache,
@@ -17,6 +18,27 @@ import type { ProjectBuildStore } from "../src/projects/project-build-store.js";
 import type { ProjectStore } from "../src/projects/project-store.js";
 
 const temporaryDirectories: string[] = [];
+const gradleFailureOutput = [
+  "> Task :app:mergeReleaseResources FAILED",
+  "",
+  "FAILURE: Build failed with an exception.",
+  "",
+  "* What went wrong:",
+  "Execution failed for task ':app:mergeReleaseResources'.",
+  "> A failure occurred while executing com.android.build.gradle.internal.res.LinkApplicationAndroidResourcesTask$TaskAction",
+  "   > Android resource linking failed",
+  "",
+  "* Try:",
+  "> Run with --stacktrace option to get the stack trace.",
+  "",
+  "BUILD FAILED in 12s",
+].join("\n");
+const wrapperFailureOutput = [
+  "Could not unzip C:\\agent-data\\gradle-8.14.5-bin.zip to C:\\agent-data\\gradle-8.14.5-bin.",
+  "Reason: zip END header not found",
+  'Exception in thread "main" java.util.zip.ZipException: zip END header not found',
+  "\tat java.base/java.util.zip.ZipFile$Source.findEND(ZipFile.java:1649)",
+].join("\n");
 
 class InMemoryProjectStore implements ProjectStore {
   readonly #projects: AndroidProject[];
@@ -185,6 +207,65 @@ afterEach(() => {
 });
 
 describe("Android project build service", () => {
+  it("extracts the actionable Gradle failure section", () => {
+    expect(extractGradleFailureSummary(gradleFailureOutput)).toBe(
+      [
+        "Execution failed for task ':app:mergeReleaseResources'.",
+        "> A failure occurred while executing com.android.build.gradle.internal.res.LinkApplicationAndroidResourcesTask$TaskAction",
+        "   > Android resource linking failed",
+      ].join("\n"),
+    );
+  });
+
+  it("extracts Gradle Wrapper download failures without a structured Gradle section", () => {
+    expect(extractGradleFailureSummary(wrapperFailureOutput)).toBe(
+      [
+        "Could not unzip C:\\agent-data\\gradle-8.14.5-bin.zip to C:\\agent-data\\gradle-8.14.5-bin.",
+        "Reason: zip END header not found",
+        'Exception in thread "main" java.util.zip.ZipException: zip END header not found',
+      ].join("\n"),
+    );
+  });
+
+  it("hydrates historical generic build failures from their saved logs", async () => {
+    const root = mkdtempSync(join(tmpdir(), "device-robot-build-"));
+    temporaryDirectories.push(root);
+    const paths = resolveAgentPaths(join(root, "agent-data"));
+    const project = createProject(root);
+    const store = new InMemoryProjectBuildStore();
+    const logPath = join(paths.logs, "builds", "legacy-failure.log");
+    mkdirSync(join(paths.logs, "builds"), { recursive: true });
+    writeFileSync(logPath, wrapperFailureOutput);
+    const legacyRun: ProjectBuildRun = {
+      id: "323e4567-e89b-12d3-a456-426614174000",
+      projectId: project.id,
+      modulePath: "app",
+      variant: "release",
+      taskName: ":app:assembleRelease",
+      status: "failed",
+      logPath,
+      artifactPaths: [],
+      message: "Gradle 构建失败。",
+      exitCode: 1,
+      startedAt: "2026-07-22T16:45:30.134Z",
+      finishedAt: "2026-07-22T16:46:06.073Z",
+    };
+    store.create(legacyRun);
+    const service = new LocalProjectBuildService({
+      paths,
+      projectStore: new InMemoryProjectStore(project),
+      buildStore: store,
+    });
+
+    const runs = await service.listRuns(project.id);
+
+    expect(runs.runs[0]).toMatchObject({
+      id: legacyRun.id,
+      message: expect.stringContaining("zip END header not found"),
+    });
+    expect(store.runs[0]?.message).toContain("Could not unzip");
+  });
+
   it("removes a corrupt Gradle Wrapper archive before starting a build", async () => {
     const root = mkdtempSync(join(tmpdir(), "device-robot-build-"));
     temporaryDirectories.push(root);
@@ -406,10 +487,15 @@ describe("Android project build service", () => {
     });
     expect(running.status).toBe("queued");
     await vi.waitFor(() => expect(runner.starts).toHaveLength(1));
-    runner.complete({ exitCode: 1 });
+    runner.complete({ exitCode: 1, output: gradleFailureOutput });
     await vi.waitFor(async () => {
       const runs = await service.listRuns(project.id);
-      expect(runs.runs[0]).toMatchObject({ id: running.id, status: "failed", exitCode: 1 });
+      expect(runs.runs[0]).toMatchObject({
+        id: running.id,
+        status: "failed",
+        exitCode: 1,
+        message: expect.stringContaining("Android resource linking failed"),
+      });
     });
   });
 

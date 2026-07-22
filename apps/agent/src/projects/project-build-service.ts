@@ -34,6 +34,9 @@ const execFileAsync = promisify(execFile);
 const MAX_BUILD_ARTIFACTS = 100;
 const MAX_ARTIFACT_DEPTH = 6;
 const MAX_CONCURRENT_BUILDS = 2;
+const MAX_BUILD_FAILURE_MESSAGE_LENGTH = 8_000;
+const GENERIC_GRADLE_FAILURE_MESSAGE = "Gradle 构建失败。";
+const ansiEscapeSequence = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "gu");
 
 export class ProjectBuildError extends Error {
   public constructor(
@@ -371,6 +374,81 @@ function shouldRetryWrapperDownload(result: ProjectBuildProcessResult): boolean 
   return result.exitCode !== 0 && /zip END header not found/iu.test(result.output ?? "");
 }
 
+function trimBuildFailureMessage(message: string): string {
+  return message.length <= MAX_BUILD_FAILURE_MESSAGE_LENGTH
+    ? message
+    : `${message.slice(0, MAX_BUILD_FAILURE_MESSAGE_LENGTH).trimEnd()}\n...`;
+}
+
+export function extractGradleFailureSummary(output: string | undefined): string | undefined {
+  if (output === undefined || output.trim().length === 0) {
+    return undefined;
+  }
+
+  const lines = output
+    .replaceAll(ansiEscapeSequence, "")
+    .replaceAll("\r\n", "\n")
+    .replaceAll("\r", "\n")
+    .split("\n");
+  const whatWentWrongIndex = lines.findIndex((line) =>
+    /^\s*\*\s*What went wrong:\s*$/iu.test(line),
+  );
+  if (whatWentWrongIndex >= 0) {
+    const details: string[] = [];
+    for (const line of lines.slice(whatWentWrongIndex + 1)) {
+      if (
+        /^\s*\*\s*(Try|Exception is|Get more help):/iu.test(line) ||
+        /^\s*BUILD FAILED\b/iu.test(line) ||
+        /^\s*FAILURE:/iu.test(line)
+      ) {
+        break;
+      }
+      if (line.trim().length > 0) {
+        details.push(line.trimEnd());
+      }
+    }
+    const message = details.join("\n").trim();
+    if (message.length > 0) {
+      return trimBuildFailureMessage(message);
+    }
+  }
+
+  const failureIndex = lines.findIndex((line) => /^\s*FAILURE:/iu.test(line));
+  if (failureIndex >= 0) {
+    const details = lines
+      .slice(failureIndex + 1)
+      .map((line) => line.trimEnd())
+      .filter((line) => line.trim().length > 0)
+      .filter((line) => !/^\s*\*\s*(Try|Get more help):/iu.test(line))
+      .filter((line) => !/^\s*BUILD FAILED\b/iu.test(line));
+    const message = details.join("\n").trim();
+    if (message.length > 0) {
+      return trimBuildFailureMessage(message);
+    }
+  }
+
+  const fallbackStart = lines.findIndex((line) =>
+    /^\s*(Could not|Unable to|Execution failed|A problem occurred|Exception in thread|Caused by:|Reason:|ERROR:)/iu.test(
+      line,
+    ),
+  );
+  if (fallbackStart >= 0) {
+    const details = lines
+      .slice(fallbackStart)
+      .map((line) => line.trimEnd())
+      .filter((line) => line.trim().length > 0)
+      .filter((line) => !/^\s*at\s+/iu.test(line))
+      .filter((line) => !/^\s*BUILD FAILED\b/iu.test(line))
+      .slice(0, 12);
+    const message = details.join("\n").trim();
+    if (message.length > 0) {
+      return trimBuildFailureMessage(message);
+    }
+  }
+
+  return undefined;
+}
+
 function createDefaultRunner(): ProjectBuildProcessRunner {
   return {
     start: (options) => {
@@ -534,9 +612,14 @@ export class LocalProjectBuildService implements ProjectBuildService {
 
   public async listRuns(projectId: string): Promise<ProjectBuildRunListResponse> {
     this.#requireProject(projectId);
+    const runs = await Promise.all(
+      this.#buildStore
+        .listByProject(projectId)
+        .map(async (run) => await this.#hydrateFailureMessage(run)),
+    );
     return projectBuildRunListResponseSchema.parse({
       projectId,
-      runs: this.#buildStore.listByProject(projectId),
+      runs,
     });
   }
 
@@ -866,7 +949,9 @@ export class LocalProjectBuildService implements ProjectBuildService {
         ? artifactPaths.length === 0
           ? "构建完成，未发现 APK 输出。"
           : `构建完成，发现 ${artifactPaths.length} 个 APK 输出。`
-        : (result.errorMessage ?? "Gradle 构建失败。");
+        : (extractGradleFailureSummary(result.output) ??
+          result.errorMessage ??
+          GENERIC_GRADLE_FAILURE_MESSAGE);
     const completedRun = projectBuildRunSchema.parse({
       ...active.run,
       status,
@@ -876,5 +961,22 @@ export class LocalProjectBuildService implements ProjectBuildService {
       finishedAt,
     });
     this.#buildStore.finish(completedRun);
+  }
+
+  async #hydrateFailureMessage(run: ProjectBuildRun): Promise<ProjectBuildRun> {
+    if (run.status !== "failed" || run.message !== GENERIC_GRADLE_FAILURE_MESSAGE) {
+      return run;
+    }
+    try {
+      const message = extractGradleFailureSummary(await readFile(run.logPath, "utf8"));
+      if (message === undefined) {
+        return run;
+      }
+      const hydratedRun = projectBuildRunSchema.parse({ ...run, message });
+      this.#buildStore.finish(hydratedRun);
+      return hydratedRun;
+    } catch {
+      return run;
+    }
   }
 }

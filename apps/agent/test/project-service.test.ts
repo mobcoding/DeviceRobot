@@ -238,6 +238,31 @@ describe("Android project service", () => {
     );
   });
 
+  it("ignores Gradle configuration methods when discovering Android variants", async () => {
+    const { root, service } = createFixture();
+    const projectRoot = join(root, "ConfigureEachExample");
+    mkdirSync(projectRoot);
+    createAndroidProject(projectRoot);
+    writeFileSync(
+      join(projectRoot, "app", "build.gradle.kts"),
+      [
+        'plugins { id("com.android.application") }',
+        "android {",
+        "  buildTypes {",
+        "    release { isMinifyEnabled = true }",
+        "    configureEach { isCrunchPngs = false }",
+        "  }",
+        "}",
+      ].join("\n"),
+    );
+
+    const project = await service.add({ source: "local", rootPath: projectRoot });
+
+    expect(project.modules).toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: "app", variants: ["release"] })]),
+    );
+  });
+
   it("recognizes Android application and library plugin aliases in Kotlin DSL", async () => {
     const { root, service } = createFixture();
     const projectRoot = join(root, "VersionCatalogExample");

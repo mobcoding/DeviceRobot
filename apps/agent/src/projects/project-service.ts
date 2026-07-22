@@ -155,10 +155,21 @@ function namedGradleEntries(block: string | undefined): string[] {
   if (block === undefined) {
     return [];
   }
+  const configurationMethods = new Set([
+    "all",
+    "configure",
+    "configureEach",
+    "each",
+    "forEach",
+    "matching",
+    "whenObjectAdded",
+    "whenObjectRemoved",
+    "withType",
+  ]);
   const entries = new Set<string>();
   for (const match of block.matchAll(/(?:^|[}\n;])\s*([A-Za-z][A-Za-z0-9_-]*)\s*\{/gmu)) {
     const name = match[1];
-    if (name !== undefined) {
+    if (name !== undefined && !configurationMethods.has(name)) {
       entries.add(name);
     }
   }

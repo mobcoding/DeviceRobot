@@ -863,6 +863,7 @@ summary:focus-visible {
 
 .project-list {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -950,31 +951,16 @@ summary:focus-visible {
 }
 
 .project-build {
-  border-top: 1px solid #303030;
   background: #181818;
 }
 
-.project-build > header {
+.project-build-runtime {
   display: flex;
-  min-height: 46px;
+  min-height: 42px;
   align-items: center;
-  padding: 0 14px;
-}
-
-.project-build > header > div {
-  display: flex;
-  align-items: baseline;
+  justify-content: space-between;
   gap: 8px;
-}
-
-.project-build > header strong {
-  color: #dce4e6;
-  font-size: 13px;
-}
-
-.project-build > header small {
-  color: #8e999e;
-  font-size: 11px;
+  padding: 0 14px;
 }
 
 .project-sdk-state {
@@ -3200,6 +3186,10 @@ h3 {
 
   .project-summary-heading {
     width: 100%;
+  }
+
+  .project-list {
+    grid-template-columns: 1fr;
   }
 
   .project-build-targets {

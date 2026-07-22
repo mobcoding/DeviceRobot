@@ -135,16 +135,12 @@ function ProjectBuildSection({
   }
   return (
     <section className="project-build" aria-label={`${project.name} 的构建`}>
-      <header>
-        <div>
-          <strong>Gradle 构建</strong>
-          <small>仅使用项目自身的 Gradle Wrapper</small>
-          {data !== undefined && (
-            <span className={sdkReady ? "project-sdk-state ready" : "project-sdk-state"}>
-              {sdkReady ? "Android SDK 已就绪" : "Android SDK 需要准备"}
-            </span>
-          )}
-          {data !== undefined && !sdkReady && (
+      {data !== undefined && (
+        <div className="project-build-runtime">
+          <span className={sdkReady ? "project-sdk-state ready" : "project-sdk-state"}>
+            {sdkReady ? "Android SDK 已就绪" : "Android SDK 需要准备"}
+          </span>
+          {!sdkReady && (
             <button
               className="project-sdk-install"
               type="button"
@@ -156,7 +152,7 @@ function ProjectBuildSection({
             </button>
           )}
         </div>
-      </header>
+      )}
       {!project.gradleWrapper ? (
         <p>未检测到 Gradle Wrapper，已禁用构建操作。</p>
       ) : loading ? (

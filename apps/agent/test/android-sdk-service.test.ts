@@ -31,6 +31,19 @@ function writeSdkPackage(root: string, packageName: string): void {
     const version = packageName.slice("build-tools;".length);
     mkdirSync(join(root, "build-tools", version), { recursive: true });
     writeFileSync(join(root, "build-tools", version, executable), "");
+    return;
+  }
+  if (packageName.startsWith("ndk;")) {
+    const version = packageName.slice("ndk;".length);
+    mkdirSync(join(root, "ndk", version), { recursive: true });
+    writeFileSync(join(root, "ndk", version, "source.properties"), "Pkg.Revision = " + version);
+    return;
+  }
+  if (packageName.startsWith("cmake;")) {
+    const version = packageName.slice("cmake;".length);
+    const cmake = process.platform === "win32" ? "cmake.exe" : "cmake";
+    mkdirSync(join(root, "cmake", version, "bin"), { recursive: true });
+    writeFileSync(join(root, "cmake", version, "bin", cmake), "");
   }
 }
 
@@ -71,6 +84,59 @@ describe("Android SDK service", () => {
         { name: "app", path: "app", buildFile: "app/build.gradle.kts", variants: ["debug"] },
       ]),
     ).resolves.toEqual(["platform-tools", "platforms;android-36", "build-tools;36.0.0"]);
+  });
+
+  it("discovers NDK and CMake packages required by native Android modules", async () => {
+    const root = mkdtempSync(join(tmpdir(), "device-robot-sdk-"));
+    temporaryDirectories.push(root);
+    mkdirSync(join(root, "health"), { recursive: true });
+    writeFileSync(
+      join(root, "health", "build.gradle.kts"),
+      [
+        "android {",
+        "  compileSdk = 36",
+        '  ndkVersion = "28.1.13356709"',
+        "  externalNativeBuild { cmake { version = \"3.18.1\" } }",
+        "}",
+      ].join("\n"),
+    );
+
+    await expect(
+      requiredAndroidSdkPackages(root, [
+        { name: "health", path: "health", buildFile: "health/build.gradle.kts", variants: [] },
+      ]),
+    ).resolves.toEqual([
+      "platform-tools",
+      "platforms;android-36",
+      "build-tools;36.0.0",
+      "ndk;28.1.13356709",
+      "cmake;3.18.1",
+    ]);
+  });
+
+  it("reports an incomplete NDK package as missing", async () => {
+    const root = mkdtempSync(join(tmpdir(), "device-robot-sdk-"));
+    temporaryDirectories.push(root);
+    const paths = resolveAgentPaths(join(root, "agent-data"));
+    for (const packageName of ["platform-tools", "platforms;android-36", "build-tools;36.0.0"]) {
+      writeSdkPackage(paths.androidSdk, packageName);
+    }
+    mkdirSync(join(paths.androidSdk, "ndk", "28.1.13356709", ".installer"), { recursive: true });
+
+    await expect(
+      inspectAndroidSdk({
+        paths,
+        requiredPackages: [
+          "platform-tools",
+          "platforms;android-36",
+          "build-tools;36.0.0",
+          "ndk;28.1.13356709",
+        ],
+      }),
+    ).resolves.toMatchObject({
+      source: "managed",
+      missingPackages: ["ndk;28.1.13356709"],
+    });
   });
 
   it("prefers a complete managed SDK over an incomplete environment SDK", async () => {

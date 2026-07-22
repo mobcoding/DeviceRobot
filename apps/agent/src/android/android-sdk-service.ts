@@ -128,7 +128,42 @@ async function isPackageInstalled(sdkRoot: string, packageName: string): Promise
     return await hasBuildTools(sdkRoot, buildTools);
   }
 
+  const ndkVersion = /^ndk;([0-9]+(?:\.[0-9]+)+)$/u.exec(packageName)?.[1];
+  if (ndkVersion !== undefined) {
+    return existsSync(join(sdkRoot, "ndk", ndkVersion, "source.properties"));
+  }
+
+  const cmakeVersion = /^cmake;([0-9]+(?:\.[0-9]+)+)$/u.exec(packageName)?.[1];
+  if (cmakeVersion !== undefined) {
+    const executable = process.platform === "win32" ? "cmake.exe" : "cmake";
+    return existsSync(join(sdkRoot, "cmake", cmakeVersion, "bin", executable));
+  }
+
   return false;
+}
+
+function packageInstallPath(sdkRoot: string, packageName: string): string | undefined {
+  if (packageName === "platform-tools") {
+    return join(sdkRoot, "platform-tools");
+  }
+
+  const platform = /^platforms;android-(\d+)$/u.exec(packageName)?.[1];
+  if (platform !== undefined) {
+    return join(sdkRoot, "platforms", `android-${platform}`);
+  }
+
+  const buildTools = /^build-tools;([0-9.]+)$/u.exec(packageName)?.[1];
+  if (buildTools !== undefined) {
+    return join(sdkRoot, "build-tools", buildTools);
+  }
+
+  const ndkVersion = /^ndk;([0-9]+(?:\.[0-9]+)+)$/u.exec(packageName)?.[1];
+  if (ndkVersion !== undefined) {
+    return join(sdkRoot, "ndk", ndkVersion);
+  }
+
+  const cmakeVersion = /^cmake;([0-9]+(?:\.[0-9]+)+)$/u.exec(packageName)?.[1];
+  return cmakeVersion === undefined ? undefined : join(sdkRoot, "cmake", cmakeVersion);
 }
 
 async function missingPackages(
@@ -154,6 +189,25 @@ function compileSdkFromBuildScript(contents: string): number | undefined {
   return values.length === 0 ? undefined : Math.max(...values);
 }
 
+function nativeBuildPackagesFromBuildScript(contents: string): string[] {
+  const packages: string[] = [];
+  for (const match of contents.matchAll(/\bndkVersion\s*(?:=)?\s*["']([0-9]+(?:\.[0-9]+)+)["']/gu)) {
+    const version = match[1];
+    if (version !== undefined) {
+      packages.push(`ndk;${version}`);
+    }
+  }
+  for (const match of contents.matchAll(
+    /\bcmake\s*\{[\s\S]{0,1024}?\bversion\s*(?:=)?\s*["']([0-9]+(?:\.[0-9]+)+)["']/gu,
+  )) {
+    const version = match[1];
+    if (version !== undefined) {
+      packages.push(`cmake;${version}`);
+    }
+  }
+  return packages;
+}
+
 export async function requiredAndroidSdkPackages(
   projectRoot: string,
   modules: readonly AndroidProjectModule[],
@@ -175,12 +229,13 @@ export async function requiredAndroidSdkPackages(
   const apiLevels = contents
     .map((content) => compileSdkFromBuildScript(content))
     .filter((value): value is number => value !== undefined);
-  if (apiLevels.length === 0) {
-    return ["platform-tools"];
+  const packages = ["platform-tools"];
+  if (apiLevels.length > 0) {
+    const apiLevel = Math.max(...apiLevels);
+    packages.push(`platforms;android-${apiLevel}`, `build-tools;${apiLevel}.0.0`);
   }
-
-  const apiLevel = Math.max(...apiLevels);
-  return ["platform-tools", `platforms;android-${apiLevel}`, `build-tools;${apiLevel}.0.0`];
+  packages.push(...contents.flatMap(nativeBuildPackagesFromBuildScript));
+  return unique(packages);
 }
 
 export async function inspectAndroidSdk(options: {
@@ -414,6 +469,15 @@ export class AndroidSdkService {
     if (!existsSync(sdkManagerPath)) {
       await this.#installCommandLineTools();
     }
+    const incompletePackages = await missingPackages(this.#paths.androidSdk, requiredPackages);
+    await Promise.all(
+      incompletePackages.map(async (packageName) => {
+        const packagePath = packageInstallPath(this.#paths.androidSdk, packageName);
+        if (packagePath !== undefined) {
+          await rm(packagePath, { force: true, recursive: true });
+        }
+      }),
+    );
     await runCommand(
       sdkManagerPath,
       [`--sdk_root=${this.#paths.androidSdk}`, "--licenses"],

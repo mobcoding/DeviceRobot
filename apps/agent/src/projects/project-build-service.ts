@@ -409,12 +409,14 @@ export class LocalProjectBuildService implements ProjectBuildService {
     if (wrapper === undefined) {
       throw new ProjectBuildError("未找到 Gradle Wrapper，已拒绝执行构建。", 422);
     }
-    const androidSdk = await this.#sdkService.inspect(project.rootPath, project.modules);
-    if (
-      !androidSdk.available ||
-      androidSdk.path === undefined ||
-      androidSdk.missingPackages.length > 0
-    ) {
+    let androidSdk: AndroidSdkInfo;
+    try {
+      androidSdk = await this.#sdkService.install(project.rootPath, project.modules);
+    } catch (error) {
+      const message = error instanceof AndroidSdkServiceError ? error.message : errorMessage(error);
+      throw new ProjectBuildError(`自动准备 Android SDK 失败：${message}`, 503);
+    }
+    if (!androidSdk.available || androidSdk.path === undefined || androidSdk.missingPackages.length > 0) {
       const missing = androidSdk.missingPackages.join("、");
       throw new ProjectBuildError(
         missing.length === 0 ? "Android SDK 未就绪。" : `Android SDK 缺少：${missing}。`,

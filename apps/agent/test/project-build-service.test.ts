@@ -313,15 +313,18 @@ describe("Android project build service", () => {
     },
   );
 
-  it("rejects missing projects and cannot receive arbitrary Gradle task names", async () => {
+  it("rejects missing projects and arbitrary Gradle task names", async () => {
     const root = mkdtempSync(join(tmpdir(), "device-robot-build-"));
     temporaryDirectories.push(root);
     const project = createProject(root);
+    const runner = new ControlledBuildRunner();
+    const paths = resolveAgentPaths(join(root, "agent-data"));
+    prepareManagedAndroidSdk(paths);
     const service = new LocalProjectBuildService({
-      paths: resolveAgentPaths(join(root, "agent-data")),
+      paths,
       projectStore: new InMemoryProjectStore(project),
       buildStore: new InMemoryProjectBuildStore(),
-      runner: new ControlledBuildRunner(),
+      runner,
     });
 
     await expect(service.listTargets("123e4567-e89b-12d3-a456-426614174999")).rejects.toMatchObject(
@@ -333,8 +336,16 @@ describe("Android project build service", () => {
       service.start(project.id, { modulePath: "app", variant: "clean", approved: true }),
     ).rejects.toMatchObject({ statusCode: 422 });
     writeFileSync(join(root, "gradlew.bat"), "@echo off");
-    await expect(
-      service.start(project.id, { modulePath: "app", variant: "debug", approved: true }),
-    ).rejects.toMatchObject({ statusCode: 503 });
+    const running = await service.start(project.id, {
+      modulePath: "app",
+      variant: "debug",
+      approved: true,
+    });
+    expect(running.status).toBe("running");
+    runner.complete({ exitCode: 1 });
+    await vi.waitFor(async () => {
+      const runs = await service.listRuns(project.id);
+      expect(runs.runs[0]).toMatchObject({ id: running.id, status: "failed", exitCode: 1 });
+    });
   });
 });

@@ -1,8 +1,8 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream, existsSync, type WriteStream } from "node:fs";
-import { mkdir, readdir, realpath, stat } from "node:fs/promises";
-import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { mkdir, open, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { AgentPaths } from "@device-robot/config";
 import {
@@ -46,6 +46,7 @@ export class ProjectBuildError extends Error {
 export type ProjectBuildProcessResult = {
   exitCode: number | null;
   errorMessage?: string;
+  output?: string;
 };
 
 export type ProjectBuildArtifact = {
@@ -172,6 +173,197 @@ function findWrapper(rootPath: string): string | undefined {
   return names.map((name) => join(rootPath, name)).find((path) => existsSync(path));
 }
 
+function wrapperDistributionUrl(contents: string): string | undefined {
+  return /^\s*distributionUrl\s*=\s*(.+?)\s*$/mu.exec(contents)?.[1]
+    ?.trim()
+    .replaceAll("\\:", ":");
+}
+
+function wrapperDistributionArchiveName(distributionUrl: string): string | undefined {
+  const path = distributionUrl
+    .split(/[?#]/u, 1)[0]
+    ?.split("/")
+    .at(-1);
+  return path?.endsWith(".zip") === true ? path : undefined;
+}
+
+async function hasZipEndRecord(path: string): Promise<boolean> {
+  const metadata = await stat(path);
+  const minimumSize = 22;
+  if (!metadata.isFile() || metadata.size < minimumSize) {
+    return false;
+  }
+  const length = Math.min(metadata.size, 65_557);
+  const buffer = Buffer.alloc(length);
+  const handle = await open(path, "r");
+  try {
+    await handle.read(buffer, 0, length, metadata.size - length);
+  } finally {
+    await handle.close();
+  }
+  for (let index = length - minimumSize; index >= 0; index -= 1) {
+    if (
+      buffer[index] === 0x50 &&
+      buffer[index + 1] === 0x4b &&
+      buffer[index + 2] === 0x05 &&
+      buffer[index + 3] === 0x06
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export async function purgeCorruptGradleWrapperCache(
+  projectRoot: string,
+  gradleHome: string,
+): Promise<number> {
+  let properties: string;
+  try {
+    properties = await readFile(join(projectRoot, "gradle", "wrapper", "gradle-wrapper.properties"), "utf8");
+  } catch {
+    return 0;
+  }
+  const distributionUrl = wrapperDistributionUrl(properties);
+  const archiveName =
+    distributionUrl === undefined ? undefined : wrapperDistributionArchiveName(distributionUrl);
+  if (archiveName === undefined) {
+    return 0;
+  }
+  const distributionName = archiveName.slice(0, -".zip".length);
+  const distributionRoot = join(gradleHome, "wrapper", "dists", distributionName);
+  let entries: Array<{ name: string; isDirectory(): boolean }>;
+  try {
+    entries = await readdir(distributionRoot, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  let removed = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const archivePath = join(distributionRoot, entry.name, archiveName);
+    if (!existsSync(archivePath)) {
+      continue;
+    }
+    try {
+      if (!(await hasZipEndRecord(archivePath))) {
+        await rm(dirname(archivePath), { force: true, recursive: true });
+        removed += 1;
+      }
+    } catch {
+      await rm(dirname(archivePath), { force: true, recursive: true });
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
+async function sha256(path: string): Promise<string> {
+  return createHash("sha256").update(await readFile(path)).digest("hex");
+}
+
+async function gradleDistributionChecksum(distributionUrl: string): Promise<string> {
+  const response = await fetch(`${distributionUrl}.sha256`, { signal: AbortSignal.timeout(30_000) });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const checksum = (await response.text()).trim().match(/[0-9a-f]{64}/iu)?.[0];
+  if (checksum === undefined) {
+    throw new Error("Gradle distribution checksum is invalid");
+  }
+  return checksum.toLowerCase();
+}
+
+async function downloadGradleDistribution(
+  distributionUrl: string,
+  archivePath: string,
+  checksum: string,
+): Promise<boolean> {
+  const temporaryPath = `${archivePath}.download`;
+  await rm(temporaryPath, { force: true });
+  try {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const downloaded = existsSync(temporaryPath) ? (await stat(temporaryPath)).size : 0;
+      const response = await fetch(distributionUrl, {
+        signal: AbortSignal.timeout(120_000),
+        ...(downloaded === 0 ? {} : { headers: { Range: `bytes=${downloaded}-` } }),
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      if (downloaded > 0 && response.status !== 206) {
+        await rm(temporaryPath, { force: true });
+        continue;
+      }
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (bytes.length === 0) {
+        continue;
+      }
+      await writeFile(temporaryPath, bytes, { flag: downloaded === 0 ? "w" : "a" });
+      if ((await sha256(temporaryPath)).toLowerCase() === checksum) {
+        await rm(archivePath, { force: true });
+        await rename(temporaryPath, archivePath);
+        return true;
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  } finally {
+    await rm(temporaryPath, { force: true });
+  }
+}
+
+async function resumeGradleWrapperDownload(projectRoot: string, gradleHome: string): Promise<number> {
+  let properties: string;
+  try {
+    properties = await readFile(join(projectRoot, "gradle", "wrapper", "gradle-wrapper.properties"), "utf8");
+  } catch {
+    return 0;
+  }
+  const distributionUrl = wrapperDistributionUrl(properties);
+  const archiveName =
+    distributionUrl === undefined ? undefined : wrapperDistributionArchiveName(distributionUrl);
+  if (distributionUrl === undefined || archiveName === undefined) {
+    return 0;
+  }
+  const distributionRoot = join(
+    gradleHome,
+    "wrapper",
+    "dists",
+    archiveName.slice(0, -".zip".length),
+  );
+  let entries: Array<{ name: string; isDirectory(): boolean }>;
+  try {
+    entries = await readdir(distributionRoot, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  let checksum: string;
+  try {
+    checksum = await gradleDistributionChecksum(distributionUrl);
+  } catch {
+    return 0;
+  }
+  let repaired = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const archivePath = join(distributionRoot, entry.name, archiveName);
+    if (existsSync(archivePath) && (await downloadGradleDistribution(distributionUrl, archivePath, checksum))) {
+      repaired += 1;
+    }
+  }
+  return repaired;
+}
+
+function shouldRetryWrapperDownload(result: ProjectBuildProcessResult): boolean {
+  return result.exitCode !== 0 && /zip END header not found/iu.test(result.output ?? "");
+}
+
 function createDefaultRunner(): ProjectBuildProcessRunner {
   return {
     start: (options) => {
@@ -190,8 +382,11 @@ function createDefaultRunner(): ProjectBuildProcessRunner {
         windowsVerbatimArguments: useWindowsCommand,
       });
 
+      let output = "";
       const writeOutput = (chunk: Buffer | string): void => {
-        options.onOutput(chunk.toString());
+        const text = chunk.toString();
+        output = `${output}${text}`.slice(-65_536);
+        options.onOutput(text);
       };
       child.stdout?.on("data", writeOutput);
       child.stderr?.on("data", writeOutput);
@@ -211,6 +406,7 @@ function createDefaultRunner(): ProjectBuildProcessRunner {
       child.once("close", (exitCode, signal) =>
         complete({
           exitCode,
+          output,
           ...(signal === null ? {} : { errorMessage: `进程被信号 ${signal} 终止。` }),
         }),
       );
@@ -423,6 +619,10 @@ export class LocalProjectBuildService implements ProjectBuildService {
         503,
       );
     }
+    const purgedWrapperArchives = await purgeCorruptGradleWrapperCache(
+      project.rootPath,
+      this.#paths.gradleHome,
+    );
 
     const buildLogDirectory = join(this.#paths.logs, "builds");
     await mkdir(buildLogDirectory, { recursive: true });
@@ -450,14 +650,8 @@ export class LocalProjectBuildService implements ProjectBuildService {
     );
     let buildProcess: ProjectBuildProcess;
     let temporarySigning: TemporarySigningMaterial | undefined;
-    try {
-      temporarySigning = await this.#temporarySigningService.prepare(project);
-      if (temporarySigning !== undefined) {
-        logStream.write(
-          "\n[DeviceRobot] 已生成临时签名，仅用于本次本地构建，构建结束后将自动删除。\n",
-        );
-      }
-      buildProcess = this.#runner.start({
+    const startBuildProcess = (): ProjectBuildProcess =>
+      this.#runner.start({
         executable: wrapper,
         args: ["--no-daemon", "--console=plain", target.taskName],
         cwd: project.rootPath,
@@ -469,6 +663,19 @@ export class LocalProjectBuildService implements ProjectBuildService {
         },
         onOutput: (chunk) => logStream.write(chunk),
       });
+    try {
+      if (purgedWrapperArchives > 0) {
+        logStream.write(
+          `[DeviceRobot] 已清理 ${purgedWrapperArchives} 个损坏的 Gradle Wrapper 缓存，将自动重新下载。\n`,
+        );
+      }
+      temporarySigning = await this.#temporarySigningService.prepare(project);
+      if (temporarySigning !== undefined) {
+        logStream.write(
+          "\n[DeviceRobot] 已生成临时签名，仅用于本次本地构建，构建结束后将自动删除。\n",
+        );
+      }
+      buildProcess = startBuildProcess();
     } catch (error) {
       await temporarySigning?.dispose();
       const failedRun = projectBuildRunSchema.parse({
@@ -496,7 +703,21 @@ export class LocalProjectBuildService implements ProjectBuildService {
       cancelled: false,
       completion: Promise.resolve(),
     } satisfies ActiveBuild;
-    active.completion = buildProcess.completed.then(async (result) => {
+    active.completion = buildProcess.completed.then(async (initialResult) => {
+      let result = initialResult;
+      if (!active.cancelled && shouldRetryWrapperDownload(result)) {
+        const repairedArchives = await resumeGradleWrapperDownload(
+          project.rootPath,
+          this.#paths.gradleHome,
+        );
+        if (repairedArchives > 0) {
+          active.logStream.write(
+            `[DeviceRobot] Gradle Wrapper 缓存下载损坏，已清理并自动重试构建。\n`,
+          );
+          active.process = startBuildProcess();
+          result = await active.process.completed;
+        }
+      }
       await this.#complete(active, result);
     });
     this.#activeRuns.set(run.id, active);

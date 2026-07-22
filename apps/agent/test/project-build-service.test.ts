@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveAgentPaths, type AgentPaths } from "@device-robot/config";
@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   LocalProjectBuildService,
   ProjectBuildError,
+  purgeCorruptGradleWrapperCache,
   type ProjectBuildProcess,
   type ProjectBuildProcessResult,
   type ProjectBuildProcessRunner,
@@ -156,6 +157,38 @@ afterEach(() => {
 });
 
 describe("Android project build service", () => {
+  it("removes a corrupt Gradle Wrapper archive before starting a build", async () => {
+    const root = mkdtempSync(join(tmpdir(), "device-robot-build-"));
+    temporaryDirectories.push(root);
+    const paths = resolveAgentPaths(join(root, "agent-data"));
+    const wrapperDirectory = join(root, "gradle", "wrapper");
+    mkdirSync(wrapperDirectory, { recursive: true });
+    writeFileSync(
+      join(wrapperDirectory, "gradle-wrapper.properties"),
+      "distributionUrl=https\\://services.gradle.org/distributions/gradle-8.14.5-bin.zip\n",
+    );
+    const cacheDirectory = join(
+      paths.gradleHome,
+      "wrapper",
+      "dists",
+      "gradle-8.14.5-bin",
+      "test-cache",
+    );
+    const archivePath = join(cacheDirectory, "gradle-8.14.5-bin.zip");
+    mkdirSync(cacheDirectory, { recursive: true });
+    writeFileSync(archivePath, "partial download");
+
+    await expect(purgeCorruptGradleWrapperCache(root, paths.gradleHome)).resolves.toBe(1);
+    expect(existsSync(cacheDirectory)).toBe(false);
+
+    mkdirSync(cacheDirectory, { recursive: true });
+    const validZipEnd = Buffer.alloc(22);
+    validZipEnd.set([0x50, 0x4b, 0x05, 0x06]);
+    writeFileSync(archivePath, validZipEnd);
+    await expect(purgeCorruptGradleWrapperCache(root, paths.gradleHome)).resolves.toBe(0);
+    expect(existsSync(archivePath)).toBe(true);
+  });
+
   it("refreshes legacy module metadata before listing APK targets", async () => {
     const root = mkdtempSync(join(tmpdir(), "device-robot-build-"));
     temporaryDirectories.push(root);

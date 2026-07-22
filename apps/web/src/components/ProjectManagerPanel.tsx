@@ -14,7 +14,7 @@ import {
   Play,
   RefreshCw,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   AndroidBuildTarget,
   AndroidDevice,
@@ -117,6 +117,46 @@ function buildStatusDescription(run: ProjectBuildRun | undefined): string {
     return "尚未执行构建";
   }
   return run.message ?? "构建已结束";
+}
+
+function BuildFailureMessage({ message }: { message: string }): React.JSX.Element {
+  const contentRef = useRef<HTMLParagraphElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [canExpand, setCanExpand] = useState(false);
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [message]);
+
+  useEffect(() => {
+    const content = contentRef.current;
+    if (content === null || expanded) {
+      return;
+    }
+    const updateOverflow = (): void => {
+      setCanExpand(content.scrollHeight > content.clientHeight + 1);
+    };
+    updateOverflow();
+    const observer = new ResizeObserver(updateOverflow);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [expanded, message]);
+
+  return (
+    <div className={`project-build-failure${expanded ? " is-expanded" : ""}`}>
+      <p ref={contentRef}>{message}</p>
+      {canExpand && (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+        >
+          <span>{expanded ? "收起" : "展开"}</span>
+          <ChevronDown aria-hidden="true" size={14} strokeWidth={2} />
+        </button>
+      )}
+    </div>
+  );
 }
 
 function groupBuildTargets(targets: AndroidBuildTarget[]): ProjectBuildModule[] {
@@ -265,7 +305,9 @@ function ProjectBuildSection({
                         {latestRun === undefined ? "尚未构建" : buildStatusLabel(latestRun.status)}
                       </strong>
                       <span>
-                        {latestRun !== undefined && latestRun.artifactPaths.length > 0
+                        {latestRun?.status === "failed"
+                          ? "构建失败，查看失败原因"
+                          : latestRun !== undefined && latestRun.artifactPaths.length > 0
                           ? `发现 ${latestRun.artifactPaths.length} 个 APK 输出`
                           : buildStatusDescription(latestRun)}
                       </span>
@@ -277,6 +319,9 @@ function ProjectBuildSection({
                       </time>
                     )}
                   </div>
+                  {latestRun?.status === "failed" && latestRun.message !== undefined && (
+                    <BuildFailureMessage message={latestRun.message} />
+                  )}
                   {latestRun !== undefined && latestRun.artifactPaths.length > 0 && (
                     <div className="project-build-artifacts" aria-label="APK 构建产物">
                       <div className="project-build-artifact-headings" aria-hidden="true">

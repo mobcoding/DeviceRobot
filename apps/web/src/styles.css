@@ -1148,6 +1148,63 @@ summary:focus-visible {
   white-space: nowrap;
 }
 
+.project-build-failure {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 12px 14px;
+  border: 1px solid #50303a;
+  border-radius: 6px;
+  color: #d8aeb5;
+  background: #21171b;
+}
+
+.project-build-failure p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: #d5bdc2;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.project-build-failure.is-expanded {
+  align-items: start;
+}
+
+.project-build-failure.is-expanded p {
+  display: block;
+  overflow: visible;
+}
+
+.project-build-failure button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 3px 5px;
+  border: 0;
+  color: #f0b5c0;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.project-build-failure button:hover {
+  color: #ffd0d8;
+  background: #3a2229;
+}
+
+.project-build-failure.is-expanded button svg {
+  transform: rotate(180deg);
+}
+
 .project-build-artifacts {
   display: grid;
   --project-artifact-time-column: 126px;

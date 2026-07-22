@@ -128,6 +128,13 @@ function createProject(rootPath: string): AndroidProject {
         moduleType: "library",
         variants: ["release"],
       },
+      {
+        name: "unknown",
+        path: "unknown",
+        buildFile: "unknown/build.gradle.kts",
+        moduleType: "unknown",
+        variants: ["release"],
+      },
     ],
     createdAt: "2026-07-21T10:00:00.000Z",
     updatedAt: "2026-07-21T10:00:00.000Z",
@@ -176,7 +183,10 @@ describe("Android project build service", () => {
       ]),
     );
     expect(targets.targets).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ modulePath: "library" })]),
+      expect.arrayContaining([
+        expect.objectContaining({ modulePath: "library" }),
+        expect.objectContaining({ modulePath: "unknown" }),
+      ]),
     );
 
     const running = await service.start(project.id, {

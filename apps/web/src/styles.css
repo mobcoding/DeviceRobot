@@ -1150,12 +1150,15 @@ summary:focus-visible {
 .project-build-artifacts {
   display: grid;
   --project-artifact-time-column: 126px;
+  --project-artifact-action-column: 132px;
   gap: 10px;
 }
 
 .project-build-artifact-headings {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--project-artifact-time-column) auto;
+  grid-template-columns: minmax(0, 1fr) var(--project-artifact-time-column) var(
+      --project-artifact-action-column
+    );
   gap: 12px;
   align-items: center;
   padding: 0 14px;
@@ -1169,12 +1172,15 @@ summary:focus-visible {
 }
 
 .project-build-artifact-headings > span:nth-child(2) {
-  justify-self: start;
+  justify-self: center;
+  text-align: center;
 }
 
 .project-build-artifact {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--project-artifact-time-column) auto;
+  grid-template-columns: minmax(0, 1fr) var(--project-artifact-time-column) var(
+      --project-artifact-action-column
+    );
   gap: 10px 12px;
   align-items: center;
   min-height: 78px;
@@ -1207,7 +1213,8 @@ summary:focus-visible {
 }
 
 .project-build-artifact-time {
-  justify-self: start;
+  justify-self: center;
+  text-align: center;
   color: #97a4aa;
   font-size: 12px;
   white-space: nowrap;
@@ -1263,7 +1270,7 @@ summary:focus-visible {
   font-size: 11px;
 }
 
-@container (max-width: 500px) {
+@container (max-width: 400px) {
   .project-summary {
     min-height: 62px;
     padding-inline: 14px;

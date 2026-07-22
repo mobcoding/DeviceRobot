@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Box,
-  ChevronRight,
   Download,
   FolderGit2,
   FolderOpen,
@@ -135,22 +134,18 @@ function ProjectBuildSection({
   }
   return (
     <section className="project-build" aria-label={`${project.name} 的构建`}>
-      {data !== undefined && (
+      {data !== undefined && !sdkReady && (
         <div className="project-build-runtime">
-          <span className={sdkReady ? "project-sdk-state ready" : "project-sdk-state"}>
-            {sdkReady ? "Android SDK 已就绪" : "Android SDK 需要准备"}
-          </span>
-          {!sdkReady && (
-            <button
-              className="project-sdk-install"
-              type="button"
-              disabled={installing || building}
-              onClick={() => onInstallSdk(project.id)}
-            >
-              <Download aria-hidden="true" size={13} strokeWidth={1.9} />
-              {installing ? "正在安装" : "安装所需 SDK"}
-            </button>
-          )}
+          <span className="project-sdk-state">Android SDK 需要准备</span>
+          <button
+            className="project-sdk-install"
+            type="button"
+            disabled={installing || building}
+            onClick={() => onInstallSdk(project.id)}
+          >
+            <Download aria-hidden="true" size={13} strokeWidth={1.9} />
+            {installing ? "正在安装" : "安装所需 SDK"}
+          </button>
         </div>
       )}
       {!project.gradleWrapper ? (
@@ -307,7 +302,6 @@ export function ProjectManagerPanel({
   const [localPath, setLocalPath] = useState("");
   const [remoteUrl, setRemoteUrl] = useState("");
   const [pendingBuild, setPendingBuild] = useState<PendingBuild>();
-  const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>();
   const [installedArtifact, setInstalledArtifact] = useState<InstalledProjectArtifact>();
   const [pendingSignatureConflict, setPendingSignatureConflict] =
     useState<ProjectArtifactInstall>();
@@ -517,36 +511,10 @@ export function ProjectManagerPanel({
         <p className="management-empty">尚未接入 Android 项目。</p>
       ) : (
         <div className="project-list">
-          {projectsQuery.data?.projects.map((project, index) => (
-            <details
-              key={project.id}
-              className="project-item"
-              open={
-                expandedProjectIds === undefined ? index === 0 : expandedProjectIds.has(project.id)
-              }
-              onToggle={(event) => {
-                const open = event.currentTarget.open;
-                setExpandedProjectIds((current) => {
-                  const next = new Set(
-                    current ?? projectsQuery.data?.projects.slice(0, 1).map(({ id }) => id),
-                  );
-                  if (open) {
-                    next.add(project.id);
-                  } else {
-                    next.delete(project.id);
-                  }
-                  return next;
-                });
-              }}
-            >
-              <summary className="project-summary">
+          {projectsQuery.data?.projects.map((project) => (
+            <article key={project.id} className="project-item">
+              <header className="project-summary">
                 <span className="project-summary-heading">
-                  <ChevronRight
-                    className="project-disclosure-icon"
-                    aria-hidden="true"
-                    size={16}
-                    strokeWidth={2}
-                  />
                   {project.source === "local" ? (
                     <FolderOpen aria-hidden="true" size={20} strokeWidth={1.7} />
                   ) : (
@@ -557,7 +525,7 @@ export function ProjectManagerPanel({
                     {sourceLabel(project.source)}
                   </span>
                 </span>
-              </summary>
+              </header>
               <ProjectBuildSection
                 project={project}
                 data={projectBuildsQuery.data?.[project.id]}
@@ -581,7 +549,7 @@ export function ProjectManagerPanel({
                   installArtifact(project, run, artifactIndex)
                 }
               />
-            </details>
+            </article>
           ))}
         </div>
       )}

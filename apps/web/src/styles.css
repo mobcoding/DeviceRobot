@@ -882,12 +882,6 @@ summary:focus-visible {
   gap: 10px;
   padding: 0 14px;
   background: #1c1c1c;
-  cursor: pointer;
-  list-style: none;
-}
-
-.project-summary::-webkit-details-marker {
-  display: none;
 }
 
 .project-summary-heading {
@@ -897,7 +891,7 @@ summary:focus-visible {
   gap: 8px;
 }
 
-.project-summary-heading > svg:not(.project-disclosure-icon) {
+.project-summary-heading > svg {
   flex: 0 0 auto;
   color: #8fc6c9;
 }
@@ -910,23 +904,8 @@ summary:focus-visible {
   white-space: nowrap;
 }
 
-.project-disclosure-icon {
-  flex: 0 0 auto;
-  color: #87959a;
-  transition: transform 160ms ease;
-}
-
-.project-item[open] > .project-summary .project-disclosure-icon {
-  transform: rotate(90deg);
-}
-
-.project-item[open] > .project-summary {
+.project-summary {
   border-bottom: 1px solid #303030;
-}
-
-.project-summary:focus-visible {
-  outline: 2px solid #6faeb2;
-  outline-offset: -2px;
 }
 
 .project-source {
@@ -976,12 +955,6 @@ summary:focus-visible {
   font-weight: 700;
 }
 
-.project-sdk-state.ready {
-  border-color: #2f6b63;
-  color: #88d8c0;
-  background: #173029;
-}
-
 .project-sdk-install {
   display: inline-flex;
   min-height: 28px;
@@ -1016,7 +989,7 @@ summary:focus-visible {
 
 .project-build-targets {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   padding: 2px 14px 14px;
 }

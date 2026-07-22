@@ -130,21 +130,71 @@ function parseApplicationId(content: string | undefined): string | undefined {
   return /\bapplicationId\s*(?:=\s*)?["']([^"']+)["']/u.exec(content ?? "")?.[1]?.trim();
 }
 
+function gradleBlockContents(source: string, blockName: string): string | undefined {
+  const blockStart = new RegExp(`\\b${blockName}\\s*\\{`, "u").exec(source);
+  if (blockStart?.index === undefined) {
+    return undefined;
+  }
+  const openingBrace = source.indexOf("{", blockStart.index);
+  let depth = 0;
+  for (let index = openingBrace; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(openingBrace + 1, index);
+      }
+    }
+  }
+  return undefined;
+}
+
+function namedGradleEntries(block: string | undefined): string[] {
+  if (block === undefined) {
+    return [];
+  }
+  const entries = new Set<string>();
+  for (const match of block.matchAll(/(?:^|[}\n;])\s*([A-Za-z][A-Za-z0-9_-]*)\s*\{/gmu)) {
+    const name = match[1];
+    if (name !== undefined) {
+      entries.add(name);
+    }
+  }
+  for (const match of block.matchAll(
+    /\b(?:create|maybeCreate|register|getByName|named)\s*\(\s*["']([A-Za-z][A-Za-z0-9_-]*)["']\s*\)/gu,
+  )) {
+    const name = match[1];
+    if (name !== undefined) {
+      entries.add(name);
+    }
+  }
+  return [...entries];
+}
+
 function parseVariants(content: string | undefined): string[] {
   const source = content ?? "";
   const variants = new Set<string>();
-  if (/\bdebug\s*\{/u.test(source)) {
-    variants.add("debug");
+  for (const name of namedGradleEntries(gradleBlockContents(source, "buildTypes"))) {
+    variants.add(name);
   }
-  if (/\brelease\s*\{/u.test(source)) {
-    variants.add("release");
+  for (const name of namedGradleEntries(gradleBlockContents(source, "productFlavors"))) {
+    variants.add(name);
   }
-  const flavorBlock = /\bproductFlavors\s*\{([\s\S]{0,100000})/u.exec(source)?.[1];
-  if (flavorBlock !== undefined) {
-    for (const match of flavorBlock.matchAll(/^\s*([A-Za-z][A-Za-z0-9_]*)\s*\{/gmu)) {
-      const name = match[1];
-      if (name !== undefined && name !== "create") {
-        variants.add(name);
+  return [...variants].sort((left, right) => left.localeCompare(right, "en"));
+}
+
+function moduleVariants(content: string | undefined): string[] {
+  const variants = parseVariants(content);
+  if (variants.length > 0) {
+    return variants;
+  }
+  // Some compact Groovy build scripts omit a buildTypes block and rely on AGP defaults.
+  if (/\b(?:debug|release)\s*\{/u.test(content ?? "")) {
+    for (const name of ["debug", "release"]) {
+      if (new RegExp(`\\b${name}\\s*\\{`, "u").test(content ?? "")) {
+        variants.push(name);
       }
     }
   }
@@ -231,7 +281,7 @@ export async function scanAndroidProject(rootPath: string): Promise<{
           : { manifestPath: relativeProjectPath(rootPath, manifestPath) }),
         ...(packageName === undefined ? {} : { packageName }),
         ...(applicationId === undefined ? {} : { applicationId }),
-        variants: parseVariants(buildContent),
+        variants: moduleVariants(buildContent),
       };
     }),
   );
@@ -338,9 +388,11 @@ export class LocalProjectService implements ProjectService {
       throw new ProjectError("项目目录已不存在或无法访问。", 422);
     }
 
-    const sourceIndex = await indexAndroidProjectSource(project.rootPath, project.modules);
+    const scan = await scanAndroidProject(project.rootPath);
+    const sourceIndex = await indexAndroidProjectSource(project.rootPath, scan.modules);
     const indexedProject = androidProjectSchema.parse({
       ...project,
+      ...scan,
       sourceIndex,
       updatedAt: new Date().toISOString(),
     });

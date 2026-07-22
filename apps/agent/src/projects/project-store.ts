@@ -105,8 +105,16 @@ export class SqliteProjectStore implements ProjectStore {
 
   public updateSourceIndex(project: AndroidProject): void {
     this.#sqlite
-      .prepare("UPDATE projects SET source_index_json = ?, updated_at = ? WHERE id = ?")
+      .prepare(
+        `
+          UPDATE projects
+          SET gradle_wrapper = ?, modules_json = ?, source_index_json = ?, updated_at = ?
+          WHERE id = ?
+        `,
+      )
       .run(
+        project.gradleWrapper ? 1 : 0,
+        JSON.stringify(project.modules),
         project.sourceIndex === undefined ? null : JSON.stringify(project.sourceIndex),
         project.updatedAt,
         project.id,

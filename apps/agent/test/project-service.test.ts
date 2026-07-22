@@ -205,6 +205,57 @@ describe("Android project service", () => {
     expect(runner.run).toHaveBeenCalledTimes(1);
   });
 
+  it("recognizes build types and product flavors declared with Kotlin DSL functions", async () => {
+    const { root, service } = createFixture();
+    const projectRoot = join(root, "KotlinDslExample");
+    mkdirSync(projectRoot);
+    createAndroidProject(projectRoot);
+    writeFileSync(
+      join(projectRoot, "app", "build.gradle.kts"),
+      [
+        "android {",
+        '  defaultConfig { applicationId = "com.example.app" }',
+        "  buildTypes {",
+        '    getByName("debug") { isDebuggable = true }',
+        '    create("release") { isMinifyEnabled = true }',
+        "  }",
+        "  productFlavors {",
+        '    create("free") { }',
+        '    register("paid") { }',
+        "  }",
+        "}",
+      ].join("\n"),
+    );
+
+    const project = await service.add({ source: "local", rootPath: projectRoot });
+
+    expect(project.modules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "app", variants: ["debug", "free", "paid", "release"] }),
+      ]),
+    );
+  });
+
+  it("updates module variants when a project is reindexed", async () => {
+    const { root, service } = createFixture();
+    const projectRoot = join(root, "ReindexKotlinDslExample");
+    mkdirSync(projectRoot);
+    createAndroidProject(projectRoot);
+    const project = await service.add({ source: "local", rootPath: projectRoot });
+    writeFileSync(
+      join(projectRoot, "app", "build.gradle.kts"),
+      'android { buildTypes { getByName("debug") { } create("release") { } } }',
+    );
+
+    const reindexed = await service.reindex(project.id);
+
+    expect(reindexed.modules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "app", variants: ["debug", "release"] }),
+      ]),
+    );
+  });
+
   it("clones a HTTPS repository with fixed Git arguments before scanning it", async () => {
     const runner: ProjectCommandRunner = {
       run: vi.fn().mockImplementation(async (_executable, args: readonly string[]) => {

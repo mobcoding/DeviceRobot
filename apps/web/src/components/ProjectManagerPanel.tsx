@@ -1,9 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  CheckCircle2,
+  CircleAlert,
+  Clock3,
   Download,
+  FileArchive,
   FolderGit2,
   FolderOpen,
   GitBranch,
+  LoaderCircle,
   PackageCheck,
   Play,
   RefreshCw,
@@ -79,6 +84,38 @@ function artifactName(path: string): string {
   return path.split("/").at(-1) ?? path;
 }
 
+function formatBuildTime(value: string): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(value));
+}
+
+function formatRelativeBuildTime(value: string): string {
+  const elapsedSeconds = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 1_000));
+  if (elapsedSeconds < 60) {
+    return "刚刚";
+  }
+  if (elapsedSeconds < 3_600) {
+    return `${Math.floor(elapsedSeconds / 60)} 分钟前`;
+  }
+  if (elapsedSeconds < 86_400) {
+    return `${Math.floor(elapsedSeconds / 3_600)} 小时前`;
+  }
+  return formatBuildTime(value);
+}
+
+function buildStatusDescription(run: ProjectBuildRun | undefined): string {
+  if (run === undefined) {
+    return "尚未执行构建";
+  }
+  return run.message ?? "构建已结束";
+}
+
 function groupBuildTargets(targets: AndroidBuildTarget[]): ProjectBuildModule[] {
   const modules = new Map<string, ProjectBuildModule>();
   for (const target of targets) {
@@ -138,21 +175,8 @@ function ProjectBuildSection({
       ) ?? module.targets[0];
     return selectedTarget === undefined ? [] : [{ module, target: selectedTarget }];
   });
-  const primaryTarget = selectedModules[0]?.target;
   return (
     <section className="project-build" aria-label={`${project.name} 的构建`}>
-      {primaryTarget !== undefined && (
-        <button
-          className="project-build-launch project-build-primary-launch"
-          type="button"
-          disabled={building || installing || !sdkReady}
-          aria-label={`构建 ${project.name} ${primaryTarget.variant}`}
-          title={`构建 ${primaryTarget.variant}`}
-          onClick={() => onRequestBuild(primaryTarget)}
-        >
-          <Play aria-hidden="true" size={16} strokeWidth={2} fill="currentColor" />
-        </button>
-      )}
       {data !== undefined && !sdkReady && (
         <div className="project-build-runtime">
           <span className="project-sdk-state">Android SDK 需要准备</span>
@@ -187,92 +211,129 @@ function ProjectBuildSection({
           <div className="project-build-targets" aria-label="可构建模块">
             {selectedModules.map(({ module, target: selectedTarget }) => {
               const latestRun = latestRunsByTask.get(selectedTarget.taskName);
+              const completedAt = latestRun?.finishedAt ?? latestRun?.startedAt;
               return (
                 <article key={module.modulePath} className="project-build-target">
-                  <label className="project-build-variant">
-                    <span>构建变体</span>
-                    <select
-                      aria-label={`${module.moduleName} 构建变体`}
-                      value={selectedTarget.taskName}
-                      disabled={building || installing}
-                      onChange={(event) =>
-                        setSelectedTaskByModule((current) => ({
-                          ...current,
-                          [module.modulePath]: event.target.value,
-                        }))
-                      }
+                  <div className="project-build-control-row">
+                    <label className="project-build-variant">
+                      <span>构建变体</span>
+                      <select
+                        aria-label={`${module.moduleName} 构建变体`}
+                        value={selectedTarget.taskName}
+                        disabled={building || installing}
+                        onChange={(event) =>
+                          setSelectedTaskByModule((current) => ({
+                            ...current,
+                            [module.modulePath]: event.target.value,
+                          }))
+                        }
+                      >
+                        {module.targets.map((target) => (
+                          <option key={target.taskName} value={target.taskName}>
+                            {target.variant}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="project-build-launch"
+                      type="button"
+                      disabled={building || installing || !sdkReady}
+                      aria-label={`构建 ${module.moduleName} ${selectedTarget.variant}`}
+                      onClick={() => onRequestBuild(selectedTarget)}
                     >
-                      {module.targets.map((target) => (
-                        <option key={target.taskName} value={target.taskName}>
-                          {target.variant}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                      <Play aria-hidden="true" size={17} strokeWidth={2} fill="currentColor" />
+                      <span>{building ? "构建中" : "构建"}</span>
+                    </button>
+                  </div>
                   <div className={`project-build-status ${latestRun?.status ?? "idle"}`}>
-                    <strong>
-                      {latestRun === undefined ? "尚未构建" : buildStatusLabel(latestRun.status)}
-                    </strong>
-                    <small>{latestRun?.message ?? "暂无构建记录"}</small>
-                    {latestRun !== undefined && latestRun.artifactPaths.length > 0 && (
-                      <div className="project-build-artifacts" aria-label="APK 构建产物">
-                        {latestRun.artifactPaths.map((artifactPath, artifactIndex) => {
-                          const name = artifactName(artifactPath);
-                          const installationMatches =
-                            installedArtifact?.serial === device?.serial &&
-                            installedArtifact?.buildId === latestRun.id &&
-                            installedArtifact.artifactIndex === artifactIndex;
-                          const installationInProgress =
-                            installingArtifact?.buildId === latestRun.id &&
-                            installingArtifact.artifactIndex === artifactIndex;
-                          return (
-                            <div className="project-build-artifact" key={artifactPath}>
-                              <code title={artifactPath}>{name}</code>
-                              <div>
-                                <a
-                                  className="project-artifact-command"
-                                  href={projectBuildArtifactDownloadUrl(
-                                    project.id,
-                                    latestRun.id,
-                                    artifactIndex,
-                                  )}
-                                  download={name}
-                                  aria-label={`导出 ${name}`}
-                                >
-                                  <Download aria-hidden="true" size={13} strokeWidth={1.9} />
-                                  <span>导出 APK</span>
-                                </a>
-                                <button
-                                  className="project-artifact-command"
-                                  type="button"
-                                  aria-label={`安装 ${name} 到当前设备`}
-                                  disabled={
-                                    device === undefined || installingArtifact !== undefined
-                                  }
-                                  title={
-                                    device === undefined
-                                      ? "请先在顶部选择可用设备"
-                                      : "安装到当前设备"
-                                  }
-                                  onClick={() => onInstallArtifact(latestRun, artifactIndex)}
-                                >
-                                  <PackageCheck aria-hidden="true" size={13} strokeWidth={1.9} />
-                                  <span>
-                                    {installationInProgress ? "正在安装" : "安装到当前设备"}
-                                  </span>
-                                </button>
-                              </div>
-                              {installationMatches && (
-                                <small className="project-artifact-installed" role="status">
-                                  已安装 {installedArtifact.packageName}
-                                </small>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
+                    <div className="project-build-status-main">
+                      {latestRun?.status === "succeeded" ? (
+                        <CheckCircle2 aria-hidden="true" size={22} strokeWidth={2} />
+                      ) : latestRun?.status === "running" ? (
+                        <LoaderCircle aria-hidden="true" size={22} strokeWidth={2} />
+                      ) : (
+                        <CircleAlert aria-hidden="true" size={22} strokeWidth={2} />
+                      )}
+                      <strong>
+                        {latestRun === undefined ? "尚未构建" : buildStatusLabel(latestRun.status)}
+                      </strong>
+                      <span>
+                        {latestRun !== undefined && latestRun.artifactPaths.length > 0
+                          ? `发现 ${latestRun.artifactPaths.length} 个 APK 输出`
+                          : buildStatusDescription(latestRun)}
+                      </span>
+                    </div>
+                    {completedAt !== undefined && (
+                      <time title={formatBuildTime(completedAt)}>
+                        <Clock3 aria-hidden="true" size={16} strokeWidth={1.9} />
+                        {formatRelativeBuildTime(completedAt)}
+                      </time>
                     )}
                   </div>
+                  {latestRun !== undefined && latestRun.artifactPaths.length > 0 && (
+                    <div className="project-build-artifacts" aria-label="APK 构建产物">
+                      <div className="project-build-artifact-headings" aria-hidden="true">
+                        <span>文件名</span>
+                        <span>构建时间</span>
+                        <span>操作</span>
+                      </div>
+                      {latestRun.artifactPaths.map((artifactPath, artifactIndex) => {
+                        const name = artifactName(artifactPath);
+                        const installationMatches =
+                          installedArtifact?.serial === device?.serial &&
+                          installedArtifact?.buildId === latestRun.id &&
+                          installedArtifact.artifactIndex === artifactIndex;
+                        const installationInProgress =
+                          installingArtifact?.buildId === latestRun.id &&
+                          installingArtifact.artifactIndex === artifactIndex;
+                        return (
+                          <div className="project-build-artifact" key={artifactPath}>
+                            <div className="project-build-artifact-file">
+                              <FileArchive aria-hidden="true" size={21} strokeWidth={1.8} />
+                              <code title={artifactPath}>{name}</code>
+                            </div>
+                            <time className="project-build-artifact-time">
+                              {completedAt === undefined ? "-" : formatBuildTime(completedAt)}
+                            </time>
+                            <div className="project-build-artifact-actions">
+                              <a
+                                className="project-artifact-command export"
+                                href={projectBuildArtifactDownloadUrl(
+                                  project.id,
+                                  latestRun.id,
+                                  artifactIndex,
+                                )}
+                                download={name}
+                                aria-label={`导出 ${name}`}
+                              >
+                                <Download aria-hidden="true" size={15} strokeWidth={1.9} />
+                                <span>导出</span>
+                              </a>
+                              <button
+                                className="project-artifact-command"
+                                type="button"
+                                aria-label={`安装 ${name} 到当前设备`}
+                                disabled={device === undefined || installingArtifact !== undefined}
+                                title={
+                                  device === undefined ? "请先在顶部选择可用设备" : "安装到当前设备"
+                                }
+                                onClick={() => onInstallArtifact(latestRun, artifactIndex)}
+                              >
+                                <PackageCheck aria-hidden="true" size={15} strokeWidth={1.9} />
+                                <span>{installationInProgress ? "安装中" : "安装"}</span>
+                              </button>
+                            </div>
+                            {installationMatches && (
+                              <small className="project-artifact-installed" role="status">
+                                已安装 {installedArtifact.packageName}
+                              </small>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </article>
               );
             })}

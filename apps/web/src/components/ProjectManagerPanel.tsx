@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
+  ChevronDown,
   CircleAlert,
   Clock3,
   Download,
@@ -217,23 +218,26 @@ function ProjectBuildSection({
                   <div className="project-build-control-row">
                     <label className="project-build-variant">
                       <span>构建变体</span>
-                      <select
-                        aria-label={`${module.moduleName} 构建变体`}
-                        value={selectedTarget.taskName}
-                        disabled={building || installing}
-                        onChange={(event) =>
-                          setSelectedTaskByModule((current) => ({
-                            ...current,
-                            [module.modulePath]: event.target.value,
-                          }))
-                        }
-                      >
-                        {module.targets.map((target) => (
-                          <option key={target.taskName} value={target.taskName}>
-                            {target.variant}
-                          </option>
-                        ))}
-                      </select>
+                      <span className="project-build-variant-select">
+                        <select
+                          aria-label={`${module.moduleName} 构建变体`}
+                          value={selectedTarget.taskName}
+                          disabled={building || installing}
+                          onChange={(event) =>
+                            setSelectedTaskByModule((current) => ({
+                              ...current,
+                              [module.modulePath]: event.target.value,
+                            }))
+                          }
+                        >
+                          {module.targets.map((target) => (
+                            <option key={target.taskName} value={target.taskName}>
+                              {target.variant}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown aria-hidden="true" size={18} strokeWidth={2.2} />
+                      </span>
                     </label>
                     <button
                       className="project-build-launch"

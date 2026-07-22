@@ -1053,15 +1053,32 @@ summary:focus-visible {
   font-weight: 700;
 }
 
+.project-build-variant-select {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
 .project-build-variant select {
   width: 100%;
   min-height: 52px;
-  padding: 0 38px 0 12px;
+  padding: 0 46px 0 12px;
   border: 1px solid #347b68;
   border-radius: 6px;
   color: #f0f4f5;
   background: #11181c;
   font-size: 16px;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.project-build-variant-select > svg {
+  position: absolute;
+  top: 50%;
+  right: 17px;
+  pointer-events: none;
+  color: #c4d0d4;
+  transform: translateY(-50%);
 }
 
 .project-build-status {

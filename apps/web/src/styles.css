@@ -868,6 +868,7 @@ summary:focus-visible {
 }
 
 .project-item {
+  position: relative;
   overflow: hidden;
   border: 1px solid #303030;
   border-radius: 6px;
@@ -880,7 +881,7 @@ summary:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 0 14px;
+  padding: 0 60px 0 14px;
   background: #1c1c1c;
 }
 
@@ -996,66 +997,10 @@ summary:focus-visible {
 
 .project-build-target {
   display: grid;
-  min-height: 194px;
+  min-height: 0;
   align-content: start;
   gap: 12px;
   min-width: 0;
-  padding: 14px;
-  border: 1px solid #3a3d42;
-  border-radius: 8px;
-  background: #202124;
-}
-
-.project-build-target > header {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.project-build-target-heading {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 10px;
-}
-
-.project-build-target-heading > span:last-child {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-
-.project-build-target-heading strong {
-  overflow: hidden;
-  color: #f0f3f4;
-  font-size: 15px;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-build-target-heading small {
-  overflow: hidden;
-  color: #919a9e;
-  font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 10px;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-build-module-icon {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  flex: 0 0 34px;
-  place-items: center;
-  border: 1px solid #46555a;
-  border-radius: 7px;
-  color: #9ad3d6;
-  background: #182b2d;
 }
 
 .project-build-launch {
@@ -1069,6 +1014,13 @@ summary:focus-visible {
   border-radius: 6px;
   color: #fff;
   background: #0867d7;
+}
+
+.project-build-primary-launch {
+  position: absolute;
+  z-index: 1;
+  top: 9px;
+  right: 14px;
 }
 
 .project-build-launch:hover:not(:disabled) {

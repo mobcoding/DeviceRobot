@@ -22,6 +22,7 @@ import {
 import { AndroidSdkService, AndroidSdkServiceError } from "../android/android-sdk-service.js";
 import type { ProjectBuildStore } from "./project-build-store.js";
 import type { ProjectStore } from "./project-store.js";
+import { scanAndroidProject } from "./project-service.js";
 import {
   LocalProjectTemporarySigningService,
   ProjectTemporarySigningError,
@@ -305,7 +306,7 @@ export class LocalProjectBuildService implements ProjectBuildService {
   }
 
   public async listTargets(projectId: string): Promise<AndroidBuildTargetListResponse> {
-    const project = this.#requireProject(projectId);
+    const project = await this.#resolveProjectForBuild(projectId);
     const wrapper = findWrapper(project.rootPath);
     return androidBuildTargetListResponseSchema.parse({
       projectId,
@@ -393,7 +394,7 @@ export class LocalProjectBuildService implements ProjectBuildService {
     projectId: string,
     request: StartProjectBuildRequest,
   ): Promise<ProjectBuildRun> {
-    const project = this.#requireProject(projectId);
+    const project = await this.#resolveProjectForBuild(projectId);
     if (this.#buildStore.findRunningByProject(projectId) !== undefined) {
       throw new ProjectBuildError("该项目已有构建正在执行。", 409);
     }
@@ -522,6 +523,22 @@ export class LocalProjectBuildService implements ProjectBuildService {
       throw new ProjectBuildError("项目目录已不存在或无法访问。", 422);
     }
     return project;
+  }
+
+  async #resolveProjectForBuild(projectId: string): Promise<AndroidProject> {
+    const project = this.#requireProject(projectId);
+    if (project.modules.every((module) => module.moduleType !== undefined)) {
+      return project;
+    }
+
+    const scan = await scanAndroidProject(project.rootPath);
+    const refreshed: AndroidProject = {
+      ...project,
+      ...scan,
+      updatedAt: new Date().toISOString(),
+    };
+    this.#projectStore.updateSourceIndex(refreshed);
+    return refreshed;
   }
 
   async #complete(active: ActiveBuild, result: ProjectBuildProcessResult): Promise<void> {

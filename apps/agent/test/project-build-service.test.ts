@@ -18,7 +18,7 @@ import type { ProjectStore } from "../src/projects/project-store.js";
 const temporaryDirectories: string[] = [];
 
 class InMemoryProjectStore implements ProjectStore {
-  public constructor(private readonly project: AndroidProject) {}
+  public constructor(private project: AndroidProject) {}
 
   public list(): AndroidProject[] {
     return [this.project];
@@ -36,7 +36,9 @@ class InMemoryProjectStore implements ProjectStore {
 
   public updateName(): void {}
 
-  public updateSourceIndex(): void {}
+  public updateSourceIndex(project: AndroidProject): void {
+    this.project = project;
+  }
 }
 
 class InMemoryProjectBuildStore implements ProjectBuildStore {
@@ -154,6 +156,43 @@ afterEach(() => {
 });
 
 describe("Android project build service", () => {
+  it("refreshes legacy module metadata before listing APK targets", async () => {
+    const root = mkdtempSync(join(tmpdir(), "device-robot-build-"));
+    temporaryDirectories.push(root);
+    mkdirSync(join(root, "app"), { recursive: true });
+    writeFileSync(join(root, "settings.gradle.kts"), 'include(":app")');
+    writeFileSync(join(root, "build.gradle.kts"), "plugins { }");
+    writeFileSync(join(root, "gradlew.bat"), "@echo off");
+    writeFileSync(
+      join(root, "app", "build.gradle.kts"),
+      [
+        'plugins { id("com.android.application") }',
+        "android { buildTypes { debug { } release { } } }",
+      ].join("\n"),
+    );
+    const legacyProject = createProject(root);
+    legacyProject.modules = legacyProject.modules.map((module) => {
+      const legacyModule = { ...module };
+      delete legacyModule.moduleType;
+      return legacyModule;
+    });
+    const store = new InMemoryProjectStore(legacyProject);
+    const service = new LocalProjectBuildService({
+      paths: resolveAgentPaths(join(root, "agent-data")),
+      projectStore: store,
+      buildStore: new InMemoryProjectBuildStore(),
+    });
+
+    const targets = await service.listTargets(legacyProject.id);
+
+    expect(targets.targets).toEqual(
+      expect.arrayContaining([expect.objectContaining({ taskName: ":app:assembleDebug" })]),
+    );
+    expect(store.findById(legacyProject.id)?.modules).toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: "app", moduleType: "application" })]),
+    );
+  });
+
   it("discovers supported variants and runs only the fixed Gradle Wrapper task after approval", async () => {
     const root = mkdtempSync(join(tmpdir(), "device-robot-build-"));
     temporaryDirectories.push(root);

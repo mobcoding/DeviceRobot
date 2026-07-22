@@ -19,18 +19,22 @@ import type { ProjectStore } from "../src/projects/project-store.js";
 const temporaryDirectories: string[] = [];
 
 class InMemoryProjectStore implements ProjectStore {
-  public constructor(private project: AndroidProject) {}
+  readonly #projects: AndroidProject[];
+
+  public constructor(projects: AndroidProject | AndroidProject[]) {
+    this.#projects = Array.isArray(projects) ? projects : [projects];
+  }
 
   public list(): AndroidProject[] {
-    return [this.project];
+    return this.#projects;
   }
 
   public findById(id: string): AndroidProject | undefined {
-    return id === this.project.id ? this.project : undefined;
+    return this.#projects.find((project) => project.id === id);
   }
 
   public findByRootPath(rootPath: string): AndroidProject | undefined {
-    return rootPath === this.project.rootPath ? this.project : undefined;
+    return this.#projects.find((project) => project.rootPath === rootPath);
   }
 
   public create(): void {}
@@ -38,7 +42,10 @@ class InMemoryProjectStore implements ProjectStore {
   public updateName(): void {}
 
   public updateSourceIndex(project: AndroidProject): void {
-    this.project = project;
+    const index = this.#projects.findIndex((candidate) => candidate.id === project.id);
+    if (index >= 0) {
+      this.#projects[index] = project;
+    }
   }
 }
 
@@ -47,7 +54,7 @@ class InMemoryProjectBuildStore implements ProjectBuildStore {
 
   public recoverInterruptedRuns(finishedAt: string): void {
     for (const [index, run] of this.runs.entries()) {
-      if (run.status === "running") {
+      if (run.status === "queued" || run.status === "running") {
         this.runs[index] = {
           ...run,
           status: "cancelled",
@@ -62,8 +69,10 @@ class InMemoryProjectBuildStore implements ProjectBuildStore {
     return this.runs.filter((run) => run.projectId === projectId);
   }
 
-  public findRunningByProject(projectId: string): ProjectBuildRun | undefined {
-    return this.runs.find((run) => run.projectId === projectId && run.status === "running");
+  public findPendingByProject(projectId: string): ProjectBuildRun | undefined {
+    return this.runs.find(
+      (run) => run.projectId === projectId && (run.status === "queued" || run.status === "running"),
+    );
   }
 
   public create(run: ProjectBuildRun): void {
@@ -85,7 +94,7 @@ class ControlledBuildRunner implements ProjectBuildProcessRunner {
     cwd: string;
     environment: NodeJS.ProcessEnv;
   }> = [];
-  #resolve: ((result: ProjectBuildProcessResult) => void) | undefined;
+  readonly #resolvers: Array<(result: ProjectBuildProcessResult) => void> = [];
 
   public start(options: {
     executable: string;
@@ -100,18 +109,37 @@ class ControlledBuildRunner implements ProjectBuildProcessRunner {
     const completed = new Promise<ProjectBuildProcessResult>((resolve) => {
       resolveCompleted = resolve;
     });
-    this.#resolve = resolveCompleted!;
-    return { completed, stop: async () => this.complete({ exitCode: 1, errorMessage: "Stopped" }) };
+    const resolve = resolveCompleted!;
+    this.#resolvers.push(resolve);
+    return {
+      completed,
+      stop: async () => this.#completeResolver(resolve, { exitCode: 1, errorMessage: "Stopped" }),
+    };
   }
 
   public complete(result: ProjectBuildProcessResult): void {
-    this.#resolve?.(result);
+    const resolve = this.#resolvers.shift();
+    resolve?.(result);
+  }
+
+  #completeResolver(
+    resolve: (result: ProjectBuildProcessResult) => void,
+    result: ProjectBuildProcessResult,
+  ): void {
+    const index = this.#resolvers.indexOf(resolve);
+    if (index >= 0) {
+      this.#resolvers.splice(index, 1);
+      resolve(result);
+    }
   }
 }
 
-function createProject(rootPath: string): AndroidProject {
+function createProject(
+  rootPath: string,
+  id = "123e4567-e89b-12d3-a456-426614174000",
+): AndroidProject {
   return {
-    id: "123e4567-e89b-12d3-a456-426614174000",
+    id,
     name: "Example",
     source: "local",
     rootPath,
@@ -266,17 +294,19 @@ describe("Android project build service", () => {
       variant: "freeDebug",
       approved: true,
     });
-    expect(running.status).toBe("running");
-    expect(runner.starts).toEqual([
-      expect.objectContaining({
-        executable: join(root, "gradlew.bat"),
-        args: ["--no-daemon", "--console=plain", ":app:assembleFreeDebug"],
-        cwd: root,
-        environment: expect.objectContaining({
-          GRADLE_USER_HOME: join(root, "agent-data", "AIMobileTester", "gradle"),
+    expect(running.status).toBe("queued");
+    await vi.waitFor(() =>
+      expect(runner.starts).toEqual([
+        expect.objectContaining({
+          executable: join(root, "gradlew.bat"),
+          args: ["--no-daemon", "--console=plain", ":app:assembleFreeDebug"],
+          cwd: root,
+          environment: expect.objectContaining({
+            GRADLE_USER_HOME: join(root, "agent-data", "AIMobileTester", "gradle"),
+          }),
         }),
-      }),
-    ]);
+      ]),
+    );
     await expect(
       service.start(project.id, { modulePath: "app", variant: "debug", approved: true }),
     ).rejects.toBeInstanceOf(ProjectBuildError);
@@ -374,11 +404,109 @@ describe("Android project build service", () => {
       variant: "debug",
       approved: true,
     });
-    expect(running.status).toBe("running");
+    expect(running.status).toBe("queued");
+    await vi.waitFor(() => expect(runner.starts).toHaveLength(1));
     runner.complete({ exitCode: 1 });
     await vi.waitFor(async () => {
       const runs = await service.listRuns(project.id);
       expect(runs.runs[0]).toMatchObject({ id: running.id, status: "failed", exitCode: 1 });
+    });
+  });
+
+  it("runs at most two builds globally and starts the next queued build after a slot opens", async () => {
+    const root = mkdtempSync(join(tmpdir(), "device-robot-build-"));
+    temporaryDirectories.push(root);
+    const projectRoots = ["first", "second", "third"].map((name) => join(root, name));
+    const projects = projectRoots.map((projectRoot, index) => {
+      mkdirSync(join(projectRoot, "app"), { recursive: true });
+      writeFileSync(join(projectRoot, "gradlew.bat"), "@echo off");
+      return createProject(
+        projectRoot,
+        `123e4567-e89b-12d3-a456-42661417400${index + 1}`,
+      );
+    });
+    const paths = resolveAgentPaths(join(root, "agent-data"));
+    prepareManagedAndroidSdk(paths);
+    const store = new InMemoryProjectBuildStore();
+    const runner = new ControlledBuildRunner();
+    const service = new LocalProjectBuildService({
+      paths,
+      projectStore: new InMemoryProjectStore(projects),
+      buildStore: store,
+      runner,
+    });
+
+    const runs = await Promise.all(
+      projects.map(async (project) =>
+        await service.start(project.id, { modulePath: "app", variant: "debug", approved: true }),
+      ),
+    );
+
+    expect(runs.map((run) => run.status)).toEqual(["queued", "queued", "queued"]);
+    await vi.waitFor(() => expect(runner.starts).toHaveLength(2));
+    expect(store.listByProject(projects[2]!.id)[0]).toMatchObject({
+      id: runs[2]!.id,
+      status: "queued",
+    });
+
+    runner.complete({ exitCode: 0 });
+    await vi.waitFor(() => expect(runner.starts).toHaveLength(3));
+    await vi.waitFor(async () => {
+      const queuedProjectRuns = await service.listRuns(projects[2]!.id);
+      expect(queuedProjectRuns.runs[0]).toMatchObject({ id: runs[2]!.id, status: "running" });
+    });
+
+    runner.complete({ exitCode: 0 });
+    runner.complete({ exitCode: 0 });
+    await vi.waitFor(async () => {
+      const completedRuns = await Promise.all(
+        projects.map(async (project) => await service.listRuns(project.id)),
+      );
+      expect(completedRuns.flatMap((response) => response.runs)).toEqual(
+        expect.arrayContaining(runs.map((run) => expect.objectContaining({ id: run.id, status: "succeeded" }))),
+      );
+    });
+  });
+
+  it("cancels queued builds when the Agent stops", async () => {
+    const root = mkdtempSync(join(tmpdir(), "device-robot-build-"));
+    temporaryDirectories.push(root);
+    const projectRoots = ["first", "second", "third"].map((name) => join(root, name));
+    const projects = projectRoots.map((projectRoot, index) => {
+      mkdirSync(join(projectRoot, "app"), { recursive: true });
+      writeFileSync(join(projectRoot, "gradlew.bat"), "@echo off");
+      return createProject(
+        projectRoot,
+        `223e4567-e89b-12d3-a456-42661417400${index + 1}`,
+      );
+    });
+    const paths = resolveAgentPaths(join(root, "agent-data"));
+    prepareManagedAndroidSdk(paths);
+    const store = new InMemoryProjectBuildStore();
+    const runner = new ControlledBuildRunner();
+    const service = new LocalProjectBuildService({
+      paths,
+      projectStore: new InMemoryProjectStore(projects),
+      buildStore: store,
+      runner,
+    });
+    const runs = await Promise.all(
+      projects.map(async (project) =>
+        await service.start(project.id, { modulePath: "app", variant: "debug", approved: true }),
+      ),
+    );
+
+    await vi.waitFor(() => expect(runner.starts).toHaveLength(2));
+    await service.dispose();
+
+    expect(store.runs).toEqual(
+      expect.arrayContaining(
+        runs.map((run) => expect.objectContaining({ id: run.id, status: "cancelled" })),
+      ),
+    );
+    expect(store.listByProject(projects[2]!.id)[0]).toMatchObject({
+      id: runs[2]!.id,
+      message: "Agent 停止前的排队构建已取消。",
     });
   });
 });

@@ -82,7 +82,7 @@ export const androidBuildTargetListResponseSchema = z.object({
   targets: z.array(androidBuildTargetSchema).max(500),
 });
 
-export const projectBuildRunStatusSchema = z.enum(["running", "succeeded", "failed", "cancelled"]);
+export const projectBuildRunStatusSchema = z.enum(["queued", "running", "succeeded", "failed", "cancelled"]);
 
 export const projectBuildRunSchema = z.object({
   id: z.uuid(),

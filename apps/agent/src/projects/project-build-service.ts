@@ -33,6 +33,7 @@ import {
 const execFileAsync = promisify(execFile);
 const MAX_BUILD_ARTIFACTS = 100;
 const MAX_ARTIFACT_DEPTH = 6;
+const MAX_CONCURRENT_BUILDS = 2;
 
 export class ProjectBuildError extends Error {
   public constructor(
@@ -101,6 +102,12 @@ type ActiveBuild = {
   temporarySigning?: TemporarySigningMaterial;
   cancelled: boolean;
   completion: Promise<void>;
+};
+
+type QueuedBuild = {
+  projectId: string;
+  request: StartProjectBuildRequest;
+  run: ProjectBuildRun;
 };
 
 function errorMessage(error: unknown): string {
@@ -488,6 +495,9 @@ export class LocalProjectBuildService implements ProjectBuildService {
   readonly #sdkService: AndroidSdkService;
   readonly #temporarySigningService: ProjectTemporarySigningService;
   readonly #activeRuns = new Map<string, ActiveBuild>();
+  readonly #queuedBuilds: QueuedBuild[] = [];
+  #launchingBuilds = 0;
+  #disposed = false;
 
   public constructor(options: LocalProjectBuildServiceOptions) {
     this.#paths = options.paths;
@@ -589,10 +599,17 @@ export class LocalProjectBuildService implements ProjectBuildService {
   public async start(
     projectId: string,
     request: StartProjectBuildRequest,
+    queuedRun?: ProjectBuildRun,
   ): Promise<ProjectBuildRun> {
+    if (this.#disposed) {
+      if (queuedRun !== undefined) {
+        return this.#cancelQueuedRun(queuedRun, "Agent 停止前的排队构建已取消。");
+      }
+      throw new ProjectBuildError("Agent 正在停止，无法创建构建任务。", 503);
+    }
     const project = await this.#resolveProjectForBuild(projectId);
-    if (this.#buildStore.findRunningByProject(projectId) !== undefined) {
-      throw new ProjectBuildError("该项目已有构建正在执行。", 409);
+    if (queuedRun === undefined && this.#buildStore.findPendingByProject(projectId) !== undefined) {
+      throw new ProjectBuildError("该项目已有构建正在运行或排队。", 409);
     }
     const target = discoverAndroidBuildTargets(project).find(
       (candidate) =>
@@ -605,12 +622,34 @@ export class LocalProjectBuildService implements ProjectBuildService {
     if (wrapper === undefined) {
       throw new ProjectBuildError("未找到 Gradle Wrapper，已拒绝执行构建。", 422);
     }
+    if (queuedRun === undefined) {
+      const id = randomUUID();
+      const run = projectBuildRunSchema.parse({
+        id,
+        projectId,
+        modulePath: target.modulePath,
+        variant: target.variant,
+        taskName: target.taskName,
+        status: "queued",
+        logPath: join(this.#paths.logs, "builds", `${id}.log`),
+        artifactPaths: [],
+        message: "构建任务正在排队。",
+        startedAt: new Date().toISOString(),
+      });
+      this.#buildStore.create(run);
+      this.#queuedBuilds.push({ projectId, request, run });
+      this.#drainBuildQueue();
+      return run;
+    }
     let androidSdk: AndroidSdkInfo;
     try {
       androidSdk = await this.#sdkService.install(project.rootPath, project.modules);
     } catch (error) {
       const message = error instanceof AndroidSdkServiceError ? error.message : errorMessage(error);
       throw new ProjectBuildError(`自动准备 Android SDK 失败：${message}`, 503);
+    }
+    if (this.#disposed) {
+      return this.#cancelQueuedRun(queuedRun, "Agent 停止前的排队构建已取消。");
     }
     if (!androidSdk.available || androidSdk.path === undefined || androidSdk.missingPackages.length > 0) {
       const missing = androidSdk.missingPackages.join("、");
@@ -626,27 +665,18 @@ export class LocalProjectBuildService implements ProjectBuildService {
 
     const buildLogDirectory = join(this.#paths.logs, "builds");
     await mkdir(buildLogDirectory, { recursive: true });
-    const id = randomUUID();
-    const startedAt = new Date().toISOString();
-    const logPath = join(buildLogDirectory, `${id}.log`);
     const run = projectBuildRunSchema.parse({
-      id,
-      projectId,
-      modulePath: target.modulePath,
-      variant: target.variant,
+      ...queuedRun,
       taskName: target.taskName,
       status: "running",
-      logPath,
-      artifactPaths: [],
       message: "Gradle 构建正在执行。",
-      startedAt,
     });
-    this.#buildStore.create(run);
+    this.#buildStore.finish(run);
 
-    const logStream = createWriteStream(logPath, { flags: "a", encoding: "utf8" });
+    const logStream = createWriteStream(run.logPath, { flags: "a", encoding: "utf8" });
     logStream.on("error", () => {});
     logStream.write(
-      `# DeviceRobot Gradle build\n# Started: ${startedAt}\n# Task: ${target.taskName}\n\n`,
+      `# DeviceRobot Gradle build\n# Started: ${run.startedAt}\n# Task: ${target.taskName}\n\n`,
     );
     let buildProcess: ProjectBuildProcess;
     let temporarySigning: TemporarySigningMaterial | undefined;
@@ -719,12 +749,18 @@ export class LocalProjectBuildService implements ProjectBuildService {
         }
       }
       await this.#complete(active, result);
+      this.#drainBuildQueue();
     });
     this.#activeRuns.set(run.id, active);
     return run;
   }
 
   public async dispose(): Promise<void> {
+    this.#disposed = true;
+    const queuedBuilds = this.#queuedBuilds.splice(0);
+    for (const queued of queuedBuilds) {
+      this.#cancelQueuedRun(queued.run, "Agent 停止前的排队构建已取消。");
+    }
     const activeRuns = [...this.#activeRuns.values()];
     for (const active of activeRuns) {
       active.cancelled = true;
@@ -735,6 +771,49 @@ export class LocalProjectBuildService implements ProjectBuildService {
         await active.completion;
       }),
     );
+  }
+
+  #drainBuildQueue(): void {
+    if (this.#disposed) {
+      return;
+    }
+    while (
+      this.#queuedBuilds.length > 0 &&
+      this.#activeRuns.size + this.#launchingBuilds < MAX_CONCURRENT_BUILDS
+    ) {
+      const queued = this.#queuedBuilds.shift();
+      if (queued === undefined) {
+        return;
+      }
+      this.#launchingBuilds += 1;
+      void this.start(queued.projectId, queued.request, queued.run)
+        .catch((error) => {
+          this.#buildStore.finish(
+            projectBuildRunSchema.parse({
+              ...queued.run,
+              status: "failed",
+              message: `无法启动排队构建：${errorMessage(error)}`,
+              exitCode: null,
+              finishedAt: new Date().toISOString(),
+            }),
+          );
+        })
+        .finally(() => {
+          this.#launchingBuilds -= 1;
+          this.#drainBuildQueue();
+        });
+    }
+  }
+
+  #cancelQueuedRun(run: ProjectBuildRun, message: string): ProjectBuildRun {
+    const cancelledRun = projectBuildRunSchema.parse({
+      ...run,
+      status: "cancelled",
+      message,
+      finishedAt: new Date().toISOString(),
+    });
+    this.#buildStore.finish(cancelledRun);
+    return cancelledRun;
   }
 
   #requireProject(projectId: string): AndroidProject {

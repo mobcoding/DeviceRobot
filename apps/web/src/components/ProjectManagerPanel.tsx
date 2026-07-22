@@ -70,6 +70,8 @@ function sourceLabel(source: ProjectSource): string {
 
 function buildStatusLabel(status: ProjectBuildRun["status"]): string {
   switch (status) {
+    case "queued":
+      return "排队中";
     case "running":
       return "构建中";
     case "succeeded":
@@ -254,7 +256,7 @@ function ProjectBuildSection({
                     <div className="project-build-status-main">
                       {latestRun?.status === "succeeded" ? (
                         <CheckCircle2 aria-hidden="true" size={22} strokeWidth={2} />
-                      ) : latestRun?.status === "running" ? (
+                      ) : latestRun?.status === "queued" || latestRun?.status === "running" ? (
                         <LoaderCircle aria-hidden="true" size={22} strokeWidth={2} />
                       ) : (
                         <CircleAlert aria-hidden="true" size={22} strokeWidth={2} />
@@ -398,6 +400,12 @@ export function ProjectManagerPanel({
           }),
         ),
       ),
+    refetchInterval: (query) =>
+      Object.values(query.state.data ?? {}).some((project) =>
+        project.runs.some((run) => run.status === "queued" || run.status === "running"),
+      )
+        ? 2_000
+        : false,
   });
   const buildMutation = useMutation({
     mutationFn: async (request: PendingBuild) =>

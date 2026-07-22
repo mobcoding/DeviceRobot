@@ -4,7 +4,7 @@ import { projectBuildRunSchema, type ProjectBuildRun } from "@device-robot/contr
 export interface ProjectBuildStore {
   recoverInterruptedRuns(finishedAt: string): void;
   listByProject(projectId: string): ProjectBuildRun[];
-  findRunningByProject(projectId: string): ProjectBuildRun | undefined;
+  findPendingByProject(projectId: string): ProjectBuildRun | undefined;
   create(run: ProjectBuildRun): void;
   finish(run: ProjectBuildRun): void;
 }
@@ -54,7 +54,7 @@ export class SqliteProjectBuildStore implements ProjectBuildStore {
         `
           UPDATE project_build_runs
           SET status = 'cancelled', message = 'Agent 重启前的构建已取消。', finished_at = ?
-          WHERE status = 'running'
+          WHERE status IN ('queued', 'running')
         `,
       )
       .run(finishedAt);
@@ -70,10 +70,10 @@ export class SqliteProjectBuildStore implements ProjectBuildStore {
     ).map(toProjectBuildRun);
   }
 
-  public findRunningByProject(projectId: string): ProjectBuildRun | undefined {
+  public findPendingByProject(projectId: string): ProjectBuildRun | undefined {
     const row = this.#sqlite
       .prepare(
-        "SELECT * FROM project_build_runs WHERE project_id = ? AND status = 'running' ORDER BY started_at DESC LIMIT 1",
+        "SELECT * FROM project_build_runs WHERE project_id = ? AND status IN ('queued', 'running') ORDER BY started_at DESC LIMIT 1",
       )
       .get(projectId) as ProjectBuildRunRow | undefined;
     return row === undefined ? undefined : toProjectBuildRun(row);

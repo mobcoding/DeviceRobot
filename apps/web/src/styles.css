@@ -1129,6 +1129,7 @@ summary:focus-visible {
   color: #c1ace6;
 }
 
+.project-build-status.queued,
 .project-build-status.running {
   color: #74b6ff;
 }

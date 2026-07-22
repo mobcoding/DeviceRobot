@@ -1056,7 +1056,7 @@ summary:focus-visible {
 .project-build-variant select {
   width: 100%;
   min-height: 52px;
-  padding-inline: 10px;
+  padding: 0 38px 0 12px;
   border: 1px solid #347b68;
   border-radius: 6px;
   color: #f0f4f5;
@@ -1132,12 +1132,13 @@ summary:focus-visible {
 
 .project-build-artifacts {
   display: grid;
+  --project-artifact-time-column: 126px;
   gap: 10px;
 }
 
 .project-build-artifact-headings {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 126px auto;
+  grid-template-columns: minmax(0, 1fr) var(--project-artifact-time-column) auto;
   gap: 12px;
   align-items: center;
   padding: 0 14px;
@@ -1150,9 +1151,13 @@ summary:focus-visible {
   text-align: right;
 }
 
+.project-build-artifact-headings > span:nth-child(2) {
+  justify-self: start;
+}
+
 .project-build-artifact {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 126px auto;
+  grid-template-columns: minmax(0, 1fr) var(--project-artifact-time-column) auto;
   gap: 10px 12px;
   align-items: center;
   min-height: 78px;
@@ -1185,6 +1190,7 @@ summary:focus-visible {
 }
 
 .project-build-artifact-time {
+  justify-self: start;
   color: #97a4aa;
   font-size: 12px;
   white-space: nowrap;

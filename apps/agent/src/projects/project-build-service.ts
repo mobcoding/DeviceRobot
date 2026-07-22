@@ -1,7 +1,7 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream, existsSync, type WriteStream } from "node:fs";
-import { mkdir, open, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, realpath, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { AgentPaths } from "@device-robot/config";
@@ -35,6 +35,7 @@ const MAX_BUILD_ARTIFACTS = 100;
 const MAX_ARTIFACT_DEPTH = 6;
 const MAX_CONCURRENT_BUILDS = 2;
 const MAX_BUILD_FAILURE_MESSAGE_LENGTH = 8_000;
+const MAX_GRADLE_DISTRIBUTION_DOWNLOAD_ATTEMPTS = 8;
 const GENERIC_GRADLE_FAILURE_MESSAGE = "Gradle 构建失败。";
 const ansiEscapeSequence = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "gu");
 
@@ -286,43 +287,88 @@ async function gradleDistributionChecksum(distributionUrl: string): Promise<stri
   return checksum.toLowerCase();
 }
 
-async function downloadGradleDistribution(
+export async function downloadGradleDistribution(
   distributionUrl: string,
   archivePath: string,
   checksum: string,
 ): Promise<boolean> {
   const temporaryPath = `${archivePath}.download`;
-  await rm(temporaryPath, { force: true });
+  if (!existsSync(temporaryPath) && existsSync(archivePath)) {
+    // A failed rename is harmless: a concurrent Gradle process may already own the archive.
+    await rename(archivePath, temporaryPath).catch(() => {});
+  }
+
   try {
-    for (let attempt = 0; attempt < 6; attempt += 1) {
-      const downloaded = existsSync(temporaryPath) ? (await stat(temporaryPath)).size : 0;
-      const response = await fetch(distributionUrl, {
-        signal: AbortSignal.timeout(120_000),
-        ...(downloaded === 0 ? {} : { headers: { Range: `bytes=${downloaded}-` } }),
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      if (downloaded > 0 && response.status !== 206) {
+    for (let attempt = 0; attempt < MAX_GRADLE_DISTRIBUTION_DOWNLOAD_ATTEMPTS; attempt += 1) {
+      try {
+        const downloaded = existsSync(temporaryPath) ? (await stat(temporaryPath)).size : 0;
+        const response = await fetch(distributionUrl, {
+          signal: AbortSignal.timeout(120_000),
+          ...(downloaded === 0 ? {} : { headers: { Range: `bytes=${downloaded}-` } }),
+        });
+        if (!response.ok) {
+          continue;
+        }
+        if (downloaded > 0 && response.status !== 206) {
+          await rm(temporaryPath, { force: true });
+          continue;
+        }
+        if (response.body === null) {
+          continue;
+        }
+        if (!(await appendGradleDistributionResponse(response.body, temporaryPath, downloaded > 0))) {
+          continue;
+        }
+        if ((await sha256(temporaryPath)).toLowerCase() === checksum) {
+          await rm(archivePath, { force: true });
+          await rename(temporaryPath, archivePath);
+          return true;
+        }
         await rm(temporaryPath, { force: true });
-        continue;
-      }
-      const bytes = Buffer.from(await response.arrayBuffer());
-      if (bytes.length === 0) {
-        continue;
-      }
-      await writeFile(temporaryPath, bytes, { flag: downloaded === 0 ? "w" : "a" });
-      if ((await sha256(temporaryPath)).toLowerCase() === checksum) {
-        await rm(archivePath, { force: true });
-        await rename(temporaryPath, archivePath);
-        return true;
+      } catch {
+        // Keep the partially downloaded file and resume it on the next attempt.
       }
     }
     return false;
+  } finally {
+    if (!existsSync(archivePath) && existsSync(temporaryPath)) {
+      await rename(temporaryPath, archivePath).catch(() => {});
+    }
+  }
+}
+
+async function appendGradleDistributionResponse(
+  responseBody: ReadableStream<Uint8Array>,
+  destination: string,
+  append: boolean,
+): Promise<boolean> {
+  const stream = createWriteStream(destination, { flags: append ? "a" : "w" });
+  const reader = responseBody.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (!stream.write(value)) {
+        await new Promise<void>((resolve) => {
+          const settled = (): void => {
+            stream.off("drain", settled);
+            stream.off("error", settled);
+            resolve();
+          };
+          stream.once("drain", settled);
+          stream.once("error", settled);
+        });
+      }
+    }
+    await closeLogStream(stream);
+    return true;
   } catch {
+    await closeLogStream(stream);
     return false;
   } finally {
-    await rm(temporaryPath, { force: true });
+    reader.releaseLock();
   }
 }
 
@@ -363,7 +409,14 @@ async function resumeGradleWrapperDownload(projectRoot: string, gradleHome: stri
       continue;
     }
     const archivePath = join(distributionRoot, entry.name, archiveName);
-    if (existsSync(archivePath) && (await downloadGradleDistribution(distributionUrl, archivePath, checksum))) {
+    const temporaryPath = `${archivePath}.download`;
+    if (!existsSync(archivePath) && existsSync(temporaryPath)) {
+      await rename(temporaryPath, archivePath).catch(() => {});
+    }
+    if (!existsSync(archivePath) || (await hasZipEndRecord(archivePath))) {
+      continue;
+    }
+    if (await downloadGradleDistribution(distributionUrl, archivePath, checksum)) {
       repaired += 1;
     }
   }
@@ -741,6 +794,10 @@ export class LocalProjectBuildService implements ProjectBuildService {
         503,
       );
     }
+    const repairedWrapperArchives = await resumeGradleWrapperDownload(
+      project.rootPath,
+      this.#paths.gradleHome,
+    );
     const purgedWrapperArchives = await purgeCorruptGradleWrapperCache(
       project.rootPath,
       this.#paths.gradleHome,
@@ -777,6 +834,11 @@ export class LocalProjectBuildService implements ProjectBuildService {
         onOutput: (chunk) => logStream.write(chunk),
       });
     try {
+      if (repairedWrapperArchives > 0) {
+        logStream.write(
+          `[DeviceRobot] 已从断点续传修复 ${repairedWrapperArchives} 个 Gradle Wrapper 缓存。\n`,
+        );
+      }
       if (purgedWrapperArchives > 0) {
         logStream.write(
           `[DeviceRobot] 已清理 ${purgedWrapperArchives} 个损坏的 Gradle Wrapper 缓存，将自动重新下载。\n`,

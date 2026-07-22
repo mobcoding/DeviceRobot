@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,7 @@ import type { AndroidProject, ProjectBuildRun } from "@device-robot/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  downloadGradleDistribution,
   extractGradleFailureSummary,
   LocalProjectBuildService,
   ProjectBuildError,
@@ -201,12 +203,50 @@ function prepareManagedAndroidSdk(paths: AgentPaths): void {
 }
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { force: true, recursive: true });
   }
 });
 
 describe("Android project build service", () => {
+  it("resumes an interrupted Gradle distribution download", async () => {
+    const root = mkdtempSync(join(tmpdir(), "device-robot-build-"));
+    temporaryDirectories.push(root);
+    const archivePath = join(root, "gradle-8.14.5-bin.zip");
+    const payload = Buffer.from("complete Gradle distribution");
+    const splitAt = 9;
+    const checksum = createHash("sha256").update(payload).digest("hex");
+    let deliveredInitialChunk = false;
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              if (!deliveredInitialChunk) {
+                deliveredInitialChunk = true;
+                controller.enqueue(payload.subarray(0, splitAt));
+              } else {
+                controller.error(new Error("connection reset"));
+              }
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(payload.subarray(splitAt), { status: 206 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      downloadGradleDistribution("https://example.invalid/gradle.zip", archivePath, checksum),
+    ).resolves.toBe(true);
+
+    expect(readFileSync(archivePath)).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ headers: { Range: `bytes=${splitAt}-` } });
+  });
+
   it("extracts the actionable Gradle failure section", () => {
     expect(extractGradleFailureSummary(gradleFailureOutput)).toBe(
       [

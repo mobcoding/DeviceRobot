@@ -638,7 +638,7 @@ export function ProjectManagerPanel({
               <ProjectBuildSection
                 project={project}
                 data={projectBuildsQuery.data?.[project.id]}
-                loading={projectBuildsQuery.isFetching}
+                loading={projectBuildsQuery.isLoading}
                 building={buildMutation.isPending}
                 installing={installSdkMutation.isPending}
                 device={device}

@@ -1,11 +1,13 @@
 import { z } from "zod";
 
 export const projectSourceSchema = z.enum(["local", "git"]);
+export const androidProjectModuleTypeSchema = z.enum(["application", "library", "unknown"]);
 
 export const androidProjectModuleSchema = z.object({
   name: z.string().min(1),
   path: z.string().min(1),
   buildFile: z.string().min(1),
+  moduleType: androidProjectModuleTypeSchema.optional(),
   manifestPath: z.string().min(1).optional(),
   packageName: z.string().min(1).optional(),
   applicationId: z.string().min(1).optional(),
@@ -132,6 +134,7 @@ export const createProjectRequestSchema = z.discriminatedUnion("source", [
 ]);
 
 export type ProjectSource = z.infer<typeof projectSourceSchema>;
+export type AndroidProjectModuleType = z.infer<typeof androidProjectModuleTypeSchema>;
 export type AndroidProjectModule = z.infer<typeof androidProjectModuleSchema>;
 export type AndroidSourceEvidenceKind = z.infer<typeof androidSourceEvidenceKindSchema>;
 export type AndroidSourceEvidence = z.infer<typeof androidSourceEvidenceSchema>;

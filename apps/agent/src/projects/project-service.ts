@@ -201,6 +201,17 @@ function moduleVariants(content: string | undefined): string[] {
   return [...variants].sort((left, right) => left.localeCompare(right, "en"));
 }
 
+function moduleType(content: string | undefined): "application" | "library" | "unknown" {
+  const source = content ?? "";
+  if (/\bcom\.android\.application\b/u.test(source)) {
+    return "application";
+  }
+  if (/\bcom\.android\.library\b/u.test(source)) {
+    return "library";
+  }
+  return "unknown";
+}
+
 async function discoverModuleDirectories(rootPath: string): Promise<string[]> {
   const modules: string[] = [];
   const visit = async (directory: string, depth: number): Promise<void> => {
@@ -276,6 +287,7 @@ export async function scanAndroidProject(rootPath: string): Promise<{
         name: modulePath === "." ? "根项目" : (modulePath.split("/").at(-1) ?? modulePath),
         path: modulePath,
         buildFile: relativeProjectPath(rootPath, buildFile),
+        moduleType: moduleType(buildContent),
         ...(manifestContent === undefined
           ? {}
           : { manifestPath: relativeProjectPath(rootPath, manifestPath) }),

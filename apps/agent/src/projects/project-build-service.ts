@@ -153,7 +153,7 @@ function taskName(modulePath: string, variant: string): string {
 }
 
 export function discoverAndroidBuildTargets(project: AndroidProject): AndroidBuildTarget[] {
-  return project.modules.flatMap((module) =>
+  return project.modules.filter((module) => module.moduleType !== "library").flatMap((module) =>
     variantsForModule(project, module.path).map((variant) =>
       androidBuildTargetSchema.parse({
         modulePath: module.path,

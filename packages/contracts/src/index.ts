@@ -29,6 +29,7 @@ export {
 } from "./ai.js";
 export {
   androidProjectModuleSchema,
+  androidProjectModuleTypeSchema,
   androidProjectSchema,
   androidBuildTargetListResponseSchema,
   androidBuildTargetSchema,
@@ -48,6 +49,7 @@ export {
   startProjectBuildRequestSchema,
   type AndroidProject,
   type AndroidProjectModule,
+  type AndroidProjectModuleType,
   type AndroidBuildTarget,
   type AndroidBuildTargetListResponse,
   type AndroidSdkInfo,

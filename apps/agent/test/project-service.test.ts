@@ -18,6 +18,7 @@ function createAndroidProject(root: string): void {
   writeFileSync(
     join(root, "app", "build.gradle.kts"),
     [
+      'plugins { id("com.android.application") }',
       "android {",
       '  defaultConfig { applicationId = "com.example.app" }',
       "  buildTypes { debug { } release { } }",
@@ -147,6 +148,7 @@ describe("Android project service", () => {
         expect.objectContaining({
           name: "app",
           path: "app",
+          moduleType: "application",
           packageName: "com.example.app",
           applicationId: "com.example.app",
           variants: ["debug", "release"],

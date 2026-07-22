@@ -1006,16 +1006,16 @@ summary:focus-visible {
 
 .project-build-launch {
   display: inline-flex;
-  min-height: 52px;
+  min-height: 32px;
   align-items: center;
   justify-content: center;
-  gap: 9px;
-  padding: 0 16px;
+  gap: 6px;
+  padding: 0 12px;
   border: 1px solid #147cf0;
   border-radius: 6px;
   color: #fff;
   background: #0872e8;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 800;
 }
 
@@ -1061,13 +1061,13 @@ summary:focus-visible {
 
 .project-build-variant select {
   width: 100%;
-  min-height: 52px;
-  padding: 0 46px 0 12px;
+  min-height: 32px;
+  padding: 0 38px 0 12px;
   border: 1px solid #347b68;
   border-radius: 6px;
   color: #f0f4f5;
   background: #11181c;
-  font-size: 16px;
+  font-size: 14px;
   appearance: none;
   -webkit-appearance: none;
 }
@@ -1075,7 +1075,7 @@ summary:focus-visible {
 .project-build-variant-select > svg {
   position: absolute;
   top: 50%;
-  right: 17px;
+  right: 12px;
   pointer-events: none;
   color: #c4d0d4;
   transform: translateY(-50%);
@@ -1303,7 +1303,7 @@ summary:focus-visible {
 
   .project-build-variant select,
   .project-build-launch {
-    min-height: 44px;
+    min-height: 32px;
     font-size: 14px;
   }
 

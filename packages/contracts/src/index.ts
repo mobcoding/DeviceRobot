@@ -69,6 +69,20 @@ export {
 } from "./projects.js";
 export { appiumRuntimeSchema, type AppiumRuntime } from "./appium.js";
 export {
+  startTestExecutionRequestSchema,
+  testExecutionRunListResponseSchema,
+  testExecutionRunSchema,
+  testExecutionStatusSchema,
+  testStepExecutionSchema,
+  testStepExecutionStatusSchema,
+  type StartTestExecutionRequest,
+  type TestExecutionRun,
+  type TestExecutionRunListResponse,
+  type TestExecutionStatus,
+  type TestStepExecution,
+  type TestStepExecutionStatus,
+} from "./test-execution.js";
+export {
   apkArtifactSchema,
   apkInstallRequestSchema,
   apkInstallResponseSchema,

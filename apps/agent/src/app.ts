@@ -36,6 +36,9 @@ import {
   generateAiPlanRequestSchema,
   installAndroidSdkRequestSchema,
   startProjectBuildRequestSchema,
+  startTestExecutionRequestSchema,
+  testExecutionRunListResponseSchema,
+  testExecutionRunSchema,
 } from "@device-robot/contracts";
 import Fastify, {
   type FastifyInstance,
@@ -93,6 +96,12 @@ import { SqliteProjectBuildStore } from "./projects/project-build-store.js";
 import { AiPlanError, LocalAiPlanService, type AiPlanService } from "./ai/ai-plan-service.js";
 import { SqliteAiConfigurationStore } from "./ai/ai-configuration-store.js";
 import { WindowsDpapiSecretProtector } from "./ai/ai-secret-protector.js";
+import {
+  LocalTestExecutionService,
+  TestExecutionError,
+  type TestExecutionService,
+} from "./test-execution/test-execution-service.js";
+import { SqliteTestExecutionStore } from "./test-execution/test-execution-store.js";
 
 export const AGENT_VERSION = "0.1.0";
 const WEBSOCKET_OPEN = 1;
@@ -114,6 +123,7 @@ export type CreateAgentAppOptions = {
   deviceActionAuditStore?: DeviceActionAuditStore;
   appiumRuntimeService?: AppiumRuntimeService;
   scrcpyStreamService?: ScrcpyStreamService;
+  testExecutionService?: TestExecutionService;
 };
 
 export type AgentApp = {
@@ -131,6 +141,7 @@ export type AgentApp = {
   deviceActionAuditStore: DeviceActionAuditStore;
   appiumRuntimeService: AppiumRuntimeService;
   scrcpyStreamService: ScrcpyStreamService;
+  testExecutionService: TestExecutionService;
 };
 
 function defaultWebRoot(): string {
@@ -187,13 +198,40 @@ function parseBuildId(params: unknown): string {
   const buildId = (params as Record<string, unknown>).buildId;
   if (
     typeof buildId !== "string" ||
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
-      buildId,
-    )
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(buildId)
   ) {
     throw new ProjectBuildError("构建记录编号无效。", 400);
   }
   return buildId;
+}
+
+function parseTestRunId(params: unknown): string {
+  if (typeof params !== "object" || params === null) {
+    throw new TestExecutionError("缺少测试运行编号。", 400);
+  }
+  const runId = (params as Record<string, unknown>).runId;
+  if (
+    typeof runId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(runId)
+  ) {
+    throw new TestExecutionError("测试运行编号无效。", 400);
+  }
+  return runId;
+}
+
+function parseTestStepIndex(params: unknown): number {
+  if (typeof params !== "object" || params === null) {
+    throw new TestExecutionError("缺少测试步骤编号。", 400);
+  }
+  const value = (params as Record<string, unknown>).stepIndex;
+  if (typeof value !== "string" || !/^\d+$/u.test(value)) {
+    throw new TestExecutionError("测试步骤编号无效。", 400);
+  }
+  const stepIndex = Number.parseInt(value, 10);
+  if (!Number.isSafeInteger(stepIndex) || stepIndex > 19) {
+    throw new TestExecutionError("测试步骤编号无效。", 400);
+  }
+  return stepIndex;
 }
 
 function parseBuildArtifactIndex(params: unknown): number {
@@ -358,6 +396,17 @@ function aiPlanErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
   return reply.code(500).send({ error: message });
 }
 
+function testExecutionErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
+  if (error instanceof TestExecutionError) {
+    return reply.code(error.statusCode).send({ error: error.message });
+  }
+  if (error instanceof DeviceControlError) {
+    return reply.code(error.statusCode).send({ error: error.message });
+  }
+  const message = error instanceof Error ? error.message : "测试执行请求失败。";
+  return reply.code(500).send({ error: message });
+}
+
 export async function createAgentApp(options: CreateAgentAppOptions = {}): Promise<AgentApp> {
   const paths = options.paths ?? resolveAgentPaths(options.localAppData);
   ensureAgentDirectories(paths);
@@ -400,6 +449,18 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
   const deviceActionAuditStore =
     options.deviceActionAuditStore ?? new SqliteDeviceActionAuditStore(database.sqlite);
   const appiumRuntimeService = options.appiumRuntimeService ?? new AppiumRuntimeService({ paths });
+  const testExecutionStore = new SqliteTestExecutionStore(database.sqlite);
+  testExecutionStore.recoverInterruptedRuns(new Date().toISOString());
+  const testExecutionService =
+    options.testExecutionService ??
+    new LocalTestExecutionService({
+      paths,
+      store: testExecutionStore,
+      projectStore,
+      deviceService,
+      deviceControlService,
+      appiumRuntimeService,
+    });
   const scrcpyStreamService =
     options.scrcpyStreamService ?? new AdbScrcpyStreamService({ paths, deviceService });
 
@@ -593,6 +654,62 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
       );
     } catch (error) {
       return aiPlanErrorReply(reply, error);
+    }
+  });
+
+  app.get("/api/v1/test-runs", async (_request, reply) => {
+    try {
+      return testExecutionRunListResponseSchema.parse(await testExecutionService.list());
+    } catch (error) {
+      return testExecutionErrorReply(reply, error);
+    }
+  });
+
+  app.get("/api/v1/test-runs/:runId", async (request, reply) => {
+    try {
+      return testExecutionRunSchema.parse(
+        await testExecutionService.find(parseTestRunId(request.params)),
+      );
+    } catch (error) {
+      return testExecutionErrorReply(reply, error);
+    }
+  });
+
+  app.post("/api/v1/test-runs", async (request, reply) => {
+    try {
+      return testExecutionRunSchema.parse(
+        await testExecutionService.start(startTestExecutionRequestSchema.parse(request.body)),
+      );
+    } catch (error) {
+      return testExecutionErrorReply(reply, error);
+    }
+  });
+
+  app.post("/api/v1/test-runs/:runId/cancel", async (request, reply) => {
+    try {
+      return testExecutionRunSchema.parse(
+        await testExecutionService.cancel(parseTestRunId(request.params)),
+      );
+    } catch (error) {
+      return testExecutionErrorReply(reply, error);
+    }
+  });
+
+  app.get("/api/v1/test-runs/:runId/steps/:stepIndex/screenshot", async (request, reply) => {
+    try {
+      const path = await testExecutionService.screenshotPath(
+        parseTestRunId(request.params),
+        parseTestStepIndex(request.params),
+      );
+      if (!existsSync(path)) {
+        throw new TestExecutionError("测试步骤截图已不存在。", 404);
+      }
+      return reply
+        .header("Cache-Control", "no-store")
+        .type("image/png")
+        .send(createReadStream(path));
+    } catch (error) {
+      return testExecutionErrorReply(reply, error);
     }
   });
 
@@ -967,6 +1084,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
   }
 
   app.addHook("onClose", async () => {
+    await testExecutionService.dispose();
     await scrcpyStreamService.dispose();
     await appiumRuntimeService.dispose();
     await projectBuildService.dispose();
@@ -988,5 +1106,6 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     deviceActionAuditStore,
     appiumRuntimeService,
     scrcpyStreamService,
+    testExecutionService,
   };
 }

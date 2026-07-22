@@ -68,3 +68,27 @@ export const aiModelConfigurations = sqliteTable("ai_model_configurations", {
   protectedApiKey: text("protected_api_key").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
+
+export const testExecutionRuns = sqliteTable("test_execution_runs", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  planId: text("plan_id").notNull(),
+  name: text("name").notNull(),
+  deviceSerial: text("device_serial").notNull(),
+  appId: text("app_id").notNull(),
+  status: text("status").notNull(),
+  message: text("message"),
+  startedAt: text("started_at").notNull(),
+  finishedAt: text("finished_at"),
+});
+
+export const testExecutionSteps = sqliteTable("test_execution_steps", {
+  runId: text("run_id").notNull(),
+  stepIndex: integer("step_index").notNull(),
+  actionJson: text("action_json").notNull(),
+  status: text("status").notNull(),
+  message: text("message"),
+  screenshotPath: text("screenshot_path"),
+  startedAt: text("started_at"),
+  finishedAt: text("finished_at"),
+});

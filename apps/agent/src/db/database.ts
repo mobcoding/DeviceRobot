@@ -132,6 +132,45 @@ const migrations: Migration[] = [
       );
     `,
   },
+  {
+    version: 8,
+    name: "test-execution-runs",
+    sql: `
+      CREATE TABLE IF NOT EXISTS test_execution_runs (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        plan_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        device_serial TEXT NOT NULL,
+        app_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        message TEXT,
+        started_at TEXT NOT NULL,
+        finished_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS test_execution_runs_project_started_at
+        ON test_execution_runs (project_id, started_at DESC);
+
+      CREATE INDEX IF NOT EXISTS test_execution_runs_status
+        ON test_execution_runs (status);
+
+      CREATE TABLE IF NOT EXISTS test_execution_steps (
+        run_id TEXT NOT NULL,
+        step_index INTEGER NOT NULL,
+        action_json TEXT NOT NULL,
+        status TEXT NOT NULL,
+        message TEXT,
+        screenshot_path TEXT,
+        started_at TEXT,
+        finished_at TEXT,
+        PRIMARY KEY (run_id, step_index)
+      );
+
+      CREATE INDEX IF NOT EXISTS test_execution_steps_run_index
+        ON test_execution_steps (run_id, step_index);
+    `,
+  },
 ];
 
 export type DatabaseHandle = {

@@ -5,6 +5,7 @@ import {
   FolderGit2,
   KeyRound,
   ListRestart,
+  Play,
   RefreshCw,
   ShieldCheck,
   Smartphone,
@@ -20,6 +21,7 @@ import {
   testAiModelConfiguration,
 } from "../api/ai";
 import { fetchProjects } from "../api/projects";
+import { startTestExecution } from "../api/test-execution";
 
 type ConversationMessage = {
   id: string;
@@ -53,7 +55,27 @@ function projectLabel(project: AndroidProject): string {
   );
 }
 
-export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): React.JSX.Element {
+function applicationIds(project: AndroidProject | undefined): string[] {
+  if (project === undefined) {
+    return [];
+  }
+  return [
+    ...new Set(
+      project.modules
+        .filter((module) => module.moduleType === undefined || module.moduleType === "application")
+        .flatMap((module) => [module.applicationId, module.packageName])
+        .filter((value): value is string => value !== undefined && value.trim().length > 0),
+    ),
+  ].sort((left, right) => left.localeCompare(right, "en"));
+}
+
+export function AiPlanPanel({
+  device,
+  onOpenRuns,
+}: {
+  device: AndroidDevice | undefined;
+  onOpenRuns(): void;
+}): React.JSX.Element {
   const [goal, setGoal] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
@@ -62,6 +84,7 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
   const [selectedModel, setSelectedModel] = useState("");
   const [editingConfiguration, setEditingConfiguration] = useState(false);
   const [externalDataAcknowledged, setExternalDataAcknowledged] = useState(false);
+  const [selectedAppId, setSelectedAppId] = useState("");
   const queryClient = useQueryClient();
   const statusQuery = useQuery({
     queryKey: ["ai-model-status"],
@@ -84,6 +107,8 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
   }, [statusQuery.data?.baseUrl, statusQuery.data?.model]);
   const projectId = selectedProjectId || projects[0]?.id || "";
   const selectedProject = projects.find((project) => project.id === projectId);
+  const appIds = applicationIds(selectedProject);
+  const appId = selectedAppId || appIds[0] || "";
   const planMutation = useMutation({
     mutationFn: generateAiPlan,
     onSuccess: (response, request) => {
@@ -111,6 +136,13 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
       setApiKey("");
       setEditingConfiguration(false);
       await queryClient.invalidateQueries({ queryKey: ["ai-model-status"] });
+    },
+  });
+  const testExecutionMutation = useMutation({
+    mutationFn: startTestExecution,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["test-runs"] });
+      onOpenRuns();
     },
   });
   const configured = statusQuery.data?.configured === true;
@@ -145,7 +177,9 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
       ? projectsQuery.error.message
       : planMutation.isError
         ? planMutation.error.message
-        : undefined;
+        : testExecutionMutation.isError
+          ? testExecutionMutation.error.message
+          : undefined;
   const configurationError = modelListMutation.isError
     ? modelListMutation.error.message
     : configurationTestMutation.isError
@@ -485,6 +519,62 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
                         已引用 {message.plan.context.evidence.length} 条源码证据；
                         {message.plan.policy.reason}
                       </p>
+                      <footer className="ai-plan-execution">
+                        <label>
+                          <span>测试应用</span>
+                          <select
+                            aria-label="测试应用包名"
+                            value={appId}
+                            disabled={
+                              appIds.length === 0 ||
+                              testExecutionMutation.isPending ||
+                              device === undefined
+                            }
+                            onChange={(event) => setSelectedAppId(event.target.value)}
+                          >
+                            {appIds.length === 0 ? (
+                              <option value="">未识别 Android Application 包名</option>
+                            ) : (
+                              appIds.map((candidate) => (
+                                <option key={candidate} value={candidate}>
+                                  {candidate}
+                                </option>
+                              ))
+                            )}
+                          </select>
+                        </label>
+                        <button
+                          className="primary-command"
+                          type="button"
+                          disabled={
+                            device === undefined ||
+                            appId.length === 0 ||
+                            testExecutionMutation.isPending
+                          }
+                          onClick={() => {
+                            const plan = message.plan;
+                            if (
+                              plan !== undefined &&
+                              device !== undefined &&
+                              appId.length > 0 &&
+                              globalThis.confirm(
+                                `确认在 ${device.model ?? device.serial} 上执行该计划？执行前将清除 ${appId} 的应用数据。`,
+                              )
+                            ) {
+                              testExecutionMutation.mutate({
+                                plan: plan.plan,
+                                deviceSerial: device.serial,
+                                appId,
+                                name: plan.reply.slice(0, 80),
+                                approved: true,
+                              });
+                            }
+                          }}
+                        >
+                          <Play aria-hidden="true" size={15} strokeWidth={1.9} />
+                          {testExecutionMutation.isPending ? "正在启动测试" : "执行计划"}
+                        </button>
+                      </footer>
                     </section>
                   )}
                 </article>

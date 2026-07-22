@@ -24,6 +24,7 @@ import { DeviceLogcatPanel } from "./components/DeviceLogcatPanel";
 import { DeviceMirrorPanel } from "./components/DeviceMirrorPanel";
 import { FileManagerPanel } from "./components/FileManagerPanel";
 import { ProjectManagerPanel } from "./components/ProjectManagerPanel";
+import { TestRunPanel } from "./components/TestRunPanel";
 
 const viewIds = [
   "devices",
@@ -42,7 +43,7 @@ const MINIMUM_MIRROR_WIDTH = 280;
 type ViewId = (typeof viewIds)[number];
 type PlannedViewId = Exclude<
   ViewId,
-  "devices" | "files" | "applications" | "logs" | "projects" | "conversations"
+  "devices" | "files" | "applications" | "logs" | "projects" | "conversations" | "runs"
 >;
 type WorkspaceTab = { id: ViewId; label: string };
 
@@ -75,11 +76,6 @@ const workspaceTabs: readonly WorkspaceTab[] = [
 ];
 
 const plannedViews: Record<PlannedViewId, PlannedViewContent> = {
-  runs: {
-    title: "测试运行",
-    description: "尚未启动测试运行。",
-    capabilities: ["Appium 工作进程", "定位器自愈", "设备矩阵与分片"],
-  },
   reports: {
     title: "报告",
     description: "尚未生成测试报告。",
@@ -611,7 +607,9 @@ export function App(): React.JSX.Element {
           ) : activeView === "projects" ? (
             <ProjectManagerPanel device={selectedDevice} />
           ) : activeView === "conversations" ? (
-            <AiPlanPanel device={selectedDevice} />
+            <AiPlanPanel device={selectedDevice} onOpenRuns={() => navigate("runs")} />
+          ) : activeView === "runs" ? (
+            <TestRunPanel />
           ) : (
             <PlannedView content={plannedViews[activeView as PlannedViewId]} />
           )}

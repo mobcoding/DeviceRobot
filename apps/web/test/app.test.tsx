@@ -344,6 +344,25 @@ const aiPlanResponse = {
   generatedAt: "2026-07-21T10:02:00.000Z",
 };
 
+const testExecutionRunResponse = {
+  id: "523e4567-e89b-12d3-a456-426614174000",
+  projectId: exampleProject.id,
+  planId: aiPlanResponse.plan.id,
+  name: "首页可见性检查",
+  deviceSerial: "8B3Y0THX0",
+  appId: "com.example.app",
+  status: "running",
+  steps: [
+    {
+      index: 0,
+      action: { action: "assert.visible", target: { text: "首页" } },
+      status: "pending",
+      screenshotAvailable: false,
+    },
+  ],
+  startedAt: "2026-07-23T10:02:00.000Z",
+};
+
 const apkArtifactResponse = {
   id: "123e4567-e89b-12d3-a456-426614174000",
   fileName: "sample.apk",
@@ -385,6 +404,8 @@ function mockApis(
   getAiPlanRequests: () => number;
   getAiModelListRequests: () => number;
   getAiConfigurationTestRequests: () => number;
+  getTestExecutionRequests: () => number;
+  getLastTestExecutionRequest: () => unknown;
 } {
   let deviceRequests = 0;
   let actionRequests = 0;
@@ -401,6 +422,8 @@ function mockApis(
   let aiPlanRequests = 0;
   let aiModelListRequests = 0;
   let aiConfigurationTestRequests = 0;
+  let testExecutionRequests = 0;
+  let lastTestExecutionRequest: unknown;
   let currentAiModelStatus = options.aiModelStatus ?? aiModelStatusResponse;
   const actionHistory = {
     serial: "8B3Y0THX0",
@@ -472,6 +495,21 @@ function mockApis(
       });
     }
 
+    if (url === "/api/v1/test-runs") {
+      if (method === "POST") {
+        testExecutionRequests += 1;
+        lastTestExecutionRequest = JSON.parse(String(init?.body ?? "{}"));
+        return new Response(JSON.stringify(testExecutionRunResponse), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ runs: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     if (url.endsWith(`/projects/${indexedProjectResponse.id}/index`) && method === "POST") {
       projectReindexRequests += 1;
       projectSourceIndexed = true;
@@ -519,7 +557,11 @@ function mockApis(
         JSON.stringify({
           projectId: projectBuildTargetResponse.projectId,
           runs: projectBuildStarted
-            ? [options.completedProjectBuild ? completedProjectBuildResponse : currentProjectBuildRun]
+            ? [
+                options.completedProjectBuild
+                  ? completedProjectBuildResponse
+                  : currentProjectBuildRun,
+              ]
             : [],
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -687,6 +729,8 @@ function mockApis(
     getAiPlanRequests: () => aiPlanRequests,
     getAiModelListRequests: () => aiModelListRequests,
     getAiConfigurationTestRequests: () => aiConfigurationTestRequests,
+    getTestExecutionRequests: () => testExecutionRequests,
+    getLastTestExecutionRequest: () => lastTestExecutionRequest,
   };
 }
 
@@ -776,11 +820,12 @@ describe("DeviceRobot Web UI", () => {
     const output = await screen.findByText("app-debug.apk");
     const artifact = output.closest(".project-build-artifact");
     expect(artifact).not.toBeNull();
-    expect(within(artifact as HTMLElement).getByRole("link", { name: "导出 app-debug.apk" }))
-      .toHaveAttribute(
-        "href",
-        `/api/v1/projects/${projectBuildTargetResponse.projectId}/builds/${completedProjectBuildResponse.id}/artifacts/0/download`,
-      );
+    expect(
+      within(artifact as HTMLElement).getByRole("link", { name: "导出 app-debug.apk" }),
+    ).toHaveAttribute(
+      "href",
+      `/api/v1/projects/${projectBuildTargetResponse.projectId}/builds/${completedProjectBuildResponse.id}/artifacts/0/download`,
+    );
 
     await user.click(
       within(artifact as HTMLElement).getByRole("button", {
@@ -789,7 +834,9 @@ describe("DeviceRobot Web UI", () => {
     );
 
     await vi.waitFor(() => expect(getProjectArtifactInstallRequests()).toBe(1));
-    expect(await within(artifact as HTMLElement).findByText("已安装 com.example.app")).toBeInTheDocument();
+    expect(
+      await within(artifact as HTMLElement).findByText("已安装 com.example.app"),
+    ).toBeInTheDocument();
   });
 
   it("uses the configured model to generate a preview-only AI ActionPlan", async () => {
@@ -808,6 +855,44 @@ describe("DeviceRobot Web UI", () => {
     expect(screen.getByText("ActionPlan 预览")).toBeInTheDocument();
     expect(screen.getByText("assert.visible")).toBeInTheDocument();
     expect(screen.getByText("执行前必须确认")).toBeInTheDocument();
+  });
+
+  it("starts an approved AI plan only after explicit confirmation", async () => {
+    const { getLastTestExecutionRequest, getTestExecutionRequests } = mockApis();
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "confirm",
+      vi.fn(() => true),
+    );
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
+    await user.click(screen.getByRole("button", { name: "AI 与用例" }));
+    await user.type(screen.getByRole("textbox", { name: "测试目标" }), "验证首页可见");
+    await user.click(screen.getByRole("button", { name: "生成操作计划" }));
+    await screen.findByText("ActionPlan 预览");
+    await user.click(screen.getByRole("button", { name: "执行计划" }));
+
+    await vi.waitFor(() => expect(getTestExecutionRequests()).toBe(1));
+    expect(getLastTestExecutionRequest()).toMatchObject({
+      deviceSerial: "8B3Y0THX0",
+      appId: "com.example.app",
+      approved: true,
+      plan: { id: aiPlanResponse.plan.id },
+    });
+    expect(await screen.findByRole("heading", { level: 1, name: "测试运行" })).toBeInTheDocument();
+  });
+
+  it("shows the test run workspace from the tab menu", async () => {
+    mockApis();
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
+    await user.click(screen.getByRole("button", { name: "测试运行" }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "测试运行" })).toBeInTheDocument();
+    expect(screen.getByText("暂无测试运行")).toBeInTheDocument();
   });
 
   it("fetches, selects, and tests an OpenAI-compatible model before enabling AI plans", async () => {

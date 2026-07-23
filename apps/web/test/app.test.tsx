@@ -495,6 +495,13 @@ function mockApis(
       });
     }
 
+    if (url === "/api/v1/ai/plans") {
+      return new Response(JSON.stringify({ plans: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     if (url === "/api/v1/test-runs") {
       if (method === "POST") {
         testExecutionRequests += 1;

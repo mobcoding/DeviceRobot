@@ -3,9 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveAgentPaths } from "@device-robot/config";
 import { XMLParser } from "fast-xml-parser";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  AndroidSdkService,
   inspectAndroidSdk,
   parseAndroidRepositoryArchive,
   requiredAndroidSdkPackages,
@@ -161,5 +162,54 @@ describe("Android SDK service", () => {
       source: "managed",
       missingPackages: [],
     });
+  });
+
+  it("installs the packages required by a second project after an active installation completes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "device-robot-sdk-"));
+    temporaryDirectories.push(root);
+    const paths = resolveAgentPaths(join(root, "agent-data"));
+    const firstProjectRoot = join(root, "first");
+    const secondProjectRoot = join(root, "second");
+    mkdirSync(join(firstProjectRoot, "app"), { recursive: true });
+    mkdirSync(join(secondProjectRoot, "app"), { recursive: true });
+    writeFileSync(join(firstProjectRoot, "app", "build.gradle.kts"), "android { compileSdk = 34 }");
+    writeFileSync(join(secondProjectRoot, "app", "build.gradle.kts"), "android { compileSdk = 35 }");
+    const firstModules = [
+      { name: "app", path: "app", buildFile: "app/build.gradle.kts", variants: ["debug"] },
+    ];
+    const secondModules = [
+      { name: "app", path: "app", buildFile: "app/build.gradle.kts", variants: ["debug"] },
+    ];
+    const requestedPackages: string[][] = [];
+    let releaseFirstInstallation: (() => void) | undefined;
+    const firstInstallation = new Promise<void>((resolve) => {
+      releaseFirstInstallation = resolve;
+    });
+    const service = new AndroidSdkService({
+      paths,
+      managedSdkInstaller: async (packages) => {
+        requestedPackages.push([...packages]);
+        if (requestedPackages.length === 1) {
+          await firstInstallation;
+        }
+        for (const packageName of packages) {
+          writeSdkPackage(paths.androidSdk, packageName);
+        }
+      },
+    });
+
+    const first = service.install(firstProjectRoot, firstModules);
+    await vi.waitFor(() => expect(requestedPackages).toHaveLength(1));
+    const second = service.install(secondProjectRoot, secondModules);
+    releaseFirstInstallation?.();
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ missingPackages: [] }),
+      expect.objectContaining({ missingPackages: [] }),
+    ]);
+    expect(requestedPackages).toEqual([
+      ["platform-tools", "platforms;android-34", "build-tools;34.0.0"],
+      ["platform-tools", "platforms;android-35", "build-tools;35.0.0"],
+    ]);
   });
 });

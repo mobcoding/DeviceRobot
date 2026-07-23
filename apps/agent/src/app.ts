@@ -19,21 +19,17 @@ import {
   deviceLogcatResponseSchema,
   deviceUiTreeResponseSchema,
   healthResponseSchema,
+  cleanupLocalDataRequestSchema,
+  cleanupLocalDataResponseSchema,
+  localDataUsageResponseSchema,
   appiumRuntimeSchema,
   androidSdkInfoSchema,
   androidBuildTargetListResponseSchema,
   androidProjectSchema,
-  aiModelConnectionTestRequestSchema,
-  aiModelConnectionTestResponseSchema,
-  aiModelListRequestSchema,
-  aiModelListResponseSchema,
-  aiModelStatusSchema,
-  aiPlanResponseSchema,
   createProjectRequestSchema,
   projectListResponseSchema,
   projectBuildRunListResponseSchema,
   projectBuildRunSchema,
-  generateAiPlanRequestSchema,
   installAndroidSdkRequestSchema,
   startProjectBuildRequestSchema,
   startTestExecutionRequestSchema,
@@ -45,6 +41,7 @@ import Fastify, {
   type FastifyReply,
   type FastifyServerOptions,
 } from "fastify";
+import { z } from "zod";
 
 import { openDatabase, type DatabaseHandle } from "./db/database.js";
 import {
@@ -95,6 +92,12 @@ import {
 import { SqliteProjectBuildStore } from "./projects/project-build-store.js";
 import { AiPlanError, LocalAiPlanService, type AiPlanService } from "./ai/ai-plan-service.js";
 import { SqliteAiConfigurationStore } from "./ai/ai-configuration-store.js";
+import { DrizzleAiPlanStore } from "./ai/ai-plan-store.js";
+import { registerAiRoutes } from "./routes/ai-routes.js";
+import {
+  FilesystemLocalDataMaintenanceService,
+  type LocalDataMaintenanceService,
+} from "./maintenance/local-data-maintenance-service.js";
 import { WindowsDpapiSecretProtector } from "./ai/ai-secret-protector.js";
 import {
   LocalTestExecutionService,
@@ -124,6 +127,7 @@ export type CreateAgentAppOptions = {
   appiumRuntimeService?: AppiumRuntimeService;
   scrcpyStreamService?: ScrcpyStreamService;
   testExecutionService?: TestExecutionService;
+  maintenanceService?: LocalDataMaintenanceService;
 };
 
 export type AgentApp = {
@@ -142,6 +146,7 @@ export type AgentApp = {
   appiumRuntimeService: AppiumRuntimeService;
   scrcpyStreamService: ScrcpyStreamService;
   testExecutionService: TestExecutionService;
+  maintenanceService: LocalDataMaintenanceService;
 };
 
 function defaultWebRoot(): string {
@@ -249,13 +254,24 @@ function parseBuildArtifactIndex(params: unknown): number {
   return artifactIndex;
 }
 
-function controlErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
-  if (error instanceof DeviceControlError) {
+function apiErrorReply(reply: FastifyReply, error: unknown, fallback: string): FastifyReply {
+  if (error instanceof z.ZodError) {
+    return reply.code(400).send({ error: "请求参数无效。" });
+  }
+  if (
+    error instanceof Error &&
+    "statusCode" in error &&
+    typeof error.statusCode === "number" &&
+    error.statusCode >= 400 &&
+    error.statusCode < 600
+  ) {
     return reply.code(error.statusCode).send({ error: error.message });
   }
+  return reply.code(500).send({ error: error instanceof Error ? error.message : fallback });
+}
 
-  const message = error instanceof Error ? error.message : "Device control request failed";
-  return reply.code(500).send({ error: message });
+function controlErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
+  return apiErrorReply(reply, error, "设备控制请求失败。");
 }
 
 function parseFilePath(query: unknown): string | undefined {
@@ -324,31 +340,12 @@ function parseLogcatLimit(query: unknown): number | undefined {
   return parsed;
 }
 
-function parseAiModelListRequest(body: unknown): ReturnType<typeof aiModelListRequestSchema.parse> {
-  try {
-    return aiModelListRequestSchema.parse(body);
-  } catch {
-    throw new AiPlanError("请填写有效的 Base URL 和 API Key。", 400);
-  }
-}
-
-function parseAiModelConnectionTestRequest(
-  body: unknown,
-): ReturnType<typeof aiModelConnectionTestRequestSchema.parse> {
-  try {
-    return aiModelConnectionTestRequestSchema.parse(body);
-  } catch {
-    throw new AiPlanError("请填写有效的 Base URL、API Key 并选择模型。", 400);
-  }
-}
-
 function appiumErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
   if (error instanceof AppiumRuntimeError) {
     return reply.code(error.statusCode).send({ error: error.message });
   }
 
-  const message = error instanceof Error ? error.message : "Appium runtime request failed";
-  return reply.code(500).send({ error: message });
+  return apiErrorReply(reply, error, "Appium 服务请求失败。");
 }
 
 function apkErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
@@ -388,6 +385,9 @@ function projectBuildErrorReply(reply: FastifyReply, error: unknown): FastifyRep
 }
 
 function aiPlanErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
+  if (error instanceof z.ZodError) {
+    return apiErrorReply(reply, error, "AI 计划请求失败。");
+  }
   if (error instanceof AiPlanError) {
     return reply.code(error.statusCode).send({ error: error.message });
   }
@@ -438,6 +438,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
       projectStore,
       configurationStore: new SqliteAiConfigurationStore(database.sqlite),
       secretProtector: new WindowsDpapiSecretProtector(),
+      planStore: new DrizzleAiPlanStore(database.db),
     });
   const apkArtifactService =
     options.apkArtifactService ??
@@ -461,6 +462,8 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
       deviceControlService,
       appiumRuntimeService,
     });
+  const maintenanceService =
+    options.maintenanceService ?? new FilesystemLocalDataMaintenanceService(paths);
   const scrcpyStreamService =
     options.scrcpyStreamService ?? new AdbScrcpyStreamService({ paths, deviceService });
 
@@ -497,6 +500,24 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
       startedAt,
       dataDirectory: paths.root,
     });
+  });
+
+  app.get("/api/v1/system/storage", async (_request, reply) => {
+    try {
+      return localDataUsageResponseSchema.parse(await maintenanceService.usage());
+    } catch (error) {
+      return apiErrorReply(reply, error, "本地数据用量读取失败。");
+    }
+  });
+
+  app.post("/api/v1/system/storage/cleanup", async (request, reply) => {
+    try {
+      return cleanupLocalDataResponseSchema.parse(
+        await maintenanceService.cleanup(cleanupLocalDataRequestSchema.parse(request.body)),
+      );
+    } catch (error) {
+      return apiErrorReply(reply, error, "本地数据清理失败。");
+    }
   });
 
   app.get("/api/v1/devices", async () => {
@@ -621,41 +642,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     },
   );
 
-  app.get("/api/v1/ai/status", async () => {
-    return aiModelStatusSchema.parse(await aiPlanService.status());
-  });
-
-  app.post("/api/v1/ai/models", async (request, reply) => {
-    try {
-      reply.header("Cache-Control", "no-store");
-      return aiModelListResponseSchema.parse(
-        await aiPlanService.listModels(parseAiModelListRequest(request.body)),
-      );
-    } catch (error) {
-      return aiPlanErrorReply(reply, error);
-    }
-  });
-
-  app.post("/api/v1/ai/config/test", async (request, reply) => {
-    try {
-      reply.header("Cache-Control", "no-store");
-      return aiModelConnectionTestResponseSchema.parse(
-        await aiPlanService.testConfiguration(parseAiModelConnectionTestRequest(request.body)),
-      );
-    } catch (error) {
-      return aiPlanErrorReply(reply, error);
-    }
-  });
-
-  app.post("/api/v1/ai/plans", async (request, reply) => {
-    try {
-      return aiPlanResponseSchema.parse(
-        await aiPlanService.generate(generateAiPlanRequestSchema.parse(request.body)),
-      );
-    } catch (error) {
-      return aiPlanErrorReply(reply, error);
-    }
-  });
+  registerAiRoutes(app, aiPlanService, aiPlanErrorReply);
 
   app.get("/api/v1/test-runs", async (_request, reply) => {
     try {
@@ -1107,5 +1094,6 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     appiumRuntimeService,
     scrcpyStreamService,
     testExecutionService,
+    maintenanceService,
   };
 }

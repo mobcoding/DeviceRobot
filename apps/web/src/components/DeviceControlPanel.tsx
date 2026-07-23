@@ -18,6 +18,7 @@ import {
   fetchDeviceActionHistory,
   fetchDeviceUiTree,
 } from "../api/device-control";
+import { formatDeviceName } from "../ui/formatters";
 import { AppiumRuntimePanel } from "./AppiumRuntimePanel";
 
 type DeviceControlPanelProps = {
@@ -49,10 +50,6 @@ function formatTime(value: string): string {
     minute: "2-digit",
     second: "2-digit",
   }).format(new Date(value));
-}
-
-function deviceName(device: AndroidDevice): string {
-  return device.model ?? device.deviceName ?? device.serial;
 }
 
 function connectionLabel(connection: AndroidDevice["connection"]): string {
@@ -219,7 +216,7 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
             <Cpu aria-hidden="true" size={16} strokeWidth={1.8} />
             型号
           </dt>
-          <dd>{deviceName(device)}</dd>
+          <dd>{formatDeviceName(device)}</dd>
         </div>
         <div>
           <dt>

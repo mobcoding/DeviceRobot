@@ -19,41 +19,22 @@ import {
   type ProjectListResponse,
 } from "@device-robot/contracts";
 
-async function projectRequest<T>(
-  url: string,
-  init: RequestInit | undefined,
-  schema: { parse(value: unknown): T },
-): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(url, init);
-  } catch {
-    throw new Error("无法连接本地 Agent。请确认 Agent 正在运行。");
-  }
-
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => undefined)) as
-      { error?: unknown } | undefined;
-    const message = typeof payload?.error === "string" ? payload.error : "项目请求失败。";
-    throw new Error(message);
-  }
-
-  return schema.parse(await response.json());
-}
+import { requestJson } from "./client";
 
 export async function fetchProjects(signal?: AbortSignal): Promise<ProjectListResponse> {
-  return await projectRequest(
+  return await requestJson(
     "/api/v1/projects",
     {
       headers: { Accept: "application/json" },
       ...(signal === undefined ? {} : { signal }),
     },
     projectListResponseSchema,
+    "项目请求失败。",
   );
 }
 
 export async function createProject(request: CreateProjectRequest): Promise<AndroidProject> {
-  return await projectRequest(
+  return await requestJson(
     "/api/v1/projects",
     {
       method: "POST",
@@ -61,17 +42,19 @@ export async function createProject(request: CreateProjectRequest): Promise<Andr
       body: JSON.stringify(request),
     },
     androidProjectSchema,
+    "项目创建失败。",
   );
 }
 
 export async function reindexProject(projectId: string): Promise<AndroidProject> {
-  return await projectRequest(
+  return await requestJson(
     `/api/v1/projects/${encodeURIComponent(projectId)}/index`,
     {
       method: "POST",
       headers: { Accept: "application/json" },
     },
     androidProjectSchema,
+    "项目索引失败。",
   );
 }
 
@@ -79,13 +62,14 @@ export async function fetchProjectBuildTargets(
   projectId: string,
   signal?: AbortSignal,
 ): Promise<AndroidBuildTargetListResponse> {
-  return await projectRequest(
+  return await requestJson(
     `/api/v1/projects/${encodeURIComponent(projectId)}/builds/targets`,
     {
       headers: { Accept: "application/json" },
       ...(signal === undefined ? {} : { signal }),
     },
     androidBuildTargetListResponseSchema,
+    "构建目标读取失败。",
   );
 }
 
@@ -93,13 +77,14 @@ export async function fetchProjectBuildRuns(
   projectId: string,
   signal?: AbortSignal,
 ): Promise<ProjectBuildRunListResponse> {
-  return await projectRequest(
+  return await requestJson(
     `/api/v1/projects/${encodeURIComponent(projectId)}/builds`,
     {
       headers: { Accept: "application/json" },
       ...(signal === undefined ? {} : { signal }),
     },
     projectBuildRunListResponseSchema,
+    "构建记录读取失败。",
   );
 }
 
@@ -107,7 +92,7 @@ export async function installProjectAndroidSdk(
   projectId: string,
   request: InstallAndroidSdkRequest,
 ): Promise<AndroidSdkInfo> {
-  return await projectRequest(
+  return await requestJson(
     `/api/v1/projects/${encodeURIComponent(projectId)}/android-sdk/install`,
     {
       method: "POST",
@@ -115,6 +100,7 @@ export async function installProjectAndroidSdk(
       body: JSON.stringify(request),
     },
     androidSdkInfoSchema,
+    "Android SDK 安装失败。",
   );
 }
 
@@ -122,7 +108,7 @@ export async function startProjectBuild(
   projectId: string,
   request: StartProjectBuildRequest,
 ): Promise<ProjectBuildRun> {
-  return await projectRequest(
+  return await requestJson(
     `/api/v1/projects/${encodeURIComponent(projectId)}/builds`,
     {
       method: "POST",
@@ -130,6 +116,7 @@ export async function startProjectBuild(
       body: JSON.stringify(request),
     },
     projectBuildRunSchema,
+    "构建启动失败。",
   );
 }
 
@@ -150,7 +137,7 @@ export async function installProjectBuildArtifact(
   artifactIndex: number,
   request: ApkInstallRequest,
 ): Promise<ApkInstallResponse> {
-  return await projectRequest(
+  return await requestJson(
     `/api/v1/devices/${encodeURIComponent(serial)}/projects/${encodeURIComponent(
       projectId,
     )}/builds/${encodeURIComponent(buildId)}/artifacts/${artifactIndex}/install`,
@@ -160,5 +147,6 @@ export async function installProjectBuildArtifact(
       body: JSON.stringify(request),
     },
     apkInstallResponseSchema,
+    "APK 安装失败。",
   );
 }

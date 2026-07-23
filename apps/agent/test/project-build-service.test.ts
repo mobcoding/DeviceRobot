@@ -10,6 +10,7 @@ import {
   downloadGradleDistribution,
   extractGradleFailureSummary,
   LocalProjectBuildService,
+  parseAndroidAssembleTasks,
   ProjectBuildError,
   purgeCorruptGradleWrapperCache,
   type ProjectBuildProcess,
@@ -245,6 +246,93 @@ describe("Android project build service", () => {
     expect(readFileSync(archivePath)).toEqual(payload);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ headers: { Range: `bytes=${splitAt}-` } });
+  });
+
+  it("shares a Gradle distribution download between concurrent builds", async () => {
+    const root = mkdtempSync(join(tmpdir(), "device-robot-build-"));
+    temporaryDirectories.push(root);
+    const archivePath = join(root, "gradle-8.14.5-bin.zip");
+    const payload = Buffer.from("shared Gradle distribution");
+    const checksum = createHash("sha256").update(payload).digest("hex");
+    let resolveResponse: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolveResponsePromise) => {
+          resolveResponse = resolveResponsePromise;
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = downloadGradleDistribution(
+      "https://example.invalid/gradle.zip",
+      archivePath,
+      checksum,
+    );
+    const second = downloadGradleDistribution(
+      "https://example.invalid/gradle.zip",
+      archivePath,
+      checksum,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    resolveResponse?.(new Response(payload));
+
+    await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
+    expect(readFileSync(archivePath)).toEqual(payload);
+  });
+
+  it("keeps only real application assemble tasks from Gradle task output", () => {
+    expect(
+      parseAndroidAssembleTasks(
+        [
+          "assemble - Assembles all variants of all applications and secondary packages.",
+          "assembleChinaFreeDebug - Assembles the ChinaFreeDebug build.",
+          "assembleChinaFreeRelease - Assembles the ChinaFreeRelease build.",
+          "assembleChinaFreeDebugAndroidTest - Assembles Android test APK.",
+          "bundleChinaFreeRelease - Creates a bundle.",
+        ].join("\n"),
+      ),
+    ).toEqual(["chinaFreeDebug", "chinaFreeRelease"]);
+  });
+
+  it("uses real Gradle assemble tasks instead of heuristic flavor combinations when available", async () => {
+    const root = mkdtempSync(join(tmpdir(), "device-robot-build-"));
+    temporaryDirectories.push(root);
+    mkdirSync(join(root, "app"), { recursive: true });
+    writeFileSync(join(root, "gradlew.bat"), "@echo off");
+    const paths = resolveAgentPaths(join(root, "agent-data"));
+    prepareManagedAndroidSdk(paths);
+    const project = createProject(root);
+    const taskRunner = {
+      list: vi.fn(async () => ({
+        exitCode: 0,
+        output: [
+          "assembleChinaFreeDebug - Assembles the ChinaFreeDebug build.",
+          "assembleChinaFreeRelease - Assembles the ChinaFreeRelease build.",
+          "assembleChinaFreeDebugAndroidTest - Assembles Android test APK.",
+        ].join("\n"),
+      })),
+    };
+    const service = new LocalProjectBuildService({
+      paths,
+      projectStore: new InMemoryProjectStore(project),
+      buildStore: new InMemoryProjectBuildStore(),
+      taskRunner,
+    });
+
+    await expect(service.listTargets(project.id)).resolves.toMatchObject({
+      targets: [
+        { modulePath: "app", variant: "chinaFreeDebug", taskName: ":app:assembleChinaFreeDebug" },
+        {
+          modulePath: "app",
+          variant: "chinaFreeRelease",
+          taskName: ":app:assembleChinaFreeRelease",
+        },
+      ],
+    });
+    expect(taskRunner.list).toHaveBeenCalledWith(
+      expect.objectContaining({ args: ["--no-daemon", "--console=plain", ":app:tasks", "--all"] }),
+    );
   });
 
   it("extracts the actionable Gradle failure section", () => {

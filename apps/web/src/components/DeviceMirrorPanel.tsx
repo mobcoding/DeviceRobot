@@ -14,6 +14,8 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { AndroidDevice } from "@device-robot/contracts";
 
+import { formatDeviceName } from "../ui/formatters";
+
 type DeviceMirrorPanelProps = {
   device: AndroidDevice;
   onPreferredSidebarWidth?(width: number): void;
@@ -49,10 +51,6 @@ type StreamControl =
 type ActivePointer = DevicePoint & {
   pointerId: number;
 };
-
-function deviceName(device: AndroidDevice): string {
-  return device.model ?? device.deviceName ?? device.serial;
-}
 
 function streamUrl(serial: string): string {
   const protocol = globalThis.location.protocol === "https:" ? "wss:" : "ws:";
@@ -591,14 +589,14 @@ export function DeviceMirrorPanel({
             <div className="apk-drop-overlay" role="status">
               <PackagePlus aria-hidden="true" size={28} strokeWidth={1.7} />
               <strong>释放以安装 APK</strong>
-              <span>{deviceName(device)}</span>
+              <span>{formatDeviceName(device)}</span>
             </div>
           )}
           <canvas
             ref={canvasRef}
             className="interactive-device-screen"
             role="img"
-            aria-label={`设备实时画面：${deviceName(device)}`}
+            aria-label={`设备实时画面：${formatDeviceName(device)}`}
             aria-busy={screenSize === undefined}
             onPointerCancel={handlePointerCancel}
             onPointerDown={handlePointerDown}

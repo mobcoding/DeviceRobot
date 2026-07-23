@@ -6,10 +6,7 @@ import {
   type ApkInstallResponse,
 } from "@device-robot/contracts";
 
-async function responseError(response: Response, fallback: string): Promise<Error> {
-  const payload = (await response.json().catch(() => undefined)) as { error?: unknown } | undefined;
-  return new Error(typeof payload?.error === "string" ? payload.error : fallback);
-}
+import { responseError } from "./client";
 
 export async function uploadApk(file: File, signal?: AbortSignal): Promise<ApkArtifact> {
   const body = new FormData();

@@ -171,6 +171,25 @@ const migrations: Migration[] = [
         ON test_execution_steps (run_id, step_index);
     `,
   },
+  {
+    version: 9,
+    name: "ai-plans",
+    sql: `
+      CREATE TABLE IF NOT EXISTS ai_plans (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        goal TEXT NOT NULL,
+        reply TEXT NOT NULL,
+        plan_json TEXT NOT NULL,
+        policy_json TEXT NOT NULL,
+        context_json TEXT NOT NULL,
+        generated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS ai_plans_project_generated_at
+        ON ai_plans (project_id, generated_at DESC);
+    `,
+  },
 ];
 
 export type DatabaseHandle = {

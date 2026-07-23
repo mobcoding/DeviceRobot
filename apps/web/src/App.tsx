@@ -25,6 +25,7 @@ import { DeviceMirrorPanel } from "./components/DeviceMirrorPanel";
 import { FileManagerPanel } from "./components/FileManagerPanel";
 import { ProjectManagerPanel } from "./components/ProjectManagerPanel";
 import { TestRunPanel } from "./components/TestRunPanel";
+import { formatDeviceName } from "./ui/formatters";
 
 const viewIds = [
   "devices",
@@ -94,10 +95,6 @@ function readViewFromHash(): ViewId {
 
 function isReadyDevice(device: AndroidDevice): boolean {
   return device.state === "device" || device.state === "emulator";
-}
-
-function deviceName(device: AndroidDevice): string {
-  return device.model ?? device.deviceName ?? device.serial;
 }
 
 function networkLabel(device: AndroidDevice | undefined): string {
@@ -216,7 +213,7 @@ function ConsoleHeader({
           ) : (
             devices.map((device) => (
               <option key={device.serial} value={device.serial}>
-                {deviceName(device)}
+                {formatDeviceName(device)}
               </option>
             ))
           )}

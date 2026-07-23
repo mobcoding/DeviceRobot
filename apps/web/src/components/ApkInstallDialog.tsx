@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AndroidDevice, ApkArtifact } from "@device-robot/contracts";
 
 import { discardApk, installApk, uploadApk } from "../api/apk";
+import { formatBytes, formatDeviceName } from "../ui/formatters";
 
 type ApkInstallDialogProps = {
   device: AndroidDevice;
@@ -11,17 +12,6 @@ type ApkInstallDialogProps = {
   initialError?: string;
   onClose(): void;
 };
-
-function formatBytes(value: number): string {
-  if (value >= 1_024 * 1_024) {
-    return `${(value / (1_024 * 1_024)).toFixed(2)} MB`;
-  }
-  return `${Math.max(1, Math.ceil(value / 1_024))} KB`;
-}
-
-function deviceName(device: AndroidDevice): string {
-  return device.model ?? device.deviceName ?? device.serial;
-}
 
 export function ApkInstallDialog({
   device,
@@ -163,7 +153,7 @@ export function ApkInstallDialog({
                 </div>
                 <div>
                   <dt>目标设备</dt>
-                  <dd>{deviceName(device)}</dd>
+                  <dd>{formatDeviceName(device)}</dd>
                   <small>{device.serial}</small>
                 </div>
                 <div className="apk-hash-row">
@@ -198,7 +188,7 @@ export function ApkInstallDialog({
           {installMutation.isPending && (
             <div className="apk-progress" role="status">
               <LoaderCircle aria-hidden="true" size={22} strokeWidth={1.8} />
-              <span>正在安装到 {deviceName(device)}</span>
+              <span>正在安装到 {formatDeviceName(device)}</span>
             </div>
           )}
 

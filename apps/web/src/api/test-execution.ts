@@ -7,24 +7,14 @@ import {
   type TestExecutionRunListResponse,
 } from "@device-robot/contracts";
 
-async function requestJson<T>(
-  path: string,
-  init: RequestInit,
-  parse: (value: unknown) => T,
-): Promise<T> {
-  const response = await fetch(path, init);
-  const payload = (await response.json().catch(() => undefined)) as { error?: unknown } | undefined;
-  if (!response.ok) {
-    throw new Error(typeof payload?.error === "string" ? payload.error : "测试运行请求失败。");
-  }
-  return parse(payload);
-}
+import { requestJson } from "./client";
 
 export async function fetchTestRuns(signal?: AbortSignal): Promise<TestExecutionRunListResponse> {
   return await requestJson(
     "/api/v1/test-runs",
     { headers: { Accept: "application/json" }, ...(signal === undefined ? {} : { signal }) },
-    (payload) => testExecutionRunListResponseSchema.parse(payload),
+    testExecutionRunListResponseSchema,
+    "测试运行读取失败。",
   );
 }
 
@@ -38,7 +28,8 @@ export async function startTestExecution(
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(startTestExecutionRequestSchema.parse(request)),
     },
-    (payload) => testExecutionRunSchema.parse(payload),
+    testExecutionRunSchema,
+    "测试启动失败。",
   );
 }
 
@@ -46,7 +37,8 @@ export async function cancelTestExecution(runId: string): Promise<TestExecutionR
   return await requestJson(
     `/api/v1/test-runs/${encodeURIComponent(runId)}/cancel`,
     { method: "POST", headers: { Accept: "application/json" } },
-    (payload) => testExecutionRunSchema.parse(payload),
+    testExecutionRunSchema,
+    "测试取消失败。",
   );
 }
 

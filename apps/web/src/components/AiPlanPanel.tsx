@@ -16,6 +16,7 @@ import type { AiPlanResponse, AndroidDevice, AndroidProject } from "@device-robo
 
 import {
   fetchAiModelStatus,
+  fetchAiPlans,
   fetchAiModels,
   generateAiPlan,
   testAiModelConfiguration,
@@ -96,6 +97,11 @@ export function AiPlanPanel({
     queryFn: ({ signal }) => fetchProjects(signal),
     retry: false,
   });
+  const plansQuery = useQuery({
+    queryKey: ["ai-plans"],
+    queryFn: ({ signal }) => fetchAiPlans(signal),
+    retry: false,
+  });
   const projects = projectsQuery.data?.projects ?? [];
   useEffect(() => {
     if (statusQuery.data?.baseUrl !== undefined) {
@@ -105,19 +111,44 @@ export function AiPlanPanel({
       setSelectedModel((current) => current || statusQuery.data?.model || "");
     }
   }, [statusQuery.data?.baseUrl, statusQuery.data?.model]);
+  useEffect(() => {
+    if (plansQuery.data === undefined) {
+      return;
+    }
+    setMessages(
+      [...plansQuery.data.plans]
+        .reverse()
+        .flatMap((record) => [
+          { id: `${record.plan.id}-user`, role: "user" as const, content: record.goal },
+          {
+            id: record.plan.id,
+            role: "assistant" as const,
+            content: record.reply,
+            plan: {
+              reply: record.reply,
+              plan: record.plan,
+              policy: record.policy,
+              context: record.context,
+              generatedAt: record.generatedAt,
+            },
+          },
+        ]),
+    );
+  }, [plansQuery.data]);
   const projectId = selectedProjectId || projects[0]?.id || "";
   const selectedProject = projects.find((project) => project.id === projectId);
   const appIds = applicationIds(selectedProject);
   const appId = selectedAppId || appIds[0] || "";
   const planMutation = useMutation({
     mutationFn: generateAiPlan,
-    onSuccess: (response, request) => {
+    onSuccess: async (response, request) => {
       setMessages((current) => [
         ...current,
         { id: `${response.plan.id}-user`, role: "user", content: request.goal },
         { id: response.plan.id, role: "assistant", content: response.reply, plan: response },
       ]);
       setGoal("");
+      await queryClient.invalidateQueries({ queryKey: ["ai-plans"] });
     },
   });
   const modelListMutation = useMutation({
@@ -175,6 +206,8 @@ export function AiPlanPanel({
     ? statusQuery.error.message
     : projectsQuery.isError
       ? projectsQuery.error.message
+      : plansQuery.isError
+        ? plansQuery.error.message
       : planMutation.isError
         ? planMutation.error.message
         : testExecutionMutation.isError

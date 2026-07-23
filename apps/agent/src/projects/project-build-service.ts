@@ -24,10 +24,10 @@ import type { ProjectBuildStore } from "./project-build-store.js";
 import type { ProjectStore } from "./project-store.js";
 import { scanAndroidProject } from "./project-service.js";
 import {
-  LocalProjectTemporarySigningService,
-  ProjectTemporarySigningError,
-  type ProjectTemporarySigningService,
-  type TemporarySigningMaterial,
+  LocalProjectManagedSigningService,
+  ProjectManagedSigningError,
+  type ManagedSigningMaterial,
+  type ProjectManagedSigningService,
 } from "./project-temporary-signing-service.js";
 
 const execFileAsync = promisify(execFile);
@@ -36,8 +36,10 @@ const MAX_ARTIFACT_DEPTH = 6;
 const MAX_CONCURRENT_BUILDS = 2;
 const MAX_BUILD_FAILURE_MESSAGE_LENGTH = 8_000;
 const MAX_GRADLE_DISTRIBUTION_DOWNLOAD_ATTEMPTS = 8;
+const GRADLE_TASK_DISCOVERY_TIMEOUT_MS = 90_000;
 const GENERIC_GRADLE_FAILURE_MESSAGE = "Gradle 构建失败。";
 const ansiEscapeSequence = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "gu");
+const gradleDistributionDownloads = new Map<string, Promise<boolean>>();
 
 export class ProjectBuildError extends Error {
   public constructor(
@@ -75,6 +77,15 @@ export interface ProjectBuildProcessRunner {
   }): ProjectBuildProcess;
 }
 
+export interface ProjectBuildTaskRunner {
+  list(options: {
+    executable: string;
+    args: readonly string[];
+    cwd: string;
+    environment: NodeJS.ProcessEnv;
+  }): Promise<ProjectBuildProcessResult>;
+}
+
 export interface ProjectBuildService {
   listTargets(projectId: string): Promise<AndroidBuildTargetListResponse>;
   installSdk(projectId: string): Promise<AndroidSdkInfo>;
@@ -93,8 +104,9 @@ export type LocalProjectBuildServiceOptions = {
   projectStore: ProjectStore;
   buildStore: ProjectBuildStore;
   runner?: ProjectBuildProcessRunner;
+  taskRunner?: ProjectBuildTaskRunner;
   sdkService?: AndroidSdkService;
-  temporarySigningService?: ProjectTemporarySigningService;
+  managedSigningService?: ProjectManagedSigningService;
 };
 
 type ActiveBuild = {
@@ -103,7 +115,7 @@ type ActiveBuild = {
   project: AndroidProject;
   target: AndroidBuildTarget;
   run: ProjectBuildRun;
-  temporarySigning?: TemporarySigningMaterial;
+  managedSigning?: ManagedSigningMaterial;
   cancelled: boolean;
   completion: Promise<void>;
 };
@@ -176,6 +188,32 @@ export function discoverAndroidBuildTargets(project: AndroidProject): AndroidBui
       }),
     ),
   );
+}
+
+function variantFromAssembleTask(task: string): string | undefined {
+  if (!/^assemble[A-Z][A-Za-z0-9]*$/u.test(task)) {
+    return undefined;
+  }
+  const suffix = task.slice("assemble".length);
+  if (/AndroidTest|UnitTest/u.test(suffix)) {
+    return undefined;
+  }
+  return `${suffix.slice(0, 1).toLowerCase()}${suffix.slice(1)}`;
+}
+
+export function parseAndroidAssembleTasks(output: string): string[] {
+  const variants = new Set<string>();
+  for (const line of output.split(/\r?\n/u)) {
+    const task = /^\s*(assemble[A-Za-z0-9]+)\s+-\s+/u.exec(line)?.[1];
+    if (task === undefined) {
+      continue;
+    }
+    const variant = variantFromAssembleTask(task);
+    if (variant !== undefined) {
+      variants.add(variant);
+    }
+  }
+  return [...variants].sort((left, right) => left.localeCompare(right, "en"));
 }
 
 function findWrapper(rootPath: string): string | undefined {
@@ -288,6 +326,26 @@ async function gradleDistributionChecksum(distributionUrl: string): Promise<stri
 }
 
 export async function downloadGradleDistribution(
+  distributionUrl: string,
+  archivePath: string,
+  checksum: string,
+): Promise<boolean> {
+  const key = resolve(archivePath);
+  const existingDownload = gradleDistributionDownloads.get(key);
+  if (existingDownload !== undefined) {
+    return await existingDownload;
+  }
+
+  const download = downloadGradleDistributionOnce(distributionUrl, archivePath, checksum).finally(() => {
+    if (gradleDistributionDownloads.get(key) === download) {
+      gradleDistributionDownloads.delete(key);
+    }
+  });
+  gradleDistributionDownloads.set(key, download);
+  return await download;
+}
+
+async function downloadGradleDistributionOnce(
   distributionUrl: string,
   archivePath: string,
   checksum: string,
@@ -557,6 +615,31 @@ function createDefaultRunner(): ProjectBuildProcessRunner {
   };
 }
 
+function createDefaultTaskRunner(): ProjectBuildTaskRunner {
+  return {
+    list: async (options) => {
+      const process = createDefaultRunner().start({ ...options, onOutput: () => {} });
+      let timedOut = false;
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        void process.stop();
+      }, GRADLE_TASK_DISCOVERY_TIMEOUT_MS);
+      try {
+        const result = await process.completed;
+        return timedOut
+          ? {
+              ...result,
+              exitCode: null,
+              errorMessage: `Gradle 任务发现超时（${GRADLE_TASK_DISCOVERY_TIMEOUT_MS / 1_000} 秒）。`,
+            }
+          : result;
+      } finally {
+        clearTimeout(timeout);
+      }
+    },
+  };
+}
+
 async function stopChildProcess(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null) {
     return;
@@ -623,8 +706,9 @@ export class LocalProjectBuildService implements ProjectBuildService {
   readonly #projectStore: ProjectStore;
   readonly #buildStore: ProjectBuildStore;
   readonly #runner: ProjectBuildProcessRunner;
+  readonly #taskRunner: ProjectBuildTaskRunner;
   readonly #sdkService: AndroidSdkService;
-  readonly #temporarySigningService: ProjectTemporarySigningService;
+  readonly #managedSigningService: ProjectManagedSigningService;
   readonly #activeRuns = new Map<string, ActiveBuild>();
   readonly #queuedBuilds: QueuedBuild[] = [];
   #launchingBuilds = 0;
@@ -635,10 +719,10 @@ export class LocalProjectBuildService implements ProjectBuildService {
     this.#projectStore = options.projectStore;
     this.#buildStore = options.buildStore;
     this.#runner = options.runner ?? createDefaultRunner();
+    this.#taskRunner = options.taskRunner ?? createDefaultTaskRunner();
     this.#sdkService = options.sdkService ?? new AndroidSdkService({ paths: options.paths });
-    this.#temporarySigningService =
-      options.temporarySigningService ??
-      new LocalProjectTemporarySigningService({ paths: options.paths });
+    this.#managedSigningService =
+      options.managedSigningService ?? new LocalProjectManagedSigningService({ paths: options.paths });
     this.#buildStore.recoverInterruptedRuns(new Date().toISOString());
   }
 
@@ -649,7 +733,7 @@ export class LocalProjectBuildService implements ProjectBuildService {
       projectId,
       gradleWrapper: wrapper !== undefined,
       androidSdk: await this.#sdkService.inspect(project.rootPath, project.modules),
-      targets: wrapper === undefined ? [] : discoverAndroidBuildTargets(project),
+      targets: wrapper === undefined ? [] : await this.#discoverBuildTargets(project, wrapper),
     });
   }
 
@@ -747,16 +831,16 @@ export class LocalProjectBuildService implements ProjectBuildService {
     if (queuedRun === undefined && this.#buildStore.findPendingByProject(projectId) !== undefined) {
       throw new ProjectBuildError("该项目已有构建正在运行或排队。", 409);
     }
-    const target = discoverAndroidBuildTargets(project).find(
+    const wrapper = findWrapper(project.rootPath);
+    if (wrapper === undefined) {
+      throw new ProjectBuildError("未找到 Gradle Wrapper，已拒绝执行构建。", 422);
+    }
+    const target = (await this.#discoverBuildTargets(project, wrapper)).find(
       (candidate) =>
         candidate.modulePath === request.modulePath && candidate.variant === request.variant,
     );
     if (target === undefined) {
       throw new ProjectBuildError("所选构建变体不存在或当前不可执行。", 422);
-    }
-    const wrapper = findWrapper(project.rootPath);
-    if (wrapper === undefined) {
-      throw new ProjectBuildError("未找到 Gradle Wrapper，已拒绝执行构建。", 422);
     }
     if (queuedRun === undefined) {
       const id = randomUUID();
@@ -819,7 +903,7 @@ export class LocalProjectBuildService implements ProjectBuildService {
       `# DeviceRobot Gradle build\n# Started: ${run.startedAt}\n# Task: ${target.taskName}\n\n`,
     );
     let buildProcess: ProjectBuildProcess;
-    let temporarySigning: TemporarySigningMaterial | undefined;
+    let managedSigning: ManagedSigningMaterial | undefined;
     const startBuildProcess = (): ProjectBuildProcess =>
       this.#runner.start({
         executable: wrapper,
@@ -844,20 +928,20 @@ export class LocalProjectBuildService implements ProjectBuildService {
           `[DeviceRobot] 已清理 ${purgedWrapperArchives} 个损坏的 Gradle Wrapper 缓存，将自动重新下载。\n`,
         );
       }
-      temporarySigning = await this.#temporarySigningService.prepare(project);
-      if (temporarySigning !== undefined) {
+      managedSigning = await this.#managedSigningService.prepare(project);
+      if (managedSigning !== undefined) {
         logStream.write(
-          "\n[DeviceRobot] 已生成临时签名，仅用于本次本地构建，构建结束后将自动删除。\n",
+          "\n[DeviceRobot] 已准备本地受管调试签名；项目内副本会在构建结束后删除，受管密钥会保留以支持后续覆盖安装。\n",
         );
       }
       buildProcess = startBuildProcess();
     } catch (error) {
-      await temporarySigning?.dispose();
+      await managedSigning?.dispose();
       const failedRun = projectBuildRunSchema.parse({
         ...run,
         status: "failed",
         message:
-          error instanceof ProjectTemporarySigningError
+          error instanceof ProjectManagedSigningError
             ? error.message
             : `无法启动 Gradle Wrapper：${errorMessage(error)}`,
         exitCode: null,
@@ -874,7 +958,7 @@ export class LocalProjectBuildService implements ProjectBuildService {
       project,
       target,
       run,
-      ...(temporarySigning === undefined ? {} : { temporarySigning }),
+      ...(managedSigning === undefined ? {} : { managedSigning }),
       cancelled: false,
       completion: Promise.resolve(),
     } satisfies ActiveBuild;
@@ -961,6 +1045,52 @@ export class LocalProjectBuildService implements ProjectBuildService {
     return cancelledRun;
   }
 
+  async #discoverBuildTargets(
+    project: AndroidProject,
+    wrapper: string,
+  ): Promise<AndroidBuildTarget[]> {
+    const fallbackTargets = discoverAndroidBuildTargets(project);
+    const applicationModules = project.modules.filter((module) => module.moduleType === "application");
+    if (applicationModules.length === 0) {
+      return fallbackTargets;
+    }
+
+    const targets = await Promise.all(
+      applicationModules.map(async (module): Promise<AndroidBuildTarget[]> => {
+        const moduleTask = module.path === "." ? "tasks" : `:${module.path.replaceAll("/", ":")}:tasks`;
+        try {
+          const result = await this.#taskRunner.list({
+            executable: wrapper,
+            args: ["--no-daemon", "--console=plain", moduleTask, "--all"],
+            cwd: project.rootPath,
+            environment: {
+              ...process.env,
+              GRADLE_USER_HOME: this.#paths.gradleHome,
+            },
+          });
+          if (result.exitCode !== 0 || result.output === undefined) {
+            return fallbackTargets.filter((target) => target.modulePath === module.path);
+          }
+          const variants = parseAndroidAssembleTasks(result.output);
+          if (variants.length === 0) {
+            return fallbackTargets.filter((target) => target.modulePath === module.path);
+          }
+          return variants.map((variant) =>
+            androidBuildTargetSchema.parse({
+              modulePath: module.path,
+              moduleName: module.name,
+              variant,
+              taskName: taskName(module.path, variant),
+            }),
+          );
+        } catch {
+          return fallbackTargets.filter((target) => target.modulePath === module.path);
+        }
+      }),
+    );
+    return targets.flat().sort((left, right) => left.taskName.localeCompare(right.taskName, "en"));
+  }
+
   #requireProject(projectId: string): AndroidProject {
     const project = this.#projectStore.findById(projectId);
     if (project === undefined) {
@@ -990,12 +1120,12 @@ export class LocalProjectBuildService implements ProjectBuildService {
 
   async #complete(active: ActiveBuild, result: ProjectBuildProcessResult): Promise<void> {
     this.#activeRuns.delete(active.run.id);
-    if (active.temporarySigning !== undefined) {
+    if (active.managedSigning !== undefined) {
       try {
-        await active.temporarySigning.dispose();
-        active.logStream.write("[DeviceRobot] 临时签名已清理。\n");
+        await active.managedSigning.dispose();
+        active.logStream.write("[DeviceRobot] 项目内调试签名副本已清理，受管密钥将保留以支持后续覆盖安装。\n");
       } catch (error) {
-        active.logStream.write(`[DeviceRobot] 临时签名清理失败：${errorMessage(error)}\n`);
+        active.logStream.write(`[DeviceRobot] 项目内调试签名副本清理失败：${errorMessage(error)}\n`);
       }
     }
     await closeLogStream(active.logStream);

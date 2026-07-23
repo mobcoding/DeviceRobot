@@ -13,6 +13,7 @@ import { useState } from "react";
 import type { TestExecutionRun, TestStepExecution } from "@device-robot/contracts";
 
 import { cancelTestExecution, fetchTestRuns, testStepScreenshotUrl } from "../api/test-execution";
+import { formatDateTime } from "../ui/formatters";
 
 function statusLabel(status: TestExecutionRun["status"] | TestStepExecution["status"]): string {
   switch (status) {
@@ -45,14 +46,6 @@ function statusIcon(
     case "pending":
       return <Clock3 {...props} />;
   }
-}
-
-function dateTime(value: string | undefined): string {
-  if (value === undefined) {
-    return "--";
-  }
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false });
 }
 
 function TestStep({
@@ -198,8 +191,8 @@ export function TestRunPanel(): React.JSX.Element {
                   )}
                 </header>
                 <div className="test-run-meta">
-                  <span>开始：{dateTime(run.startedAt)}</span>
-                  <span>结束：{dateTime(run.finishedAt)}</span>
+                  <span>开始：{formatDateTime(run.startedAt)}</span>
+                  <span>结束：{formatDateTime(run.finishedAt)}</span>
                 </div>
                 {run.message !== undefined && <p className="test-run-message">{run.message}</p>}
                 <ol className="test-step-list">

@@ -69,6 +69,17 @@ export const aiModelConfigurations = sqliteTable("ai_model_configurations", {
   updatedAt: text("updated_at").notNull(),
 });
 
+export const aiPlans = sqliteTable("ai_plans", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  goal: text("goal").notNull(),
+  reply: text("reply").notNull(),
+  planJson: text("plan_json").notNull(),
+  policyJson: text("policy_json").notNull(),
+  contextJson: text("context_json").notNull(),
+  generatedAt: text("generated_at").notNull(),
+});
+
 export const testExecutionRuns = sqliteTable("test_execution_runs", {
   id: text("id").primaryKey(),
   projectId: text("project_id").notNull(),

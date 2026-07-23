@@ -59,6 +59,14 @@ export const aiPlanResponseSchema = z.object({
   generatedAt: z.iso.datetime(),
 });
 
+export const aiPlanRecordSchema = aiPlanResponseSchema.extend({
+  goal: z.string().min(1).max(4_000),
+});
+
+export const aiPlanListResponseSchema = z.object({
+  plans: z.array(aiPlanRecordSchema).max(100),
+});
+
 export type AiModelStatus = z.infer<typeof aiModelStatusSchema>;
 export type AiModelListRequest = z.infer<typeof aiModelListRequestSchema>;
 export type AiModelListResponse = z.infer<typeof aiModelListResponseSchema>;
@@ -68,3 +76,5 @@ export type GenerateAiPlanRequest = z.infer<typeof generateAiPlanRequestSchema>;
 export type AiPlanPolicy = z.infer<typeof aiPlanPolicySchema>;
 export type AiPlanContext = z.infer<typeof aiPlanContextSchema>;
 export type AiPlanResponse = z.infer<typeof aiPlanResponseSchema>;
+export type AiPlanRecord = z.infer<typeof aiPlanRecordSchema>;
+export type AiPlanListResponse = z.infer<typeof aiPlanListResponseSchema>;

@@ -23,7 +23,12 @@ type GeneratedSigningKey = {
   createdDirectories: string[];
 };
 
-export class ProjectTemporarySigningError extends Error {
+/**
+ * Missing project signing files are supplied from a locally managed debug key.
+ * The managed key is intentionally stable so consecutive local builds can be
+ * installed as updates; only its project-local copy is temporary.
+ */
+export class ProjectManagedSigningError extends Error {
   public constructor(message: string) {
     super(message);
   }
@@ -33,16 +38,16 @@ export interface SigningKeyCommandRunner {
   run(executable: string, args: readonly string[]): Promise<void>;
 }
 
-export interface TemporarySigningMaterial {
-  readonly generatedPaths: readonly string[];
+export interface ManagedSigningMaterial {
+  readonly temporaryProjectPaths: readonly string[];
   dispose(): Promise<void>;
 }
 
-export interface ProjectTemporarySigningService {
-  prepare(project: AndroidProject): Promise<TemporarySigningMaterial | undefined>;
+export interface ProjectManagedSigningService {
+  prepare(project: AndroidProject): Promise<ManagedSigningMaterial | undefined>;
 }
 
-export type LocalProjectTemporarySigningServiceOptions = {
+export type LocalProjectManagedSigningServiceOptions = {
   runner?: SigningKeyCommandRunner;
   paths?: AgentPaths;
 };
@@ -158,7 +163,7 @@ async function disposeGeneratedKeys(keys: readonly GeneratedSigningKey[]): Promi
   }
 }
 
-function persistentKeyPath(
+function managedKeyPath(
   paths: AgentPaths,
   project: AndroidProject,
   configuration: SigningConfiguration,
@@ -174,16 +179,16 @@ function persistentKeyPath(
   return join(paths.root, "signing-keys", `${project.id}-${fingerprint}.jks`);
 }
 
-export class LocalProjectTemporarySigningService implements ProjectTemporarySigningService {
+export class LocalProjectManagedSigningService implements ProjectManagedSigningService {
   readonly #runner: SigningKeyCommandRunner;
   readonly #paths: AgentPaths | undefined;
 
-  public constructor(options: LocalProjectTemporarySigningServiceOptions = {}) {
+  public constructor(options: LocalProjectManagedSigningServiceOptions = {}) {
     this.#runner = options.runner ?? createDefaultRunner();
     this.#paths = options.paths;
   }
 
-  public async prepare(project: AndroidProject): Promise<TemporarySigningMaterial | undefined> {
+  public async prepare(project: AndroidProject): Promise<ManagedSigningMaterial | undefined> {
     const configurations = await discoverSigningConfigurations(project);
     const generated: GeneratedSigningKey[] = [];
     try {
@@ -192,7 +197,7 @@ export class LocalProjectTemporarySigningService implements ProjectTemporarySign
           continue;
         }
         if (configuration.storePassword.length < 6 || configuration.keyPassword.length < 6) {
-          throw new ProjectTemporarySigningError("临时签名密码长度不足，无法生成 JKS 文件。");
+          throw new ProjectManagedSigningError("本地调试签名密码长度不足，无法生成 JKS 文件。");
         }
         const createdDirectories = await createParentDirectory(
           configuration.keyStorePath,
@@ -203,7 +208,7 @@ export class LocalProjectTemporarySigningService implements ProjectTemporarySign
         const generatedPath =
           this.#paths === undefined
             ? configuration.keyStorePath
-            : persistentKeyPath(this.#paths, project, configuration);
+            : managedKeyPath(this.#paths, project, configuration);
         if (this.#paths !== undefined) {
           await mkdir(dirname(generatedPath), { recursive: true });
         }
@@ -233,7 +238,7 @@ export class LocalProjectTemporarySigningService implements ProjectTemporarySign
           ]);
         }
         if (needsGeneration && !existsSync(generatedPath)) {
-          throw new ProjectTemporarySigningError("keytool 未生成预期的临时签名文件。");
+          throw new ProjectManagedSigningError("keytool 未生成预期的本地调试签名文件。");
         }
         if (this.#paths !== undefined) {
           await copyFile(generatedPath, configuration.keyStorePath);
@@ -241,8 +246,8 @@ export class LocalProjectTemporarySigningService implements ProjectTemporarySign
       }
     } catch (error) {
       await disposeGeneratedKeys(generated);
-      throw new ProjectTemporarySigningError(
-        `无法生成构建临时签名：${error instanceof Error ? error.message : String(error)}`,
+      throw new ProjectManagedSigningError(
+        `无法准备本地调试签名：${error instanceof Error ? error.message : String(error)}`,
       );
     }
 
@@ -250,7 +255,7 @@ export class LocalProjectTemporarySigningService implements ProjectTemporarySign
       return undefined;
     }
     return {
-      generatedPaths: generated.map((key) => key.path),
+      temporaryProjectPaths: generated.map((key) => key.path),
       dispose: async () => await disposeGeneratedKeys(generated),
     };
   }

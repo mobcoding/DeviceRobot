@@ -44,6 +44,7 @@ export class AndroidSdkServiceError extends Error {
 export type AndroidSdkServiceOptions = {
   paths: AgentPaths;
   environment?: NodeJS.ProcessEnv;
+  managedSdkInstaller?: (requiredPackages: readonly string[]) => Promise<void>;
 };
 
 function asArray<T>(value: T | readonly T[] | undefined): T[] {
@@ -426,11 +427,14 @@ async function runCommand(
 export class AndroidSdkService {
   readonly #paths: AgentPaths;
   readonly #environment: NodeJS.ProcessEnv;
+  readonly #managedSdkInstaller: (requiredPackages: readonly string[]) => Promise<void>;
   #installation: Promise<void> | undefined;
 
   public constructor(options: AndroidSdkServiceOptions) {
     this.#paths = options.paths;
     this.#environment = options.environment ?? process.env;
+    this.#managedSdkInstaller =
+      options.managedSdkInstaller ?? (async (requiredPackages) => await this.#installManagedSdk(requiredPackages));
   }
 
   public async inspect(
@@ -450,17 +454,25 @@ export class AndroidSdkService {
     projectRoot: string,
     modules: readonly AndroidProjectModule[],
   ): Promise<AndroidSdkInfo> {
-    const current = await this.inspect(projectRoot, modules);
-    if (current.available && current.missingPackages.length === 0) {
-      return current;
-    }
-    if (this.#installation === undefined) {
-      this.#installation = this.#installManagedSdk(current.requiredPackages).finally(() => {
+    while (true) {
+      const current = await this.inspect(projectRoot, modules);
+      if (current.available && current.missingPackages.length === 0) {
+        return current;
+      }
+
+      const activeInstallation = this.#installation;
+      if (activeInstallation !== undefined) {
+        await activeInstallation;
+        // The active installation may belong to another project with a different compileSdk,
+        // NDK, or CMake requirement. Re-check this project's requirements before returning.
+        continue;
+      }
+
+      this.#installation = this.#managedSdkInstaller(current.requiredPackages).finally(() => {
         this.#installation = undefined;
       });
+      await this.#installation;
     }
-    await this.#installation;
-    return await this.inspect(projectRoot, modules);
   }
 
   async #installManagedSdk(requiredPackages: readonly string[]): Promise<void> {

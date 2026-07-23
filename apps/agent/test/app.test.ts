@@ -40,7 +40,7 @@ describe("DeviceRobot Agent", () => {
     const migrationCount = reopened.database.sqlite
       .prepare("SELECT COUNT(*) AS count FROM schema_migrations")
       .get() as { count: number };
-    expect(migrationCount.count).toBe(8);
+    expect(migrationCount.count).toBe(9);
     await reopened.app.close();
   });
 
@@ -226,6 +226,7 @@ describe("DeviceRobot Agent", () => {
           baseUrl: "https://model.example/v1",
           model: "test-model",
         }),
+        list: async () => ({ plans: [] }),
         listModels: listAiModels,
         testConfiguration: testAiConfiguration,
         generate: generateAiPlan,

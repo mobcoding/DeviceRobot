@@ -8,13 +8,27 @@ export {
 } from "./action-plan.js";
 export { healthResponseSchema, type HealthResponse } from "./health.js";
 export {
+  cleanupLocalDataRequestSchema,
+  cleanupLocalDataResponseSchema,
+  localDataCategorySchema,
+  localDataUsageResponseSchema,
+  localDataUsageSchema,
+  type CleanupLocalDataRequest,
+  type CleanupLocalDataResponse,
+  type LocalDataCategory,
+  type LocalDataUsage,
+  type LocalDataUsageResponse,
+} from "./maintenance.js";
+export {
   aiModelStatusSchema,
   aiModelListRequestSchema,
   aiModelListResponseSchema,
   aiModelConnectionTestRequestSchema,
   aiModelConnectionTestResponseSchema,
   aiPlanContextSchema,
+  aiPlanListResponseSchema,
   aiPlanPolicySchema,
+  aiPlanRecordSchema,
   aiPlanResponseSchema,
   generateAiPlanRequestSchema,
   type AiModelStatus,
@@ -23,7 +37,9 @@ export {
   type AiModelConnectionTestRequest,
   type AiModelConnectionTestResponse,
   type AiPlanContext,
+  type AiPlanListResponse,
   type AiPlanPolicy,
+  type AiPlanRecord,
   type AiPlanResponse,
   type GenerateAiPlanRequest,
 } from "./ai.js";

@@ -6,6 +6,7 @@ import {
   aiModelConnectionTestResponseSchema,
   aiModelListResponseSchema,
   aiModelStatusSchema,
+  aiPlanListResponseSchema,
   aiPlanResponseSchema,
   type AgentAction,
   type AiModelConnectionTestRequest,
@@ -14,12 +15,14 @@ import {
   type AiModelListResponse,
   type AiModelStatus,
   type AiPlanResponse,
+  type AiPlanListResponse,
   type AndroidProject,
   type GenerateAiPlanRequest,
 } from "@device-robot/contracts";
 import { z } from "zod";
 
 import type { AiConfigurationStore } from "./ai-configuration-store.js";
+import type { AiPlanStore } from "./ai-plan-store.js";
 import type { AiSecretProtector } from "./ai-secret-protector.js";
 import type { ProjectStore } from "../projects/project-store.js";
 
@@ -55,6 +58,7 @@ export interface AiPlanModelProvider {
 
 export interface AiPlanService {
   status(): Promise<AiModelStatus>;
+  list(): Promise<AiPlanListResponse>;
   listModels(request: AiModelListRequest): Promise<AiModelListResponse>;
   testConfiguration(request: AiModelConnectionTestRequest): Promise<AiModelConnectionTestResponse>;
   generate(request: GenerateAiPlanRequest): Promise<AiPlanResponse>;
@@ -65,6 +69,7 @@ export type LocalAiPlanServiceOptions = {
   modelProvider?: AiPlanModelProvider;
   configurationStore?: AiConfigurationStore;
   secretProtector?: AiSecretProtector;
+  planStore?: AiPlanStore;
 };
 
 type OpenAiCompatibleConfiguration = {
@@ -643,6 +648,7 @@ export class LocalAiPlanService implements AiPlanService {
   readonly #projectStore: ProjectStore;
   readonly #configurationStore: AiConfigurationStore | undefined;
   readonly #secretProtector: AiSecretProtector | undefined;
+  readonly #planStore: AiPlanStore | undefined;
   readonly #usesCustomProvider: boolean;
   #modelProvider: AiPlanModelProvider;
   #activeConfiguration: CompleteOpenAiCompatibleConfiguration | undefined;
@@ -655,6 +661,7 @@ export class LocalAiPlanService implements AiPlanService {
     this.#modelProvider = options.modelProvider ?? new OpenAiCompatiblePlanProvider();
     this.#configurationStore = options.configurationStore;
     this.#secretProtector = options.secretProtector;
+    this.#planStore = options.planStore;
     this.#usesCustomProvider = options.modelProvider !== undefined;
     if (this.#modelProvider instanceof OpenAiCompatiblePlanProvider) {
       this.#activeConfiguration = this.#modelProvider.configuration();
@@ -667,6 +674,10 @@ export class LocalAiPlanService implements AiPlanService {
       return unavailableStatus(this.#restoreReason);
     }
     return this.#modelProvider.status();
+  }
+
+  public async list(): Promise<AiPlanListResponse> {
+    return aiPlanListResponseSchema.parse({ plans: this.#planStore?.list() ?? [] });
   }
 
   async #ensureConfigurationRestored(): Promise<void> {
@@ -791,7 +802,7 @@ export class LocalAiPlanService implements AiPlanService {
       .filter((decision) => decision.requiresApproval)
       .map((decision) => decision.reason);
     const plan = actionPlanSchema.parse({ ...provisionalPlan, requiresApproval: true });
-    return aiPlanResponseSchema.parse({
+    const response = aiPlanResponseSchema.parse({
       reply: modelPayload.reply,
       plan,
       policy: {
@@ -803,5 +814,7 @@ export class LocalAiPlanService implements AiPlanService {
       context: contextFor(project),
       generatedAt: new Date().toISOString(),
     });
+    this.#planStore?.save({ ...response, goal: request.goal.trim() });
+    return response;
   }
 }

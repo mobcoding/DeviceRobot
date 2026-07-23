@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { AndroidDevice } from "@device-robot/contracts";
 
 import { uploadDeviceFile } from "../api/device-management";
+import { formatBytes, formatDeviceName } from "../ui/formatters";
 
 type FileUploadDialogProps = {
   device: AndroidDevice;
@@ -11,17 +12,6 @@ type FileUploadDialogProps = {
   file: File;
   onClose(): void;
 };
-
-function formatBytes(value: number): string {
-  if (value >= 1_024 * 1_024) {
-    return `${(value / (1_024 * 1_024)).toFixed(2)} MB`;
-  }
-  return `${Math.max(1, Math.ceil(value / 1_024))} KB`;
-}
-
-function deviceName(device: AndroidDevice): string {
-  return device.model ?? device.deviceName ?? device.serial;
-}
 
 export function FileUploadDialog({
   device,
@@ -81,7 +71,7 @@ export function FileUploadDialog({
               </div>
               <div>
                 <dt>目标设备</dt>
-                <dd>{deviceName(device)}</dd>
+                <dd>{formatDeviceName(device)}</dd>
                 <small>{device.serial}</small>
               </div>
               <div className="apk-hash-row">
@@ -96,7 +86,7 @@ export function FileUploadDialog({
           {uploadMutation.isPending && (
             <div className="apk-progress" role="status">
               <LoaderCircle aria-hidden="true" size={22} strokeWidth={1.8} />
-              <span>正在上传到 {deviceName(device)}</span>
+              <span>正在上传到 {formatDeviceName(device)}</span>
             </div>
           )}
 

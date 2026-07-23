@@ -28,6 +28,7 @@ import {
   androidProjectSchema,
   createProjectRequestSchema,
   projectListResponseSchema,
+  projectBuildLogResponseSchema,
   projectBuildRunListResponseSchema,
   projectBuildRunSchema,
   installAndroidSdkRequestSchema,
@@ -585,6 +586,19 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
         await projectBuildService.start(
           parseProjectId(request.params),
           startProjectBuildRequestSchema.parse(request.body),
+        ),
+      );
+    } catch (error) {
+      return projectBuildErrorReply(reply, error);
+    }
+  });
+
+  app.get("/api/v1/projects/:projectId/builds/:buildId/log", async (request, reply) => {
+    try {
+      return projectBuildLogResponseSchema.parse(
+        await projectBuildService.getLog(
+          parseProjectId(request.params),
+          parseBuildId(request.params),
         ),
       );
     } catch (error) {

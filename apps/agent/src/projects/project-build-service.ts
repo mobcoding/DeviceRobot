@@ -2,12 +2,13 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream, existsSync, type WriteStream } from "node:fs";
 import { mkdir, open, readdir, readFile, realpath, rename, rm, stat } from "node:fs/promises";
-import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { AgentPaths } from "@device-robot/config";
 import {
   androidBuildTargetListResponseSchema,
   androidBuildTargetSchema,
+  projectBuildLogResponseSchema,
   projectBuildRunListResponseSchema,
   projectBuildRunSchema,
   type AndroidBuildTarget,
@@ -15,6 +16,7 @@ import {
   type AndroidProject,
   type AndroidSdkInfo,
   type ProjectBuildRun,
+  type ProjectBuildLogResponse,
   type ProjectBuildRunListResponse,
   type StartProjectBuildRequest,
 } from "@device-robot/contracts";
@@ -35,6 +37,7 @@ const MAX_BUILD_ARTIFACTS = 100;
 const MAX_ARTIFACT_DEPTH = 6;
 const MAX_CONCURRENT_BUILDS = 2;
 const MAX_BUILD_FAILURE_MESSAGE_LENGTH = 8_000;
+const MAX_BUILD_LOG_RESPONSE_BYTES = 1_048_576;
 const MAX_GRADLE_DISTRIBUTION_DOWNLOAD_ATTEMPTS = 8;
 const GRADLE_TASK_DISCOVERY_TIMEOUT_MS = 90_000;
 const GENERIC_GRADLE_FAILURE_MESSAGE = "Gradle 构建失败。";
@@ -90,6 +93,7 @@ export interface ProjectBuildService {
   listTargets(projectId: string): Promise<AndroidBuildTargetListResponse>;
   installSdk(projectId: string): Promise<AndroidSdkInfo>;
   listRuns(projectId: string): Promise<ProjectBuildRunListResponse>;
+  getLog(projectId: string, runId: string): Promise<ProjectBuildLogResponse>;
   getArtifact(
     projectId: string,
     runId: string,
@@ -178,16 +182,18 @@ function taskName(modulePath: string, variant: string): string {
 }
 
 export function discoverAndroidBuildTargets(project: AndroidProject): AndroidBuildTarget[] {
-  return project.modules.filter((module) => module.moduleType === "application").flatMap((module) =>
-    variantsForModule(project, module.path).map((variant) =>
-      androidBuildTargetSchema.parse({
-        modulePath: module.path,
-        moduleName: module.name,
-        variant,
-        taskName: taskName(module.path, variant),
-      }),
-    ),
-  );
+  return project.modules
+    .filter((module) => module.moduleType === "application")
+    .flatMap((module) =>
+      variantsForModule(project, module.path).map((variant) =>
+        androidBuildTargetSchema.parse({
+          modulePath: module.path,
+          moduleName: module.name,
+          variant,
+          taskName: taskName(module.path, variant),
+        }),
+      ),
+    );
 }
 
 function variantFromAssembleTask(task: string): string | undefined {
@@ -223,16 +229,11 @@ function findWrapper(rootPath: string): string | undefined {
 }
 
 function wrapperDistributionUrl(contents: string): string | undefined {
-  return /^\s*distributionUrl\s*=\s*(.+?)\s*$/mu.exec(contents)?.[1]
-    ?.trim()
-    .replaceAll("\\:", ":");
+  return /^\s*distributionUrl\s*=\s*(.+?)\s*$/mu.exec(contents)?.[1]?.trim().replaceAll("\\:", ":");
 }
 
 function wrapperDistributionArchiveName(distributionUrl: string): string | undefined {
-  const path = distributionUrl
-    .split(/[?#]/u, 1)[0]
-    ?.split("/")
-    .at(-1);
+  const path = distributionUrl.split(/[?#]/u, 1)[0]?.split("/").at(-1);
   return path?.endsWith(".zip") === true ? path : undefined;
 }
 
@@ -269,7 +270,10 @@ export async function purgeCorruptGradleWrapperCache(
 ): Promise<number> {
   let properties: string;
   try {
-    properties = await readFile(join(projectRoot, "gradle", "wrapper", "gradle-wrapper.properties"), "utf8");
+    properties = await readFile(
+      join(projectRoot, "gradle", "wrapper", "gradle-wrapper.properties"),
+      "utf8",
+    );
   } catch {
     return 0;
   }
@@ -310,11 +314,15 @@ export async function purgeCorruptGradleWrapperCache(
 }
 
 async function sha256(path: string): Promise<string> {
-  return createHash("sha256").update(await readFile(path)).digest("hex");
+  return createHash("sha256")
+    .update(await readFile(path))
+    .digest("hex");
 }
 
 async function gradleDistributionChecksum(distributionUrl: string): Promise<string> {
-  const response = await fetch(`${distributionUrl}.sha256`, { signal: AbortSignal.timeout(30_000) });
+  const response = await fetch(`${distributionUrl}.sha256`, {
+    signal: AbortSignal.timeout(30_000),
+  });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
   }
@@ -336,11 +344,13 @@ export async function downloadGradleDistribution(
     return await existingDownload;
   }
 
-  const download = downloadGradleDistributionOnce(distributionUrl, archivePath, checksum).finally(() => {
-    if (gradleDistributionDownloads.get(key) === download) {
-      gradleDistributionDownloads.delete(key);
-    }
-  });
+  const download = downloadGradleDistributionOnce(distributionUrl, archivePath, checksum).finally(
+    () => {
+      if (gradleDistributionDownloads.get(key) === download) {
+        gradleDistributionDownloads.delete(key);
+      }
+    },
+  );
   gradleDistributionDownloads.set(key, download);
   return await download;
 }
@@ -374,7 +384,9 @@ async function downloadGradleDistributionOnce(
         if (response.body === null) {
           continue;
         }
-        if (!(await appendGradleDistributionResponse(response.body, temporaryPath, downloaded > 0))) {
+        if (
+          !(await appendGradleDistributionResponse(response.body, temporaryPath, downloaded > 0))
+        ) {
           continue;
         }
         if ((await sha256(temporaryPath)).toLowerCase() === checksum) {
@@ -430,10 +442,16 @@ async function appendGradleDistributionResponse(
   }
 }
 
-async function resumeGradleWrapperDownload(projectRoot: string, gradleHome: string): Promise<number> {
+async function resumeGradleWrapperDownload(
+  projectRoot: string,
+  gradleHome: string,
+): Promise<number> {
   let properties: string;
   try {
-    properties = await readFile(join(projectRoot, "gradle", "wrapper", "gradle-wrapper.properties"), "utf8");
+    properties = await readFile(
+      join(projectRoot, "gradle", "wrapper", "gradle-wrapper.properties"),
+      "utf8",
+    );
   } catch {
     return 0;
   }
@@ -691,7 +709,65 @@ async function findApkArtifacts(
     }
   };
   await visit(outputRoot, 0);
-  return artifacts;
+  const matchingArtifacts = artifacts.filter((artifact) =>
+    artifactMatchesVariant(artifact, target.variant),
+  );
+  // A few Android plugins use a non-standard output layout. Retain the
+  // previous discovery behavior for those projects rather than hiding a valid
+  // APK, while normal AGP outputs only expose the requested variant.
+  return matchingArtifacts.length > 0 ? matchingArtifacts : artifacts;
+}
+
+function artifactMatchesVariant(artifactPath: string, variant: string): boolean {
+  const outputMarker = "build/outputs/apk/";
+  const normalizedPath = artifactPath.replaceAll("\\", "/").toLocaleLowerCase("en");
+  const outputIndex = normalizedPath.lastIndexOf(outputMarker);
+  if (outputIndex < 0) {
+    return false;
+  }
+  const variantDirectory = variant.replace(/([a-z0-9])([A-Z])/gu, "$1/$2").toLocaleLowerCase("en");
+  return normalizedPath.slice(outputIndex + outputMarker.length).startsWith(`${variantDirectory}/`);
+}
+
+function sanitizeArtifactNamePart(value: string): string {
+  const withoutControlCharacters = [...value]
+    .map((character) => ((character.codePointAt(0) ?? 0) < 32 ? "_" : character))
+    .join("");
+  const sanitized = withoutControlCharacters
+    .trim()
+    .replace(/[<>:"/\\|?*]/gu, "_")
+    .replace(/[. ]+$/u, "")
+    .slice(0, 96);
+  return sanitized.length > 0 ? sanitized : "应用";
+}
+
+function formatArtifactTimestamp(value: string): string {
+  const date = new Date(value);
+  const part = (number: number): string => String(number).padStart(2, "0");
+  return `${date.getFullYear()}${part(date.getMonth() + 1)}${part(date.getDate())}_${part(
+    date.getHours(),
+  )}${part(date.getMinutes())}${part(date.getSeconds())}`;
+}
+
+function artifactDownloadName(
+  project: AndroidProject,
+  run: ProjectBuildRun,
+  artifactIndex: number,
+): string {
+  const suffix = run.artifactPaths.length > 1 ? `_${artifactIndex + 1}` : "";
+  return `${sanitizeArtifactNamePart(project.name)}_${formatArtifactTimestamp(
+    run.finishedAt ?? run.startedAt,
+  )}_${run.variant}${suffix}.apk`;
+}
+
+function withArtifactNames(project: AndroidProject, run: ProjectBuildRun): ProjectBuildRun {
+  if (run.artifactPaths.length === 0) {
+    return run;
+  }
+  return projectBuildRunSchema.parse({
+    ...run,
+    artifactNames: run.artifactPaths.map((_, index) => artifactDownloadName(project, run, index)),
+  });
 }
 
 function closeLogStream(stream: WriteStream): Promise<void> {
@@ -722,7 +798,8 @@ export class LocalProjectBuildService implements ProjectBuildService {
     this.#taskRunner = options.taskRunner ?? createDefaultTaskRunner();
     this.#sdkService = options.sdkService ?? new AndroidSdkService({ paths: options.paths });
     this.#managedSigningService =
-      options.managedSigningService ?? new LocalProjectManagedSigningService({ paths: options.paths });
+      options.managedSigningService ??
+      new LocalProjectManagedSigningService({ paths: options.paths });
     this.#buildStore.recoverInterruptedRuns(new Date().toISOString());
   }
 
@@ -748,16 +825,70 @@ export class LocalProjectBuildService implements ProjectBuildService {
   }
 
   public async listRuns(projectId: string): Promise<ProjectBuildRunListResponse> {
-    this.#requireProject(projectId);
+    const project = this.#requireProject(projectId);
     const runs = await Promise.all(
-      this.#buildStore
-        .listByProject(projectId)
-        .map(async (run) => await this.#hydrateFailureMessage(run)),
+      this.#buildStore.listByProject(projectId).map(async (run) => {
+        const normalizedRun = this.#normalizeArtifactPaths(run);
+        return withArtifactNames(project, await this.#hydrateFailureMessage(normalizedRun));
+      }),
     );
     return projectBuildRunListResponseSchema.parse({
       projectId,
       runs,
     });
+  }
+
+  public async getLog(projectId: string, runId: string): Promise<ProjectBuildLogResponse> {
+    this.#requireProject(projectId);
+    const run = this.#buildStore
+      .listByProject(projectId)
+      .find((candidate) => candidate.id === runId);
+    if (run === undefined) {
+      throw new ProjectBuildError("未找到构建记录。", 404);
+    }
+
+    const logDirectory = join(this.#paths.logs, "builds");
+    const requestedPath = resolve(run.logPath);
+    if (!isPathWithin(logDirectory, requestedPath)) {
+      throw new ProjectBuildError("构建日志路径无效。", 422);
+    }
+
+    try {
+      const [resolvedLogDirectory, resolvedLogPath] = await Promise.all([
+        realpath(logDirectory),
+        realpath(requestedPath),
+      ]);
+      if (!isPathWithin(resolvedLogDirectory, resolvedLogPath)) {
+        throw new ProjectBuildError("构建日志路径无效。", 422);
+      }
+      const metadata = await stat(resolvedLogPath);
+      if (!metadata.isFile()) {
+        throw new ProjectBuildError("构建日志暂不可用。", 404);
+      }
+
+      const offset = Math.max(0, metadata.size - MAX_BUILD_LOG_RESPONSE_BYTES);
+      const buffer = Buffer.alloc(Math.min(metadata.size, MAX_BUILD_LOG_RESPONSE_BYTES));
+      const handle = await open(resolvedLogPath, "r");
+      try {
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
+        return projectBuildLogResponseSchema.parse({
+          projectId,
+          buildId: run.id,
+          content: buffer
+            .subarray(0, bytesRead)
+            .toString("utf8")
+            .replace(/^\uFFFD/u, ""),
+          truncated: offset > 0,
+        });
+      } finally {
+        await handle.close();
+      }
+    } catch (error) {
+      if (error instanceof ProjectBuildError) {
+        throw error;
+      }
+      throw new ProjectBuildError("构建日志暂不可用。", 404);
+    }
   }
 
   public async getArtifact(
@@ -804,7 +935,7 @@ export class LocalProjectBuildService implements ProjectBuildService {
         throw new ProjectBuildError("构建产物已不存在或不是文件。", 404);
       }
       return {
-        fileName: basename(artifactPath),
+        fileName: artifactDownloadName(project, run, artifactIndex),
         filePath: artifactPath,
         sizeBytes: metadata.size,
       };
@@ -827,29 +958,36 @@ export class LocalProjectBuildService implements ProjectBuildService {
       }
       throw new ProjectBuildError("Agent 正在停止，无法创建构建任务。", 503);
     }
-    const project = await this.#resolveProjectForBuild(projectId);
-    if (queuedRun === undefined && this.#buildStore.findPendingByProject(projectId) !== undefined) {
-      throw new ProjectBuildError("该项目已有构建正在运行或排队。", 409);
-    }
-    const wrapper = findWrapper(project.rootPath);
-    if (wrapper === undefined) {
-      throw new ProjectBuildError("未找到 Gradle Wrapper，已拒绝执行构建。", 422);
-    }
-    const target = (await this.#discoverBuildTargets(project, wrapper)).find(
-      (candidate) =>
-        candidate.modulePath === request.modulePath && candidate.variant === request.variant,
-    );
-    if (target === undefined) {
-      throw new ProjectBuildError("所选构建变体不存在或当前不可执行。", 422);
-    }
     if (queuedRun === undefined) {
+      const project = this.#requireProject(projectId);
+      if (this.#buildStore.findPendingByProject(projectId) !== undefined) {
+        throw new ProjectBuildError("该项目已有构建正在运行或排队。", 409);
+      }
+      if (findWrapper(project.rootPath) === undefined) {
+        throw new ProjectBuildError("未找到 Gradle Wrapper，已拒绝执行构建。", 422);
+      }
+
+      const requestedModule = project.modules.find((module) => module.path === request.modulePath);
+      if (requestedModule === undefined) {
+        throw new ProjectBuildError("所选构建模块不存在或当前不可执行。", 422);
+      }
+      const requestedTarget = androidBuildTargetSchema.safeParse({
+        modulePath: request.modulePath,
+        moduleName: requestedModule.name,
+        variant: request.variant,
+        taskName: taskName(request.modulePath, request.variant),
+      });
+      if (!requestedTarget.success) {
+        throw new ProjectBuildError("所选构建目标无效。", 422);
+      }
+
       const id = randomUUID();
       const run = projectBuildRunSchema.parse({
         id,
         projectId,
-        modulePath: target.modulePath,
-        variant: target.variant,
-        taskName: target.taskName,
+        modulePath: requestedTarget.data.modulePath,
+        variant: requestedTarget.data.variant,
+        taskName: requestedTarget.data.taskName,
         status: "queued",
         logPath: join(this.#paths.logs, "builds", `${id}.log`),
         artifactPaths: [],
@@ -861,6 +999,22 @@ export class LocalProjectBuildService implements ProjectBuildService {
       this.#drainBuildQueue();
       return run;
     }
+
+    // All slow work happens after a run has been persisted and admitted to a
+    // queue slot, so submitting a build never blocks the HTTP request.
+    const project = await this.#resolveProjectForBuild(projectId);
+    const wrapper = findWrapper(project.rootPath);
+    if (wrapper === undefined) {
+      throw new ProjectBuildError("未找到 Gradle Wrapper，已拒绝执行构建。", 422);
+    }
+    const target = (await this.#discoverBuildTargets(project, wrapper)).find(
+      (candidate) =>
+        candidate.modulePath === request.modulePath && candidate.variant === request.variant,
+    );
+    if (target === undefined) {
+      throw new ProjectBuildError("所选构建变体不存在或当前不可执行。", 422);
+    }
+
     let androidSdk: AndroidSdkInfo;
     try {
       androidSdk = await this.#sdkService.install(project.rootPath, project.modules);
@@ -871,7 +1025,11 @@ export class LocalProjectBuildService implements ProjectBuildService {
     if (this.#disposed) {
       return this.#cancelQueuedRun(queuedRun, "Agent 停止前的排队构建已取消。");
     }
-    if (!androidSdk.available || androidSdk.path === undefined || androidSdk.missingPackages.length > 0) {
+    if (
+      !androidSdk.available ||
+      androidSdk.path === undefined ||
+      androidSdk.missingPackages.length > 0
+    ) {
       const missing = androidSdk.missingPackages.join("、");
       throw new ProjectBuildError(
         missing.length === 0 ? "Android SDK 未就绪。" : `Android SDK 缺少：${missing}。`,
@@ -1017,11 +1175,15 @@ export class LocalProjectBuildService implements ProjectBuildService {
       this.#launchingBuilds += 1;
       void this.start(queued.projectId, queued.request, queued.run)
         .catch((error) => {
+          const message =
+            error instanceof ProjectBuildError
+              ? error.message
+              : `无法启动排队构建：${errorMessage(error)}`;
           this.#buildStore.finish(
             projectBuildRunSchema.parse({
               ...queued.run,
               status: "failed",
-              message: `无法启动排队构建：${errorMessage(error)}`,
+              message,
               exitCode: null,
               finishedAt: new Date().toISOString(),
             }),
@@ -1045,19 +1207,34 @@ export class LocalProjectBuildService implements ProjectBuildService {
     return cancelledRun;
   }
 
+  #normalizeArtifactPaths(run: ProjectBuildRun): ProjectBuildRun {
+    const matchingArtifacts = run.artifactPaths.filter((artifactPath) =>
+      artifactMatchesVariant(artifactPath, run.variant),
+    );
+    if (matchingArtifacts.length === 0 || matchingArtifacts.length === run.artifactPaths.length) {
+      return run;
+    }
+    const normalizedRun = projectBuildRunSchema.parse({ ...run, artifactPaths: matchingArtifacts });
+    this.#buildStore.finish(normalizedRun);
+    return normalizedRun;
+  }
+
   async #discoverBuildTargets(
     project: AndroidProject,
     wrapper: string,
   ): Promise<AndroidBuildTarget[]> {
     const fallbackTargets = discoverAndroidBuildTargets(project);
-    const applicationModules = project.modules.filter((module) => module.moduleType === "application");
+    const applicationModules = project.modules.filter(
+      (module) => module.moduleType === "application",
+    );
     if (applicationModules.length === 0) {
       return fallbackTargets;
     }
 
     const targets = await Promise.all(
       applicationModules.map(async (module): Promise<AndroidBuildTarget[]> => {
-        const moduleTask = module.path === "." ? "tasks" : `:${module.path.replaceAll("/", ":")}:tasks`;
+        const moduleTask =
+          module.path === "." ? "tasks" : `:${module.path.replaceAll("/", ":")}:tasks`;
         try {
           const result = await this.#taskRunner.list({
             executable: wrapper,
@@ -1123,9 +1300,13 @@ export class LocalProjectBuildService implements ProjectBuildService {
     if (active.managedSigning !== undefined) {
       try {
         await active.managedSigning.dispose();
-        active.logStream.write("[DeviceRobot] 项目内调试签名副本已清理，受管密钥将保留以支持后续覆盖安装。\n");
+        active.logStream.write(
+          "[DeviceRobot] 项目内调试签名副本已清理，受管密钥将保留以支持后续覆盖安装。\n",
+        );
       } catch (error) {
-        active.logStream.write(`[DeviceRobot] 项目内调试签名副本清理失败：${errorMessage(error)}\n`);
+        active.logStream.write(
+          `[DeviceRobot] 项目内调试签名副本清理失败：${errorMessage(error)}\n`,
+        );
       }
     }
     await closeLogStream(active.logStream);

@@ -82,7 +82,13 @@ export const androidBuildTargetListResponseSchema = z.object({
   targets: z.array(androidBuildTargetSchema).max(500),
 });
 
-export const projectBuildRunStatusSchema = z.enum(["queued", "running", "succeeded", "failed", "cancelled"]);
+export const projectBuildRunStatusSchema = z.enum([
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+]);
 
 export const projectBuildRunSchema = z.object({
   id: z.uuid(),
@@ -93,6 +99,11 @@ export const projectBuildRunSchema = z.object({
   status: projectBuildRunStatusSchema,
   logPath: z.string().min(1),
   artifactPaths: z.array(z.string().min(1)).max(100),
+  /**
+   * User-facing names used when an APK is exported or installed. The physical
+   * artifact remains in the project's Gradle output directory.
+   */
+  artifactNames: z.array(z.string().min(1)).max(100).optional(),
   message: z.string().min(1).optional(),
   exitCode: z.number().int().nullable().optional(),
   startedAt: z.iso.datetime(),
@@ -102,6 +113,13 @@ export const projectBuildRunSchema = z.object({
 export const projectBuildRunListResponseSchema = z.object({
   projectId: z.uuid(),
   runs: z.array(projectBuildRunSchema).max(100),
+});
+
+export const projectBuildLogResponseSchema = z.object({
+  projectId: z.uuid(),
+  buildId: z.uuid(),
+  content: z.string().max(1_048_576),
+  truncated: z.boolean(),
 });
 
 export const startProjectBuildRequestSchema = z.object({
@@ -148,6 +166,7 @@ export type AndroidBuildTargetListResponse = z.infer<typeof androidBuildTargetLi
 export type ProjectBuildRunStatus = z.infer<typeof projectBuildRunStatusSchema>;
 export type ProjectBuildRun = z.infer<typeof projectBuildRunSchema>;
 export type ProjectBuildRunListResponse = z.infer<typeof projectBuildRunListResponseSchema>;
+export type ProjectBuildLogResponse = z.infer<typeof projectBuildLogResponseSchema>;
 export type StartProjectBuildRequest = z.infer<typeof startProjectBuildRequestSchema>;
 export type AndroidProject = z.infer<typeof androidProjectSchema>;
 export type ProjectListResponse = z.infer<typeof projectListResponseSchema>;

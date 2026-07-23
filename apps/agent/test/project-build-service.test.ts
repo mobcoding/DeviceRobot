@@ -469,6 +469,13 @@ describe("Android project build service", () => {
     mkdirSync(join(root, "app", "build", "outputs", "apk", "free", "debug"), {
       recursive: true,
     });
+    mkdirSync(join(root, "app", "build", "outputs", "apk", "debug"), { recursive: true });
+    mkdirSync(join(root, "app", "build", "outputs", "apk", "release"), { recursive: true });
+    writeFileSync(join(root, "app", "build", "outputs", "apk", "debug", "app-debug.apk"), "old");
+    writeFileSync(
+      join(root, "app", "build", "outputs", "apk", "release", "app-release.apk"),
+      "old",
+    );
     writeFileSync(join(root, "gradlew.bat"), "@echo off");
     const project = createProject(root);
     const store = new InMemoryProjectBuildStore();
@@ -531,11 +538,12 @@ describe("Android project build service", () => {
         id: running.id,
         status: "succeeded",
         artifactPaths: ["app/build/outputs/apk/free/debug/app-free-debug.apk"],
+        artifactNames: [expect.stringMatching(/^Example_\d{8}_\d{6}_freeDebug\.apk$/u)],
       });
     });
 
     await expect(service.getArtifact(project.id, running.id, 0)).resolves.toMatchObject({
-      fileName: "app-free-debug.apk",
+      fileName: expect.stringMatching(/^Example_\d{8}_\d{6}_freeDebug\.apk$/u),
       filePath: join(root, "app", "build", "outputs", "apk", "free", "debug", "app-free-debug.apk"),
       sizeBytes: 3,
     });
@@ -604,10 +612,20 @@ describe("Android project build service", () => {
         statusCode: 404,
       },
     );
-    await expect(
-      service.start(project.id, { modulePath: "app", variant: "clean", approved: true }),
-    ).rejects.toMatchObject({ statusCode: 422 });
     writeFileSync(join(root, "gradlew.bat"), "@echo off");
+    const unsupported = await service.start(project.id, {
+      modulePath: "app",
+      variant: "clean",
+      approved: true,
+    });
+    await vi.waitFor(async () => {
+      const runs = await service.listRuns(project.id);
+      expect(runs.runs[0]).toMatchObject({
+        id: unsupported.id,
+        status: "failed",
+        message: "所选构建变体不存在或当前不可执行。",
+      });
+    });
     const running = await service.start(project.id, {
       modulePath: "app",
       variant: "debug",
@@ -625,6 +643,59 @@ describe("Android project build service", () => {
         message: expect.stringContaining("Android resource linking failed"),
       });
     });
+    await expect(service.getLog(project.id, running.id)).resolves.toMatchObject({
+      projectId: project.id,
+      buildId: running.id,
+      content: expect.stringContaining("DeviceRobot Gradle build"),
+      truncated: false,
+    });
+  });
+
+  it("queues a build before Gradle target discovery finishes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "device-robot-build-"));
+    temporaryDirectories.push(root);
+    writeFileSync(join(root, "gradlew.bat"), "@echo off");
+    const project = createProject(root);
+    const paths = resolveAgentPaths(join(root, "agent-data"));
+    prepareManagedAndroidSdk(paths);
+    const runner = new ControlledBuildRunner();
+    let resolveDiscovery: ((result: ProjectBuildProcessResult) => void) | undefined;
+    const taskRunner = {
+      list: vi.fn(
+        async () =>
+          await new Promise<ProjectBuildProcessResult>((resolveDiscoveryPromise) => {
+            resolveDiscovery = resolveDiscoveryPromise;
+          }),
+      ),
+    };
+    const service = new LocalProjectBuildService({
+      paths,
+      projectStore: new InMemoryProjectStore(project),
+      buildStore: new InMemoryProjectBuildStore(),
+      runner,
+      taskRunner,
+    });
+
+    const queued = await service.start(project.id, {
+      modulePath: "app",
+      variant: "debug",
+      approved: true,
+    });
+
+    expect(queued).toMatchObject({ status: "queued", taskName: ":app:assembleDebug" });
+    await vi.waitFor(() => expect(taskRunner.list).toHaveBeenCalledTimes(1));
+    expect(runner.starts).toHaveLength(0);
+
+    resolveDiscovery?.({
+      exitCode: 0,
+      output: "assembleDebug - Assembles the Debug build.",
+    });
+    await vi.waitFor(() => expect(runner.starts).toHaveLength(1));
+    runner.complete({ exitCode: 0 });
+    await vi.waitFor(async () => {
+      const runs = await service.listRuns(project.id);
+      expect(runs.runs[0]).toMatchObject({ id: queued.id, status: "succeeded" });
+    });
   });
 
   it("runs at most two builds globally and starts the next queued build after a slot opens", async () => {
@@ -634,10 +705,7 @@ describe("Android project build service", () => {
     const projects = projectRoots.map((projectRoot, index) => {
       mkdirSync(join(projectRoot, "app"), { recursive: true });
       writeFileSync(join(projectRoot, "gradlew.bat"), "@echo off");
-      return createProject(
-        projectRoot,
-        `123e4567-e89b-12d3-a456-42661417400${index + 1}`,
-      );
+      return createProject(projectRoot, `123e4567-e89b-12d3-a456-42661417400${index + 1}`);
     });
     const paths = resolveAgentPaths(join(root, "agent-data"));
     prepareManagedAndroidSdk(paths);
@@ -651,23 +719,24 @@ describe("Android project build service", () => {
     });
 
     const runs = await Promise.all(
-      projects.map(async (project) =>
-        await service.start(project.id, { modulePath: "app", variant: "debug", approved: true }),
+      projects.map(
+        async (project) =>
+          await service.start(project.id, { modulePath: "app", variant: "debug", approved: true }),
       ),
     );
 
     expect(runs.map((run) => run.status)).toEqual(["queued", "queued", "queued"]);
     await vi.waitFor(() => expect(runner.starts).toHaveLength(2));
-    expect(store.listByProject(projects[2]!.id)[0]).toMatchObject({
-      id: runs[2]!.id,
-      status: "queued",
-    });
+    const queuedRun = runs.find(
+      (run) => store.listByProject(run.projectId)[0]?.status === "queued",
+    );
+    expect(queuedRun).toBeDefined();
 
     runner.complete({ exitCode: 0 });
     await vi.waitFor(() => expect(runner.starts).toHaveLength(3));
     await vi.waitFor(async () => {
-      const queuedProjectRuns = await service.listRuns(projects[2]!.id);
-      expect(queuedProjectRuns.runs[0]).toMatchObject({ id: runs[2]!.id, status: "running" });
+      const queuedProjectRuns = await service.listRuns(queuedRun!.projectId);
+      expect(queuedProjectRuns.runs[0]).toMatchObject({ id: queuedRun!.id, status: "running" });
     });
 
     runner.complete({ exitCode: 0 });
@@ -677,7 +746,9 @@ describe("Android project build service", () => {
         projects.map(async (project) => await service.listRuns(project.id)),
       );
       expect(completedRuns.flatMap((response) => response.runs)).toEqual(
-        expect.arrayContaining(runs.map((run) => expect.objectContaining({ id: run.id, status: "succeeded" }))),
+        expect.arrayContaining(
+          runs.map((run) => expect.objectContaining({ id: run.id, status: "succeeded" })),
+        ),
       );
     });
   });
@@ -689,10 +760,7 @@ describe("Android project build service", () => {
     const projects = projectRoots.map((projectRoot, index) => {
       mkdirSync(join(projectRoot, "app"), { recursive: true });
       writeFileSync(join(projectRoot, "gradlew.bat"), "@echo off");
-      return createProject(
-        projectRoot,
-        `223e4567-e89b-12d3-a456-42661417400${index + 1}`,
-      );
+      return createProject(projectRoot, `223e4567-e89b-12d3-a456-42661417400${index + 1}`);
     });
     const paths = resolveAgentPaths(join(root, "agent-data"));
     prepareManagedAndroidSdk(paths);
@@ -705,8 +773,9 @@ describe("Android project build service", () => {
       runner,
     });
     const runs = await Promise.all(
-      projects.map(async (project) =>
-        await service.start(project.id, { modulePath: "app", variant: "debug", approved: true }),
+      projects.map(
+        async (project) =>
+          await service.start(project.id, { modulePath: "app", variant: "debug", approved: true }),
       ),
     );
 

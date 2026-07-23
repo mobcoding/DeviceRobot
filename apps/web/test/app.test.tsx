@@ -314,10 +314,31 @@ const completedProjectBuildResponse = {
   ...runningProjectBuildResponse,
   status: "succeeded",
   artifactPaths: ["app/build/outputs/apk/debug/app-debug.apk"],
+  artifactNames: ["Example_20260721_180200_debug.apk"],
   message: "构建完成，发现 1 个 APK 输出。",
   exitCode: 0,
   finishedAt: "2026-07-21T10:02:00.000Z",
 };
+
+const failedProjectBuildResponse = {
+  ...runningProjectBuildResponse,
+  status: "failed",
+  message:
+    "Execution failed for task ':app:mergeDebugResources'.\n> Android resource linking failed",
+  exitCode: 1,
+  finishedAt: "2026-07-21T10:02:00.000Z",
+};
+
+const detailedBuildLog = [
+  "# DeviceRobot Gradle build",
+  "> Task :app:mergeDebugResources FAILED",
+  "",
+  "FAILURE: Build failed with an exception.",
+  "",
+  "* What went wrong:",
+  "Execution failed for task ':app:mergeDebugResources'.",
+  "> Android resource linking failed",
+].join("\n");
 
 const aiModelStatusResponse = {
   configured: true,
@@ -390,6 +411,8 @@ function mockApis(
       reason?: string;
     };
     completedProjectBuild?: boolean;
+    failedProjectBuild?: boolean;
+    projectBuildRuns?: Array<typeof completedProjectBuildResponse>;
   } = {},
 ): {
   getDeviceRequests: () => number;
@@ -416,7 +439,7 @@ function mockApis(
   let projectReindexRequests = 0;
   let projectSourceIndexed = false;
   let projectBuildRequests = 0;
-  let projectBuildStarted = options.completedProjectBuild ?? false;
+  let projectBuildStarted = options.completedProjectBuild ?? options.failedProjectBuild ?? false;
   let currentProjectBuildRun = runningProjectBuildResponse;
   let projectArtifactInstallRequests = 0;
   let aiPlanRequests = 0;
@@ -533,6 +556,21 @@ function mockApis(
       });
     }
 
+    if (
+      url.includes(`/projects/${projectBuildTargetResponse.projectId}/builds/`) &&
+      url.endsWith("/log")
+    ) {
+      return new Response(
+        JSON.stringify({
+          projectId: projectBuildTargetResponse.projectId,
+          buildId: failedProjectBuildResponse.id,
+          content: detailedBuildLog,
+          truncated: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
     if (url.endsWith(`/projects/${projectBuildTargetResponse.projectId}/builds`)) {
       if (method === "POST") {
         projectBuildRequests += 1;
@@ -564,11 +602,13 @@ function mockApis(
         JSON.stringify({
           projectId: projectBuildTargetResponse.projectId,
           runs: projectBuildStarted
-            ? [
+            ? (options.projectBuildRuns ?? [
                 options.completedProjectBuild
                   ? completedProjectBuildResponse
-                  : currentProjectBuildRun,
-              ]
+                  : options.failedProjectBuild
+                    ? failedProjectBuildResponse
+                    : currentProjectBuildRun,
+              ])
             : [],
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -814,7 +854,12 @@ describe("DeviceRobot Web UI", () => {
     await user.click(within(dialog).getByRole("button", { name: "确认构建" }));
 
     await vi.waitFor(() => expect(getProjectBuildRequests()).toBe(1));
-    expect(await screen.findByText("构建中")).toBeInTheDocument();
+    expect(
+      await screen.findByText("构建任务正在执行，完成后 APK 会出现在此处。"),
+    ).toBeInTheDocument();
+    const buildButton = screen.getByRole("button", { name: "构建 app release" });
+    expect(buildButton).toBeDisabled();
+    expect(buildButton).toHaveTextContent("构建中");
   });
 
   it("exports and installs an APK from a completed project build", async () => {
@@ -824,11 +869,13 @@ describe("DeviceRobot Web UI", () => {
 
     await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
     await user.click(screen.getByRole("button", { name: "项目" }));
-    const output = await screen.findByText("app-debug.apk");
+    const output = await screen.findByText("Example_20260721_180200_debug.apk");
     const artifact = output.closest(".project-build-artifact");
     expect(artifact).not.toBeNull();
     expect(
-      within(artifact as HTMLElement).getByRole("link", { name: "导出 app-debug.apk" }),
+      within(artifact as HTMLElement).getByRole("link", {
+        name: "导出 Example_20260721_180200_debug.apk",
+      }),
     ).toHaveAttribute(
       "href",
       `/api/v1/projects/${projectBuildTargetResponse.projectId}/builds/${completedProjectBuildResponse.id}/artifacts/0/download`,
@@ -836,7 +883,7 @@ describe("DeviceRobot Web UI", () => {
 
     await user.click(
       within(artifact as HTMLElement).getByRole("button", {
-        name: "安装 app-debug.apk 到当前设备",
+        name: "安装 Example_20260721_180200_debug.apk 到当前设备",
       }),
     );
 
@@ -844,6 +891,65 @@ describe("DeviceRobot Web UI", () => {
     expect(
       await within(artifact as HTMLElement).findByText("已安装 com.example.app"),
     ).toBeInTheDocument();
+  });
+
+  it("shows a failed build's detailed Gradle log in a dialog", async () => {
+    mockApis({ failedProjectBuild: true });
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
+    await user.click(screen.getByRole("button", { name: "项目" }));
+
+    expect(
+      await screen.findByText("Execution failed for task ':app:mergeDebugResources'.", {
+        exact: false,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "展开" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "查看详情" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "构建失败详情" });
+    const log = dialog.querySelector(".project-build-log");
+    expect(log).toHaveTextContent("# DeviceRobot Gradle build");
+    expect(log).toHaveTextContent("Android resource linking failed");
+    await user.click(within(dialog).getByRole("button", { name: "关闭" }));
+    expect(screen.queryByRole("dialog", { name: "构建失败详情" })).not.toBeInTheDocument();
+  });
+
+  it("only displays the two most recent project build records", async () => {
+    const latest = {
+      ...completedProjectBuildResponse,
+      id: "323e4567-e89b-12d3-a456-426614174000",
+      artifactNames: ["Example_20260722_100200_release.apk"],
+      variant: "release",
+      taskName: ":app:assembleRelease",
+      startedAt: "2026-07-22T10:01:00.000Z",
+      finishedAt: "2026-07-22T10:02:00.000Z",
+    };
+    const previous = {
+      ...completedProjectBuildResponse,
+      id: "423e4567-e89b-12d3-a456-426614174000",
+      artifactNames: ["Example_20260721_100200_debug.apk"],
+    };
+    const older = {
+      ...completedProjectBuildResponse,
+      id: "523e4567-e89b-12d3-a456-426614174000",
+      artifactNames: ["Example_20260720_100200_debug.apk"],
+      startedAt: "2026-07-20T10:01:00.000Z",
+      finishedAt: "2026-07-20T10:02:00.000Z",
+    };
+    mockApis({ completedProjectBuild: true, projectBuildRuns: [older, previous, latest] });
+    renderApp();
+
+    await userEvent.click(await screen.findByRole("button", { name: "添加工作页签" }));
+    await userEvent.click(screen.getByRole("button", { name: "项目" }));
+
+    expect(await screen.findByText("Example_20260722_100200_release.apk")).toBeInTheDocument();
+    expect(screen.getByText("Example_20260721_100200_debug.apk")).toBeInTheDocument();
+    expect(screen.queryByText("Example_20260720_100200_debug.apk")).not.toBeInTheDocument();
+    expect(screen.queryByText("已完成")).not.toBeInTheDocument();
+    expect(screen.queryByText("构建时间")).not.toBeInTheDocument();
   });
 
   it("uses the configured model to generate a preview-only AI ActionPlan", async () => {

@@ -3,6 +3,7 @@ import {
   androidProjectSchema,
   androidSdkInfoSchema,
   androidBuildTargetListResponseSchema,
+  projectBuildLogResponseSchema,
   projectBuildRunListResponseSchema,
   projectBuildRunSchema,
   projectListResponseSchema,
@@ -14,6 +15,7 @@ import {
   type ApkInstallRequest,
   type ApkInstallResponse,
   type ProjectBuildRun,
+  type ProjectBuildLogResponse,
   type ProjectBuildRunListResponse,
   type StartProjectBuildRequest,
   type ProjectListResponse,
@@ -85,6 +87,22 @@ export async function fetchProjectBuildRuns(
     },
     projectBuildRunListResponseSchema,
     "构建记录读取失败。",
+  );
+}
+
+export async function fetchProjectBuildLog(
+  projectId: string,
+  buildId: string,
+  signal?: AbortSignal,
+): Promise<ProjectBuildLogResponse> {
+  return await requestJson(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/builds/${encodeURIComponent(buildId)}/log`,
+    {
+      headers: { Accept: "application/json" },
+      ...(signal === undefined ? {} : { signal }),
+    },
+    projectBuildLogResponseSchema,
+    "构建日志读取失败。",
   );
 }
 

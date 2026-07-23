@@ -154,6 +154,12 @@ describe("DeviceRobot Agent", () => {
       startedAt: "2026-07-21T10:00:00.000Z",
     };
     const startBuild = vi.fn(async () => buildRun);
+    const getBuildLog = vi.fn(async () => ({
+      projectId: project.id,
+      buildId: buildRun.id,
+      content: "FAILURE: Build failed with an exception.",
+      truncated: false,
+    }));
     const aiPlan = {
       reply: "已生成首页检查计划。",
       plan: {
@@ -213,6 +219,7 @@ describe("DeviceRobot Agent", () => {
           missingPackages: [],
         }),
         listRuns: async () => ({ projectId: project.id, runs: [buildRun] }),
+        getLog: getBuildLog,
         getArtifact: async () => {
           throw new Error("No build artifact is configured for this route test.");
         },
@@ -269,6 +276,11 @@ describe("DeviceRobot Agent", () => {
         headers,
         payload: { modulePath: "app", variant: "debug", approved: true },
       });
+      const buildLog = await app.inject({
+        method: "GET",
+        url: `/api/v1/projects/${project.id}/builds/${buildRun.id}/log`,
+        headers,
+      });
       const aiStatus = await app.inject({ method: "GET", url: "/api/v1/ai/status", headers });
       const aiModels = await app.inject({
         method: "POST",
@@ -307,6 +319,11 @@ describe("DeviceRobot Agent", () => {
       expect(sdkInstall.statusCode).toBe(200);
       expect(runs.statusCode).toBe(200);
       expect(build.statusCode).toBe(200);
+      expect(buildLog.statusCode).toBe(200);
+      expect(buildLog.json()).toMatchObject({
+        buildId: buildRun.id,
+        content: "FAILURE: Build failed with an exception.",
+      });
       expect(aiStatus.statusCode).toBe(200);
       expect(aiModels.statusCode).toBe(200);
       expect(invalidAiModels.statusCode).toBe(400);
@@ -323,6 +340,7 @@ describe("DeviceRobot Agent", () => {
         variant: "debug",
         approved: true,
       });
+      expect(getBuildLog).toHaveBeenCalledWith(project.id, buildRun.id);
       expect(generateAiPlan).toHaveBeenCalledWith({ projectId: project.id, goal: "检查首页" });
       expect(listAiModels).toHaveBeenCalledWith({
         baseUrl: "https://model.example/v1",
@@ -629,6 +647,9 @@ describe("DeviceRobot Agent", () => {
           throw new Error("Not used");
         },
         listRuns: async () => ({ projectId, runs: [] }),
+        getLog: async () => {
+          throw new Error("Not used");
+        },
         getArtifact,
         start: async () => {
           throw new Error("Not used");

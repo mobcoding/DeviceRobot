@@ -1,39 +1,35 @@
-import { agentActionSchema } from "@device-robot/contracts";
-import { z } from "zod";
+import { testSuiteSchema, type TestSuite } from "@device-robot/contracts";
+import { parse as parseYaml } from "yaml";
 
-export const sourceEvidenceSchema = z.object({
-  file: z.string().min(1),
-  line: z.number().int().positive(),
-});
+export {
+  sourceEvidenceSchema,
+  testCaseSchema,
+  testStepSchema,
+  testSuiteSchema,
+  type SourceEvidence,
+  type TestCase,
+  type TestStep,
+  type TestSuite,
+} from "@device-robot/contracts";
 
-export const testStepSchema = z.object({
-  id: z.string().min(1),
-  action: agentActionSchema,
-  healingEnabled: z.boolean().default(true),
-});
+export class TestDslParseError extends Error {}
 
-export const testCaseSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  priority: z.enum(["P0", "P1", "P2", "P3"]).default("P2"),
-  tags: z.array(z.string().min(1)).default([]),
-  sourceEvidence: z.array(sourceEvidenceSchema).default([]),
-  data: z.record(z.string(), z.string()).default({}),
-  steps: z.array(testStepSchema).min(1),
-});
+export function parseTestSuiteDocument(document: string, fileName?: string): TestSuite {
+  const content = document.replace(/^\uFEFF/u, "").trim();
+  if (content.length === 0) {
+    throw new TestDslParseError("测试用例文件为空。");
+  }
 
-export const testSuiteSchema = z.object({
-  schemaVersion: z.literal(1),
-  appId: z.string().min(1),
-  suite: z.object({
-    id: z.string().min(1),
-    name: z.string().min(1),
-    sourceRevision: z.string().min(1),
-  }),
-  cases: z.array(testCaseSchema).min(1),
-});
-
-export type SourceEvidence = z.infer<typeof sourceEvidenceSchema>;
-export type TestStep = z.infer<typeof testStepSchema>;
-export type TestCase = z.infer<typeof testCaseSchema>;
-export type TestSuite = z.infer<typeof testSuiteSchema>;
+  try {
+    const value = fileName?.toLocaleLowerCase().endsWith(".json")
+      ? JSON.parse(content)
+      : parseYaml(content, { uniqueKeys: true });
+    return testSuiteSchema.parse(value);
+  } catch (error) {
+    if (error instanceof TestDslParseError) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : "文件格式无效。";
+    throw new TestDslParseError(`测试 DSL 校验失败：${message}`);
+  }
+}

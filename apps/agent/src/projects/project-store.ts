@@ -11,6 +11,7 @@ export interface ProjectStore {
   findById(id: string): AndroidProject | undefined;
   findByRootPath(rootPath: string): AndroidProject | undefined;
   create(project: AndroidProject): void;
+  delete(id: string): void;
   updateName(id: string, name: string): void;
   updateSourceIndex(project: AndroidProject): void;
 }
@@ -97,6 +98,10 @@ export class SqliteProjectStore implements ProjectStore {
         project.createdAt,
         project.updatedAt,
       );
+  }
+
+  public delete(id: string): void {
+    this.#sqlite.prepare("DELETE FROM projects WHERE id = ?").run(id);
   }
 
   public updateName(id: string, name: string): void {

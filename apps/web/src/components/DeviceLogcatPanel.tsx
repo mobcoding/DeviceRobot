@@ -3,6 +3,7 @@ import { RefreshCw, ScrollText, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { AndroidDevice, DeviceLogcatEntry, DeviceLogcatLevel } from "@device-robot/contracts";
 
+import { useAgentUnavailable } from "../agent-availability";
 import { fetchDeviceLogcat } from "../api/device-management";
 
 type DeviceLogcatPanelProps = {
@@ -78,6 +79,7 @@ function matchesSearch(entry: DeviceLogcatEntry, searchTerm: string): boolean {
 }
 
 export function DeviceLogcatPanel({ device }: DeviceLogcatPanelProps): React.JSX.Element {
+  const agentUnavailable = useAgentUnavailable();
   const [level, setLevel] = useState<DeviceLogcatLevel | "all">("all");
   const [searchTerm, setSearchTerm] = useState("");
   const logcatQuery = useQuery({
@@ -142,7 +144,7 @@ export function DeviceLogcatPanel({ device }: DeviceLogcatPanelProps): React.JSX
         )}
       </div>
 
-      {logcatQuery.isError && (
+      {logcatQuery.isError && !agentUnavailable && (
         <p className="management-error" role="alert">
           {logcatQuery.error.message}
         </p>

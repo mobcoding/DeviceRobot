@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { healthResponseSchema } from "@device-robot/contracts";
@@ -40,7 +40,7 @@ describe("DeviceRobot Agent", () => {
     const migrationCount = reopened.database.sqlite
       .prepare("SELECT COUNT(*) AS count FROM schema_migrations")
       .get() as { count: number };
-    expect(migrationCount.count).toBe(9);
+    expect(migrationCount.count).toBe(12);
     await reopened.app.close();
   });
 
@@ -86,6 +86,47 @@ describe("DeviceRobot Agent", () => {
     await app.close();
   });
 
+  it("serves current production assets while preserving SPA and API fallbacks", async () => {
+    const root = createTemporaryRoot();
+    const webRoot = join(root, "web");
+    mkdirSync(join(webRoot, "assets"), { recursive: true });
+    writeFileSync(join(webRoot, "index.html"), "<!doctype html><title>DeviceRobot</title>");
+    writeFileSync(join(webRoot, "assets", "app-current.js"), "console.log('current asset');");
+
+    const { app } = await createAgentApp({
+      localAppData: root,
+      serveWeb: true,
+      webRoot,
+    });
+    const headers = { host: "127.0.0.1:43110" };
+
+    try {
+      const asset = await app.inject({
+        method: "GET",
+        url: "/assets/app-current.js",
+        headers,
+      });
+      const workspace = await app.inject({ method: "GET", url: "/projects/example", headers });
+      const unknownAsset = await app.inject({
+        method: "GET",
+        url: "/assets/missing.js",
+        headers,
+      });
+      const unknownApi = await app.inject({ method: "GET", url: "/api/v1/missing", headers });
+
+      expect(asset.statusCode).toBe(200);
+      expect(asset.headers["content-type"]).toContain("application/javascript");
+      expect(asset.body).toContain("current asset");
+      expect(workspace.statusCode).toBe(200);
+      expect(workspace.body).toContain("DeviceRobot");
+      expect(unknownAsset.statusCode).toBe(404);
+      expect(unknownApi.statusCode).toBe(404);
+      expect(unknownApi.json()).toEqual({ error: "API route not found" });
+    } finally {
+      await app.close();
+    }
+  });
+
   it("returns devices from the injected discovery service", async () => {
     const { app } = await createAgentApp({
       localAppData: createTemporaryRoot(),
@@ -121,6 +162,71 @@ describe("DeviceRobot Agent", () => {
     await app.close();
   });
 
+  it("serves a completed test run as offline HTML and ZIP report files", async () => {
+    const root = createTemporaryRoot();
+    const htmlPath = join(root, "report.html");
+    const zipPath = join(root, "report.zip");
+    writeFileSync(htmlPath, "<!doctype html><title>DeviceRobot 测试报告</title>");
+    writeFileSync(zipPath, Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+    const run = {
+      id: "123e4567-e89b-12d3-a456-426614174000",
+      projectId: "223e4567-e89b-12d3-a456-426614174000",
+      planId: "dsl:smoke:opens-home",
+      name: "首页冒烟测试",
+      deviceSerial: "device-1",
+      appId: "com.example.app",
+      status: "failed" as const,
+      steps: [],
+      startedAt: "2026-07-23T10:00:00.000Z",
+      finishedAt: "2026-07-23T10:00:01.000Z",
+    };
+    const { app } = await createAgentApp({
+      localAppData: root,
+      testReportService: {
+        generate: async () => ({
+          run,
+          generatedAt: "2026-07-23T10:00:02.000Z",
+          htmlFileName: "report.html",
+          zipFileName: "report.zip",
+          screenshotCount: 0,
+          evidence: { uiXml: false, logcat: false, appiumLog: false },
+        }),
+        htmlPath: async () => htmlPath,
+        zipPath: async () => zipPath,
+      },
+    });
+    const headers = { host: "127.0.0.1:43110" };
+
+    try {
+      const metadata = await app.inject({
+        method: "GET",
+        url: `/api/v1/test-runs/${run.id}/report`,
+        headers,
+      });
+      const html = await app.inject({
+        method: "GET",
+        url: `/api/v1/test-runs/${run.id}/report/html`,
+        headers,
+      });
+      const zip = await app.inject({
+        method: "GET",
+        url: `/api/v1/test-runs/${run.id}/report/zip`,
+        headers,
+      });
+
+      expect(metadata.statusCode).toBe(200);
+      expect(metadata.json()).toMatchObject({ run: { id: run.id }, screenshotCount: 0 });
+      expect(html.statusCode).toBe(200);
+      expect(html.headers["content-type"]).toContain("text/html");
+      expect(html.body).toContain("DeviceRobot");
+      expect(zip.statusCode).toBe(200);
+      expect(zip.headers["content-type"]).toContain("application/zip");
+      expect(zip.rawPayload.subarray(0, 2).toString("utf8")).toBe("PK");
+    } finally {
+      await app.close();
+    }
+  });
+
   it("lists and registers projects through contract-validated routes", async () => {
     const project = {
       id: "123e4567-e89b-12d3-a456-426614174000",
@@ -141,6 +247,7 @@ describe("DeviceRobot Agent", () => {
       updatedAt: "2026-07-21T10:00:00.000Z",
     };
     const add = vi.fn(async () => project);
+    const remove = vi.fn(async () => undefined);
     const reindex = vi.fn(async () => project);
     const buildRun = {
       id: "223e4567-e89b-12d3-a456-426614174000",
@@ -178,6 +285,22 @@ describe("DeviceRobot Agent", () => {
       generatedAt: "2026-07-21T10:00:00.000Z",
     };
     const generateAiPlan = vi.fn(async () => aiPlan);
+    const aiConversation = {
+      id: "423e4567-e89b-12d3-a456-426614174000",
+      projectId: project.id,
+      appId: "com.example.app",
+      title: "com.example.app 测试会话",
+      sourceRevision: "abc123",
+      contextStatus: "current" as const,
+      createdAt: "2026-07-21T10:00:00.000Z",
+      updatedAt: "2026-07-21T10:00:00.000Z",
+    };
+    const listAiConversations = vi.fn(async (projectId: string) => ({
+      projectId,
+      conversations: [aiConversation],
+    }));
+    const createAiConversation = vi.fn(async () => aiConversation);
+    const getAiConversation = vi.fn(async () => ({ conversation: aiConversation, messages: [] }));
     const listAiModels = vi.fn(async () => ({
       provider: "openai-compatible" as const,
       models: ["test-model"],
@@ -190,7 +313,7 @@ describe("DeviceRobot Agent", () => {
     }));
     const { app } = await createAgentApp({
       localAppData: createTemporaryRoot(),
-      projectService: { list: async () => [project], add, reindex },
+      projectService: { list: async () => [project], add, remove, reindex },
       projectBuildService: {
         listTargets: async () => ({
           projectId: project.id,
@@ -234,6 +357,9 @@ describe("DeviceRobot Agent", () => {
           model: "test-model",
         }),
         list: async () => ({ plans: [] }),
+        listConversations: listAiConversations,
+        createConversation: createAiConversation,
+        getConversation: getAiConversation,
         listModels: listAiModels,
         testConfiguration: testAiConfiguration,
         generate: generateAiPlan,
@@ -252,6 +378,11 @@ describe("DeviceRobot Agent", () => {
       const indexed = await app.inject({
         method: "POST",
         url: `/api/v1/projects/${project.id}/index`,
+        headers,
+      });
+      const deleted = await app.inject({
+        method: "DELETE",
+        url: `/api/v1/projects/${project.id}`,
         headers,
       });
       const targets = await app.inject({
@@ -310,10 +441,27 @@ describe("DeviceRobot Agent", () => {
         headers,
         payload: { projectId: project.id, goal: "检查首页" },
       });
+      const aiConversations = await app.inject({
+        method: "GET",
+        url: `/api/v1/projects/${project.id}/ai-conversations`,
+        headers,
+      });
+      const aiConversationCreated = await app.inject({
+        method: "POST",
+        url: `/api/v1/projects/${project.id}/ai-conversations`,
+        headers,
+        payload: { appId: "com.example.app" },
+      });
+      const aiConversationDetail = await app.inject({
+        method: "GET",
+        url: `/api/v1/ai-conversations/${aiConversation.id}`,
+        headers,
+      });
 
       expect(listed.statusCode).toBe(200);
       expect(listed.json()).toMatchObject({ projects: [{ name: "Example" }] });
       expect(created.statusCode).toBe(200);
+      expect(deleted.statusCode).toBe(204);
       expect(indexed.statusCode).toBe(200);
       expect(targets.statusCode).toBe(200);
       expect(sdkInstall.statusCode).toBe(200);
@@ -329,11 +477,15 @@ describe("DeviceRobot Agent", () => {
       expect(invalidAiModels.statusCode).toBe(400);
       expect(aiConfiguration.statusCode).toBe(200);
       expect(aiGenerated.statusCode).toBe(200);
+      expect(aiConversations.statusCode).toBe(200);
+      expect(aiConversationCreated.statusCode).toBe(200);
+      expect(aiConversationDetail.statusCode).toBe(200);
       expect(aiModels.headers["cache-control"]).toBe("no-store");
       expect(aiConfiguration.headers["cache-control"]).toBe("no-store");
       expect(invalidAiModels.json()).toEqual({ error: "请填写有效的 Base URL 和 API Key。" });
       expect(created.json()).toMatchObject({ modules: [{ packageName: "com.example.app" }] });
       expect(add).toHaveBeenCalledWith({ source: "local", rootPath: "C:\\Github\\Example" });
+      expect(remove).toHaveBeenCalledWith(project.id);
       expect(reindex).toHaveBeenCalledWith(project.id);
       expect(startBuild).toHaveBeenCalledWith(project.id, {
         modulePath: "app",
@@ -342,6 +494,11 @@ describe("DeviceRobot Agent", () => {
       });
       expect(getBuildLog).toHaveBeenCalledWith(project.id, buildRun.id);
       expect(generateAiPlan).toHaveBeenCalledWith({ projectId: project.id, goal: "检查首页" });
+      expect(listAiConversations).toHaveBeenCalledWith(project.id);
+      expect(createAiConversation).toHaveBeenCalledWith(project.id, {
+        appId: "com.example.app",
+      });
+      expect(getAiConversation).toHaveBeenCalledWith(aiConversation.id);
       expect(listAiModels).toHaveBeenCalledWith({
         baseUrl: "https://model.example/v1",
         apiKey: "test-key",
@@ -401,6 +558,13 @@ describe("DeviceRobot Agent", () => {
           readAt: "2026-07-21T10:00:00.000Z",
         }),
       },
+      deviceApplicationIconService: {
+        readIcon: async (serial, packageName) => {
+          expect(serial).toBe("device-1");
+          expect(packageName).toBe("com.example.app");
+          return { content: Buffer.from([0x89, 0x50, 0x4e, 0x47]), contentType: "image/png" };
+        },
+      },
     });
     const headers = { host: "127.0.0.1:43110" };
 
@@ -413,6 +577,11 @@ describe("DeviceRobot Agent", () => {
       const applications = await app.inject({
         method: "GET",
         url: "/api/v1/devices/device-1/applications?filter=user",
+        headers,
+      });
+      const applicationIcon = await app.inject({
+        method: "GET",
+        url: "/api/v1/devices/device-1/applications/com.example.app/icon",
         headers,
       });
       const logcat = await app.inject({
@@ -431,6 +600,9 @@ describe("DeviceRobot Agent", () => {
         filter: "user",
         applications: [{ packageName: "com.example.app", source: "user" }],
       });
+      expect(applicationIcon.statusCode).toBe(200);
+      expect(applicationIcon.headers["content-type"]).toContain("image/png");
+      expect(applicationIcon.rawPayload).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
       expect(logcat.statusCode).toBe(200);
       expect(logcat.json()).toMatchObject({
         entries: [{ level: "info", tag: "ActivityManager" }],
@@ -551,7 +723,7 @@ describe("DeviceRobot Agent", () => {
     const discard = vi.fn(async () => undefined);
     const { app } = await createAgentApp({
       localAppData: createTemporaryRoot(),
-      apkArtifactService: { stage, install, discard },
+      apkArtifactService: { stage, find: async () => artifact, install, discard },
     });
     const boundary = "device-robot-apk-boundary";
     const payload = Buffer.from(
@@ -656,7 +828,7 @@ describe("DeviceRobot Agent", () => {
         },
         dispose: async () => {},
       },
-      apkArtifactService: { stage, install, discard: async () => {} },
+      apkArtifactService: { stage, find: async () => artifact, install, discard: async () => {} },
     });
     const headers = { host: "127.0.0.1:43110" };
 

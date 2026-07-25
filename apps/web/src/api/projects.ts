@@ -21,7 +21,7 @@ import {
   type ProjectListResponse,
 } from "@device-robot/contracts";
 
-import { requestJson } from "./client";
+import { requestEmpty, requestJson } from "./client";
 
 export async function fetchProjects(signal?: AbortSignal): Promise<ProjectListResponse> {
   return await requestJson(
@@ -45,6 +45,14 @@ export async function createProject(request: CreateProjectRequest): Promise<Andr
     },
     androidProjectSchema,
     "项目创建失败。",
+  );
+}
+
+export async function deleteProject(projectId: string): Promise<void> {
+  await requestEmpty(
+    `/api/v1/projects/${encodeURIComponent(projectId)}`,
+    { method: "DELETE", headers: { Accept: "application/json" } },
+    "删除项目失败。",
   );
 }
 

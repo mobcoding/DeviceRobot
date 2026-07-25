@@ -540,8 +540,8 @@ export class AdbScrcpyStreamService implements ScrcpyStreamService {
       this.#sessions.delete(session.serial);
     }
 
-    await session.reader.cancel().catch(() => undefined);
     await session.client.close().catch(() => undefined);
+    await session.reader.cancel().catch(() => undefined);
     await session.adb.close().catch(() => undefined);
   }
 

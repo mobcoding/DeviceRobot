@@ -24,3 +24,19 @@ export async function requestJson<T>(
   }
   return schema.parse(await response.json());
 }
+
+export async function requestEmpty(
+  url: string,
+  init: RequestInit | undefined,
+  fallback: string,
+): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(url, init);
+  } catch {
+    throw new Error("无法连接本地 Agent。请确认 Agent 正在运行。");
+  }
+  if (!response.ok) {
+    throw await responseError(response, fallback);
+  }
+}

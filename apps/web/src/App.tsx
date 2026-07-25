@@ -6,13 +6,15 @@ import {
   FolderGit2,
   FolderOpen,
   LayoutDashboard,
-  Play,
+  LoaderCircle,
   Plus,
   ScrollText,
+  Terminal,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AndroidDevice } from "@device-robot/contracts";
 
+import { AgentAvailabilityProvider } from "./agent-availability";
 import { fetchDevices } from "./api/devices";
 import { fetchHealth } from "./api/health";
 import { AppiumRuntimePanel } from "./components/AppiumRuntimePanel";
@@ -24,29 +26,40 @@ import { DeviceLogcatPanel } from "./components/DeviceLogcatPanel";
 import { DeviceMirrorPanel } from "./components/DeviceMirrorPanel";
 import { FileManagerPanel } from "./components/FileManagerPanel";
 import { ProjectManagerPanel } from "./components/ProjectManagerPanel";
-import { TestRunPanel } from "./components/TestRunPanel";
 import { formatDeviceName } from "./ui/formatters";
 
 const viewIds = [
   "devices",
+  "projects",
+  "conversations",
   "files",
   "applications",
   "logs",
-  "projects",
-  "conversations",
-  "runs",
+  "terminal",
   "reports",
 ] as const;
-const defaultVisibleViews: ViewId[] = ["devices", "files", "applications"];
+const defaultVisibleViews: ViewId[] = [
+  "devices",
+  "projects",
+  "conversations",
+  "files",
+  "applications",
+];
 const GOLDEN_RATIO = 1.618;
 const MINIMUM_MIRROR_WIDTH = 280;
+const MIRROR_WIDTH_STORAGE_PREFIX = "device-robot:mirror-width:";
+const LAST_MIRROR_WIDTH_STORAGE_KEY = `${MIRROR_WIDTH_STORAGE_PREFIX}last`;
+const DEFAULT_MIRROR_ASPECT_RATIO = 9 / 19;
+const MIRROR_ASPECT_RATIO_STORAGE_PREFIX = "device-robot:mirror-aspect-ratio:";
+const LAST_MIRROR_ASPECT_RATIO_STORAGE_KEY = `${MIRROR_ASPECT_RATIO_STORAGE_PREFIX}last`;
 
 type ViewId = (typeof viewIds)[number];
 type PlannedViewId = Exclude<
   ViewId,
-  "devices" | "files" | "applications" | "logs" | "projects" | "conversations" | "runs"
+  "devices" | "files" | "applications" | "logs" | "projects" | "conversations"
 >;
 type WorkspaceTab = { id: ViewId; label: string };
+type AgentStatus = "normal" | "running" | "unavailable" | "degraded";
 
 type PlannedViewContent = {
   title: string;
@@ -65,20 +78,84 @@ function sidebarWidthBounds(container: HTMLElement | null): { minimum: number; m
   return { minimum: Math.min(MINIMUM_MIRROR_WIDTH, maximum), maximum };
 }
 
+function storedMirrorWidth(storageKey: string): number | undefined {
+  try {
+    const value = Number.parseInt(globalThis.localStorage.getItem(storageKey) ?? "", 10);
+    return Number.isSafeInteger(value) && value >= MINIMUM_MIRROR_WIDTH ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function savedMirrorWidth(serial: string | undefined): number | undefined {
+  const deviceWidth =
+    serial === undefined ? undefined : storedMirrorWidth(`${MIRROR_WIDTH_STORAGE_PREFIX}${serial}`);
+  return deviceWidth ?? storedMirrorWidth(LAST_MIRROR_WIDTH_STORAGE_KEY);
+}
+
+function saveMirrorWidth(serial: string | undefined, width: number): void {
+  try {
+    globalThis.localStorage.setItem(LAST_MIRROR_WIDTH_STORAGE_KEY, String(width));
+    if (serial !== undefined) {
+      globalThis.localStorage.setItem(`${MIRROR_WIDTH_STORAGE_PREFIX}${serial}`, String(width));
+    }
+  } catch {
+    // Private browsing or browser policy can make local storage unavailable.
+  }
+}
+
+function storedMirrorAspectRatio(storageKey: string): number | undefined {
+  try {
+    const value = Number.parseFloat(globalThis.localStorage.getItem(storageKey) ?? "");
+    return Number.isFinite(value) && value >= 0.2 && value <= 4 ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function savedMirrorAspectRatio(serial: string | undefined): number {
+  const deviceAspectRatio =
+    serial === undefined
+      ? undefined
+      : storedMirrorAspectRatio(`${MIRROR_ASPECT_RATIO_STORAGE_PREFIX}${serial}`);
+  return (
+    deviceAspectRatio ??
+    storedMirrorAspectRatio(LAST_MIRROR_ASPECT_RATIO_STORAGE_KEY) ??
+    DEFAULT_MIRROR_ASPECT_RATIO
+  );
+}
+
+function saveMirrorAspectRatio(serial: string | undefined, aspectRatio: number): void {
+  try {
+    const value = String(aspectRatio);
+    globalThis.localStorage.setItem(LAST_MIRROR_ASPECT_RATIO_STORAGE_KEY, value);
+    if (serial !== undefined) {
+      globalThis.localStorage.setItem(`${MIRROR_ASPECT_RATIO_STORAGE_PREFIX}${serial}`, value);
+    }
+  } catch {
+    // Private browsing or browser policy can make local storage unavailable.
+  }
+}
+
 const workspaceTabs: readonly WorkspaceTab[] = [
   { id: "devices", label: "概览" },
+  { id: "projects", label: "项目" },
+  { id: "conversations", label: "AI" },
   { id: "files", label: "文件管理器" },
   { id: "applications", label: "应用管理器" },
   { id: "logs", label: "设备日志" },
-  { id: "projects", label: "项目" },
-  { id: "conversations", label: "AI 与用例" },
-  { id: "runs", label: "测试运行" },
-  { id: "reports", label: "报告" },
+  { id: "terminal", label: "终端" },
+  { id: "reports", label: "测试报告" },
 ];
 
 const plannedViews: Record<PlannedViewId, PlannedViewContent> = {
+  terminal: {
+    title: "终端",
+    description: "终端能力尚未启用。",
+    capabilities: ["受控命令", "审批执行", "操作审计"],
+  },
   reports: {
-    title: "报告",
+    title: "测试报告",
     description: "尚未生成测试报告。",
     capabilities: ["离线 HTML", "截图与 UI 树", "ADB 与 Appium 审计"],
   },
@@ -90,6 +167,9 @@ function isViewId(value: string): value is ViewId {
 
 function readViewFromHash(): ViewId {
   const value = globalThis.location.hash.replace(/^#/, "");
+  if (value === "runs") {
+    return "conversations";
+  }
   return value === "overview" || !isViewId(value) ? "devices" : value;
 }
 
@@ -142,12 +222,12 @@ function WorkspaceIcon({ viewId }: { viewId: ViewId }): React.JSX.Element {
       return <AppWindow {...iconProps} />;
     case "logs":
       return <ScrollText {...iconProps} />;
+    case "terminal":
+      return <Terminal {...iconProps} />;
     case "projects":
       return <FolderGit2 {...iconProps} />;
     case "conversations":
       return <Bot {...iconProps} />;
-    case "runs":
-      return <Play {...iconProps} />;
     case "reports":
       return <FileText {...iconProps} />;
   }
@@ -170,7 +250,7 @@ function PlannedView({ content }: { content: PlannedViewContent }): React.JSX.El
 
 type ConsoleHeaderProps = {
   activeView: ViewId;
-  agentStatus: string;
+  agentStatus: AgentStatus;
   adbAvailable: boolean | undefined;
   devices: readonly AndroidDevice[];
   selectedDevice: AndroidDevice | undefined;
@@ -181,6 +261,22 @@ type ConsoleHeaderProps = {
   onSelectDevice(serial: string): void;
   onToggleAddMenu(): void;
 };
+
+function agentStatusPresentation(status: AgentStatus): {
+  label: string;
+  className: string;
+} {
+  switch (status) {
+    case "normal":
+      return { label: "Agent 正常", className: "runtime-indicator healthy" };
+    case "running":
+      return { label: "Agent 运行中", className: "runtime-indicator healthy is-running" };
+    case "unavailable":
+      return { label: "Agent 不可用", className: "runtime-indicator unavailable" };
+    case "degraded":
+      return { label: "Agent 降级", className: "runtime-indicator warning" };
+  }
+}
 
 function ConsoleHeader({
   activeView,
@@ -197,6 +293,7 @@ function ConsoleHeader({
 }: ConsoleHeaderProps): React.JSX.Element {
   const visibleTabs = workspaceTabs.filter((tab) => visibleViews.includes(tab.id));
   const addableTabs = workspaceTabs.filter((tab) => !visibleViews.includes(tab.id));
+  const agentIndicator = agentStatusPresentation(agentStatus);
 
   return (
     <header className="console-topbar">
@@ -261,10 +358,8 @@ function ConsoleHeader({
         <div className="console-runtime" aria-label="本地运行状态">
           <span className="device-telemetry">{networkLabel(selectedDevice)}</span>
           <span className="device-telemetry">{batteryLabel(selectedDevice)}</span>
-          <span
-            className={agentStatus === "已连接" ? "runtime-indicator healthy" : "runtime-indicator"}
-          >
-            Agent {agentStatus}
+          <span className={agentIndicator.className} title="本地 Agent 状态">
+            {agentIndicator.label}
           </span>
           <span className={adbAvailable ? "runtime-indicator healthy" : "runtime-indicator"}>
             ADB {adbAvailable ? "就绪" : "不可用"}
@@ -301,7 +396,12 @@ export function App(): React.JSX.Element {
   const [selectedSerial, setSelectedSerial] = useState<string>();
   const [visibleViews, setVisibleViews] = useState<readonly ViewId[]>(defaultVisibleViews);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const [mirrorWidth, setMirrorWidth] = useState<number>();
+  const [mirrorWidth, setMirrorWidth] = useState<number | undefined>(() =>
+    savedMirrorWidth(undefined),
+  );
+  const [mirrorAspectRatio, setMirrorAspectRatio] = useState<number>(() =>
+    savedMirrorAspectRatio(undefined),
+  );
   const [isResizingLayout, setIsResizingLayout] = useState(false);
   const [apkSelection, setApkSelection] = useState<
     { key: number; file?: File; error?: string } | undefined
@@ -312,6 +412,8 @@ export function App(): React.JSX.Element {
   const mirrorWidthAdjustedRef = useRef(false);
   const readyDevices = (deviceQuery.data?.devices ?? []).filter(isReadyDevice);
   const selectedDevice = readyDevices.find((device) => device.serial === selectedSerial);
+  const scanningDevices =
+    deviceQuery.isPending || (deviceQuery.isFetching && deviceQuery.data === undefined);
 
   const queueApk = useCallback((file: File): void => {
     const isApk = file.name.toLocaleLowerCase().endsWith(".apk");
@@ -334,8 +436,13 @@ export function App(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    mirrorWidthAdjustedRef.current = false;
-    setMirrorWidth(undefined);
+    const savedWidth = savedMirrorWidth(selectedDevice?.serial);
+    mirrorWidthAdjustedRef.current = savedWidth !== undefined;
+    setMirrorWidth(savedWidth);
+    setMirrorAspectRatio(savedMirrorAspectRatio(selectedDevice?.serial));
+    if (selectedDevice?.serial !== undefined && savedWidth !== undefined) {
+      saveMirrorWidth(selectedDevice.serial, savedWidth);
+    }
   }, [selectedDevice?.serial]);
 
   useEffect(() => {
@@ -360,13 +467,14 @@ export function App(): React.JSX.Element {
     return () => globalThis.removeEventListener("resize", constrainMirrorWidth);
   }, []);
 
-  const agentStatus = healthQuery.isPending
-    ? "检查中"
-    : healthQuery.isError
-      ? "不可用"
+  const agentUnavailable = healthQuery.isError;
+  const agentStatus: AgentStatus = agentUnavailable
+    ? "unavailable"
+    : healthQuery.isPending || healthQuery.isFetching
+      ? "running"
       : healthQuery.data.status === "ok"
-        ? "已连接"
-        : "降级";
+        ? "normal"
+        : "degraded";
 
   const navigate = (viewId: ViewId): void => {
     setActiveView(viewId);
@@ -384,25 +492,60 @@ export function App(): React.JSX.Element {
     navigate("devices");
   };
 
-  const updateMirrorWidth = useCallback((clientX: number): void => {
-    const layout = layoutRef.current;
-    if (layout === null) {
-      return;
-    }
+  const updateMirrorWidth = useCallback(
+    (clientX: number): void => {
+      const layout = layoutRef.current;
+      if (layout === null) {
+        return;
+      }
 
-    const bounds = sidebarWidthBounds(layout);
-    const width = clientX - layout.getBoundingClientRect().left;
-    setMirrorWidth(Math.min(bounds.maximum, Math.max(bounds.minimum, Math.round(width))));
-  }, []);
+      const bounds = sidebarWidthBounds(layout);
+      const width = Math.min(
+        bounds.maximum,
+        Math.max(bounds.minimum, Math.round(clientX - layout.getBoundingClientRect().left)),
+      );
+      saveMirrorWidth(selectedDevice?.serial, width);
+      setMirrorWidth(width);
+    },
+    [selectedDevice?.serial],
+  );
 
-  const usePreferredMirrorWidth = useCallback((width: number): void => {
-    if (mirrorWidthAdjustedRef.current) {
-      return;
-    }
+  const usePreferredMirrorWidth = useCallback(
+    (width: number): void => {
+      if (mirrorWidthAdjustedRef.current) {
+        return;
+      }
 
-    const { minimum, maximum } = sidebarWidthBounds(layoutRef.current);
-    setMirrorWidth(Math.min(maximum, Math.max(minimum, Math.round(width))));
-  }, []);
+      const { minimum, maximum } = sidebarWidthBounds(layoutRef.current);
+      const preferredWidth = Math.min(maximum, Math.max(minimum, Math.round(width)));
+      mirrorWidthAdjustedRef.current = true;
+      saveMirrorWidth(selectedDevice?.serial, preferredWidth);
+      setMirrorWidth(preferredWidth);
+    },
+    [selectedDevice?.serial],
+  );
+
+  const rememberMirrorScreenSize = useCallback(
+    (size: { width: number; height: number }): void => {
+      if (
+        !Number.isFinite(size.width) ||
+        !Number.isFinite(size.height) ||
+        size.width <= 0 ||
+        size.height <= 0
+      ) {
+        return;
+      }
+
+      const aspectRatio = size.width / size.height;
+      if (aspectRatio < 0.2 || aspectRatio > 4) {
+        return;
+      }
+
+      setMirrorAspectRatio(aspectRatio);
+      saveMirrorAspectRatio(selectedDevice?.serial, aspectRatio);
+    },
+    [selectedDevice?.serial],
+  );
 
   const finishLayoutResize = useCallback((): void => {
     resizingRef.current = false;
@@ -452,175 +595,187 @@ export function App(): React.JSX.Element {
     if (next !== undefined) {
       event.preventDefault();
       mirrorWidthAdjustedRef.current = true;
-      setMirrorWidth(Math.min(maximum, Math.max(minimum, next)));
+      const nextWidth = Math.min(maximum, Math.max(minimum, next));
+      saveMirrorWidth(selectedDevice?.serial, nextWidth);
+      setMirrorWidth(nextWidth);
     }
   };
 
   const sidebarBounds = sidebarWidthBounds(layoutRef.current);
   const sidebarWidth = mirrorWidth ?? sidebarBounds.maximum;
-  const shellStyle =
-    mirrorWidth === undefined
-      ? undefined
-      : ({ "--device-sidebar-width": `${mirrorWidth}px` } as React.CSSProperties);
+  const shellStyle = {
+    ...(mirrorWidth === undefined ? {} : { "--device-sidebar-width": `${mirrorWidth}px` }),
+    "--last-mirror-aspect-ratio": String(mirrorAspectRatio),
+  } as React.CSSProperties;
 
   return (
-    <div className="device-console-shell" style={shellStyle}>
-      <input
-        ref={apkInputRef}
-        className="visually-hidden"
-        type="file"
-        accept=".apk,application/vnd.android.package-archive"
-        aria-label="APK 文件"
-        onChange={(event) => {
-          const file = event.currentTarget.files?.item(0);
-          event.currentTarget.value = "";
-          if (file !== null && file !== undefined) {
-            queueApk(file);
-          }
-        }}
-      />
-      <ConsoleHeader
-        activeView={activeView}
-        agentStatus={agentStatus}
-        adbAvailable={deviceQuery.data?.adb.available}
-        devices={readyDevices}
-        selectedDevice={selectedDevice}
-        visibleViews={visibleViews}
-        addMenuOpen={addMenuOpen}
-        onNavigate={navigate}
-        onAddView={addView}
-        onSelectDevice={selectDevice}
-        onToggleAddMenu={() => setAddMenuOpen((open) => !open)}
-      />
-
-      <div ref={layoutRef} className="device-console-layout">
-        <aside className="mirror-sidebar">
-          {selectedDevice === undefined ? (
-            <section className="mirror-empty" aria-label="设备连接状态">
-              <p>屏幕镜像</p>
-              <strong>{deviceQuery.isPending ? "正在扫描设备" : "未检测到可用设备"}</strong>
-            </section>
-          ) : (
-            <DeviceMirrorPanel
-              device={selectedDevice}
-              onPreferredSidebarWidth={usePreferredMirrorWidth}
-              onApkDrop={queueApk}
-            />
-          )}
-        </aside>
-
-        <div
-          role="separator"
-          tabIndex={0}
-          className={`layout-divider${isResizingLayout ? " is-resizing" : ""}`}
-          aria-label="调整左右区域宽度"
-          aria-orientation="vertical"
-          aria-valuemin={sidebarBounds.minimum}
-          aria-valuemax={sidebarBounds.maximum}
-          aria-valuenow={sidebarWidth}
-          aria-valuetext="左侧镜像区域宽度，最大值为黄金比例"
-          onKeyDown={adjustMirrorWidthWithKeyboard}
-          onPointerDown={(event) => {
-            if (event.button !== 0) {
-              return;
+    <AgentAvailabilityProvider unavailable={agentUnavailable}>
+      <div className="device-console-shell" style={shellStyle}>
+        <input
+          ref={apkInputRef}
+          className="visually-hidden"
+          type="file"
+          accept=".apk,application/vnd.android.package-archive"
+          aria-label="APK 文件"
+          onChange={(event) => {
+            const file = event.currentTarget.files?.item(0);
+            event.currentTarget.value = "";
+            if (file !== null && file !== undefined) {
+              queueApk(file);
             }
-
-            event.preventDefault();
-            mirrorWidthAdjustedRef.current = true;
-            resizingRef.current = true;
-            event.currentTarget.setPointerCapture?.(event.pointerId);
-            setIsResizingLayout(true);
-            updateMirrorWidth(event.clientX);
-          }}
-          onPointerMove={(event) => {
-            if (resizingRef.current) {
-              updateMirrorWidth(event.clientX);
-            }
-          }}
-          onPointerUp={finishPointerLayoutResize}
-          onPointerCancel={finishPointerLayoutResize}
-          onMouseDown={(event) => {
-            if (resizingRef.current || event.button !== 0) {
-              return;
-            }
-
-            event.preventDefault();
-            mirrorWidthAdjustedRef.current = true;
-            resizingRef.current = true;
-            setIsResizingLayout(true);
-            updateMirrorWidth(event.clientX);
-          }}
-          onMouseMove={(event) => {
-            if (resizingRef.current) {
-              updateMirrorWidth(event.clientX);
-            }
-          }}
-          onMouseUp={finishLayoutResize}
-          onLostPointerCapture={() => {
-            finishLayoutResize();
           }}
         />
+        <ConsoleHeader
+          activeView={activeView}
+          agentStatus={agentStatus}
+          adbAvailable={deviceQuery.data?.adb.available}
+          devices={readyDevices}
+          selectedDevice={selectedDevice}
+          visibleViews={visibleViews}
+          addMenuOpen={addMenuOpen}
+          onNavigate={navigate}
+          onAddView={addView}
+          onSelectDevice={selectDevice}
+          onToggleAddMenu={() => setAddMenuOpen((open) => !open)}
+        />
 
-        <main className="console-main">
-          {healthQuery.isError && (
-            <section className="notice" role="alert">
-              <strong>本地 Agent 不可用。</strong>
-              <span>{healthQuery.error.message}</span>
-            </section>
-          )}
-          {deviceQuery.isError && (
-            <section className="notice" role="alert">
-              <strong>设备发现失败。</strong>
-              <span>{deviceQuery.error.message}</span>
-            </section>
-          )}
-          {deviceQuery.data?.error !== undefined && (
-            <section className="notice" role="alert">
-              <strong>{deviceQuery.data.adb.available ? "ADB 请求失败。" : "ADB 不可用。"}</strong>
-              <span>{deviceQuery.data.error}</span>
-            </section>
-          )}
+        <div ref={layoutRef} className="device-console-layout">
+          <aside className={`mirror-sidebar${selectedDevice === undefined ? " is-empty" : ""}`}>
+            {selectedDevice === undefined ? (
+              <section
+                className={`mirror-empty${scanningDevices ? " is-scanning" : ""}`}
+                aria-label="设备连接状态"
+                aria-busy={scanningDevices}
+              >
+                <p>屏幕镜像</p>
+                {scanningDevices ? (
+                  <div className="mirror-scan-progress" role="status" aria-label="正在扫描设备">
+                    <LoaderCircle aria-hidden="true" size={24} strokeWidth={1.8} />
+                    <strong>正在扫描设备</strong>
+                  </div>
+                ) : (
+                  <strong>未检测到可用设备</strong>
+                )}
+              </section>
+            ) : (
+              <DeviceMirrorPanel
+                device={selectedDevice}
+                onPreferredSidebarWidth={usePreferredMirrorWidth}
+                onScreenSize={rememberMirrorScreenSize}
+                onApkDrop={queueApk}
+              />
+            )}
+          </aside>
 
-          {selectedDevice === undefined &&
-          (activeView === "devices" ||
-            activeView === "files" ||
-            activeView === "applications" ||
-            activeView === "logs") ? (
-            <section className="main-empty-state" aria-label="设备工作台">
-              <h1>连接 Android 设备</h1>
-              <p>连接设备并完成 USB 调试授权后，即可在这里查看和管理设备内容。</p>
-            </section>
-          ) : activeView === "devices" && selectedDevice !== undefined ? (
-            <DeviceControlPanel device={selectedDevice} />
-          ) : activeView === "files" && selectedDevice !== undefined ? (
-            <FileManagerPanel device={selectedDevice} />
-          ) : activeView === "applications" && selectedDevice !== undefined ? (
-            <ApplicationManagerPanel
-              device={selectedDevice}
-              onRequestApkInstall={() => apkInputRef.current?.click()}
-            />
-          ) : activeView === "logs" && selectedDevice !== undefined ? (
-            <DeviceLogcatPanel device={selectedDevice} />
-          ) : activeView === "projects" ? (
-            <ProjectManagerPanel device={selectedDevice} />
-          ) : activeView === "conversations" ? (
-            <AiPlanPanel device={selectedDevice} onOpenRuns={() => navigate("runs")} />
-          ) : activeView === "runs" ? (
-            <TestRunPanel />
-          ) : (
-            <PlannedView content={plannedViews[activeView as PlannedViewId]} />
-          )}
-        </main>
+          <div
+            role="separator"
+            tabIndex={0}
+            className={`layout-divider${isResizingLayout ? " is-resizing" : ""}`}
+            aria-label="调整左右区域宽度"
+            aria-orientation="vertical"
+            aria-valuemin={sidebarBounds.minimum}
+            aria-valuemax={sidebarBounds.maximum}
+            aria-valuenow={sidebarWidth}
+            aria-valuetext="左侧镜像区域宽度，最大值为黄金比例"
+            onKeyDown={adjustMirrorWidthWithKeyboard}
+            onPointerDown={(event) => {
+              if (event.button !== 0) {
+                return;
+              }
+
+              event.preventDefault();
+              mirrorWidthAdjustedRef.current = true;
+              resizingRef.current = true;
+              event.currentTarget.setPointerCapture?.(event.pointerId);
+              setIsResizingLayout(true);
+              updateMirrorWidth(event.clientX);
+            }}
+            onPointerMove={(event) => {
+              if (resizingRef.current) {
+                updateMirrorWidth(event.clientX);
+              }
+            }}
+            onPointerUp={finishPointerLayoutResize}
+            onPointerCancel={finishPointerLayoutResize}
+            onMouseDown={(event) => {
+              if (resizingRef.current || event.button !== 0) {
+                return;
+              }
+
+              event.preventDefault();
+              mirrorWidthAdjustedRef.current = true;
+              resizingRef.current = true;
+              setIsResizingLayout(true);
+              updateMirrorWidth(event.clientX);
+            }}
+            onMouseMove={(event) => {
+              if (resizingRef.current) {
+                updateMirrorWidth(event.clientX);
+              }
+            }}
+            onMouseUp={finishLayoutResize}
+            onLostPointerCapture={() => {
+              finishLayoutResize();
+            }}
+          />
+
+          <main
+            className={`console-main${activeView === "conversations" ? " ai-test-console-main" : ""}`}
+          >
+            {!agentUnavailable && deviceQuery.isError && (
+              <section className="notice" role="alert">
+                <strong>设备发现失败。</strong>
+                <span>{deviceQuery.error.message}</span>
+              </section>
+            )}
+            {!agentUnavailable && deviceQuery.data?.error !== undefined && (
+              <section className="notice" role="alert">
+                <strong>
+                  {deviceQuery.data.adb.available ? "ADB 请求失败。" : "ADB 不可用。"}
+                </strong>
+                <span>{deviceQuery.data.error}</span>
+              </section>
+            )}
+
+            {selectedDevice === undefined &&
+            (activeView === "devices" ||
+              activeView === "files" ||
+              activeView === "applications" ||
+              activeView === "logs") ? (
+              <section className="main-empty-state" aria-label="设备工作台">
+                <h1>连接 Android 设备</h1>
+                <p>连接设备并完成 USB 调试授权后，即可在这里查看和管理设备内容。</p>
+              </section>
+            ) : activeView === "devices" && selectedDevice !== undefined ? (
+              <DeviceControlPanel device={selectedDevice} />
+            ) : activeView === "files" && selectedDevice !== undefined ? (
+              <FileManagerPanel device={selectedDevice} />
+            ) : activeView === "applications" && selectedDevice !== undefined ? (
+              <ApplicationManagerPanel
+                device={selectedDevice}
+                onRequestApkInstall={() => apkInputRef.current?.click()}
+              />
+            ) : activeView === "logs" && selectedDevice !== undefined ? (
+              <DeviceLogcatPanel device={selectedDevice} />
+            ) : activeView === "projects" ? (
+              <ProjectManagerPanel device={selectedDevice} />
+            ) : activeView === "conversations" ? (
+              <AiPlanPanel device={selectedDevice} />
+            ) : (
+              <PlannedView content={plannedViews[activeView as PlannedViewId]} />
+            )}
+          </main>
+        </div>
+        {apkSelection !== undefined && selectedDevice !== undefined && (
+          <ApkInstallDialog
+            key={apkSelection.key}
+            device={selectedDevice}
+            {...(apkSelection.file === undefined ? {} : { file: apkSelection.file })}
+            {...(apkSelection.error === undefined ? {} : { initialError: apkSelection.error })}
+            onClose={() => setApkSelection(undefined)}
+          />
+        )}
       </div>
-      {apkSelection !== undefined && selectedDevice !== undefined && (
-        <ApkInstallDialog
-          key={apkSelection.key}
-          device={selectedDevice}
-          {...(apkSelection.file === undefined ? {} : { file: apkSelection.file })}
-          {...(apkSelection.error === undefined ? {} : { initialError: apkSelection.error })}
-          onClose={() => setApkSelection(undefined)}
-        />
-      )}
-    </div>
+    </AgentAvailabilityProvider>
   );
 }

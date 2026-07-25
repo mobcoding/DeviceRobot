@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AiPlanResponse } from "@device-robot/contracts";
 
 import { App } from "../src/App";
 
@@ -66,6 +67,8 @@ class MockVideoDecoder {
 
 beforeEach(() => {
   globalThis.location.hash = "#devices";
+  globalThis.localStorage.clear();
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
   MockWebSocket.instances.splice(0);
   vi.stubGlobal("WebSocket", MockWebSocket);
   vi.stubGlobal("VideoDecoder", MockVideoDecoder);
@@ -182,13 +185,18 @@ const applicationsResponse = {
       packageName: "com.example.app",
       source: "user",
       apkPath: "/data/app/com.example.app/base.apk",
+      versionName: "2.5.16",
       versionCode: "42",
+      sizeBytes: 92739482,
+      lastUsedAt: "2026-07-22T10:30:00.000Z",
     },
     {
       packageName: "com.android.settings",
       source: "system",
       apkPath: "/system/priv-app/Settings/Settings.apk",
+      versionName: "14",
       versionCode: "33",
+      sizeBytes: 12345678,
     },
   ],
   readAt: "2026-07-20T10:00:00.000Z",
@@ -347,7 +355,7 @@ const aiModelStatusResponse = {
   model: "test-model",
 };
 
-const aiPlanResponse = {
+const aiPlanResponse: AiPlanResponse = {
   reply: "已生成首页可见性检查计划。",
   plan: {
     id: "423e4567-e89b-12d3-a456-426614174000",
@@ -384,6 +392,39 @@ const testExecutionRunResponse = {
   startedAt: "2026-07-23T10:02:00.000Z",
 };
 
+const testSuiteRecordResponse = {
+  id: "623e4567-e89b-12d3-a456-426614174000",
+  projectId: exampleProject.id,
+  fileName: "smoke.yaml",
+  suite: {
+    schemaVersion: 1,
+    appId: "com.example.app",
+    suite: {
+      id: "smoke",
+      name: "示例冒烟测试",
+      sourceRevision: "main",
+    },
+    cases: [
+      {
+        id: "launch-home",
+        name: "启动后显示首页",
+        priority: "P0",
+        tags: ["smoke"],
+        sourceEvidence: [],
+        data: {},
+        steps: [
+          {
+            id: "home-visible",
+            action: { action: "assert.visible", target: { text: "首页" } },
+            healingEnabled: true,
+          },
+        ],
+      },
+    ],
+  },
+  importedAt: "2026-07-23T10:00:00.000Z",
+};
+
 const apkArtifactResponse = {
   id: "123e4567-e89b-12d3-a456-426614174000",
   fileName: "sample.apk",
@@ -410,9 +451,11 @@ function mockApis(
       model?: string;
       reason?: string;
     };
+    aiPlan?: AiPlanResponse;
     completedProjectBuild?: boolean;
     failedProjectBuild?: boolean;
     projectBuildRuns?: Array<typeof completedProjectBuildResponse>;
+    testRuns?: readonly (typeof testExecutionRunResponse)[];
   } = {},
 ): {
   getDeviceRequests: () => number;
@@ -421,14 +464,19 @@ function mockApis(
   getInstallRequests: () => number;
   getFileUploadRequests: () => number;
   getProjectCreateRequests: () => number;
+  getProjectDeleteRequests: () => number;
   getProjectReindexRequests: () => number;
   getProjectBuildRequests: () => number;
   getProjectArtifactInstallRequests: () => number;
   getAiPlanRequests: () => number;
+  getLastAiPlanRequest: () => unknown;
   getAiModelListRequests: () => number;
   getAiConfigurationTestRequests: () => number;
   getTestExecutionRequests: () => number;
   getLastTestExecutionRequest: () => unknown;
+  getTestSuiteImportRequests: () => number;
+  getTestSuiteRunRequests: () => number;
+  getLastTestSuiteRunRequest: () => unknown;
 } {
   let deviceRequests = 0;
   let actionRequests = 0;
@@ -436,6 +484,8 @@ function mockApis(
   let installRequests = 0;
   let fileUploadRequests = 0;
   let projectCreateRequests = 0;
+  let projectDeleteRequests = 0;
+  let projectDeleted = false;
   let projectReindexRequests = 0;
   let projectSourceIndexed = false;
   let projectBuildRequests = 0;
@@ -443,10 +493,34 @@ function mockApis(
   let currentProjectBuildRun = runningProjectBuildResponse;
   let projectArtifactInstallRequests = 0;
   let aiPlanRequests = 0;
+  let lastAiPlanRequest: unknown;
   let aiModelListRequests = 0;
   let aiConfigurationTestRequests = 0;
   let testExecutionRequests = 0;
   let lastTestExecutionRequest: unknown;
+  let testSuiteImportRequests = 0;
+  let testSuiteRunRequests = 0;
+  let lastTestSuiteRunRequest: unknown;
+  let importedTestSuites: (typeof testSuiteRecordResponse)[] = [];
+  const aiConversation = {
+    id: "723e4567-e89b-12d3-a456-426614174000",
+    projectId: exampleProject.id,
+    appId: "com.example.app",
+    title: "com.example.app 测试会话",
+    sourceRevision: "2026-07-20T10:00:00.000Z",
+    contextStatus: "current" as const,
+    createdAt: "2026-07-20T10:00:00.000Z",
+    updatedAt: "2026-07-20T10:00:00.000Z",
+  };
+  let aiConversations = [aiConversation];
+  let aiConversationMessages: Array<{
+    id: string;
+    conversationId: string;
+    role: "user" | "assistant";
+    content: string;
+    plan?: AiPlanResponse;
+    createdAt: string;
+  }> = [];
   let currentAiModelStatus = options.aiModelStatus ?? aiModelStatusResponse;
   const actionHistory = {
     serial: "8B3Y0THX0",
@@ -464,6 +538,17 @@ function mockApis(
     const url =
       typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+
+    if (url.endsWith("/api/v1/system/health")) {
+      if (options.healthError !== undefined) {
+        throw options.healthError;
+      }
+
+      return new Response(JSON.stringify(healthResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
 
     if (url.includes("/api/v1/appium/runtime")) {
       return new Response(JSON.stringify(appiumRuntimeResponse), {
@@ -490,19 +575,20 @@ function mockApis(
     if (url === "/api/v1/ai/config/test" && method === "POST") {
       aiConfigurationTestRequests += 1;
       const request = JSON.parse(String(init?.body ?? "{}")) as {
-        baseUrl: string;
+        baseUrl?: string;
         model: string;
       };
+      const baseUrl = request.baseUrl ?? currentAiModelStatus.baseUrl ?? "https://model.example/v1";
       currentAiModelStatus = {
         configured: true,
         provider: "openai-compatible",
-        baseUrl: request.baseUrl,
+        baseUrl,
         model: request.model,
       };
       return new Response(
         JSON.stringify({
           provider: "openai-compatible",
-          baseUrl: request.baseUrl,
+          baseUrl,
           model: request.model,
           message: "模型连接成功，已应用到当前本地 Agent。",
         }),
@@ -512,7 +598,29 @@ function mockApis(
 
     if (url === "/api/v1/ai/plans" && method === "POST") {
       aiPlanRequests += 1;
-      return new Response(JSON.stringify(aiPlanResponse), {
+      lastAiPlanRequest = JSON.parse(String(init?.body ?? "{}"));
+      const request = lastAiPlanRequest as { conversationId?: string; goal?: string };
+      const response = options.aiPlan ?? aiPlanResponse;
+      const conversationId = request.conversationId ?? aiConversation.id;
+      aiConversationMessages = [
+        ...aiConversationMessages,
+        {
+          id: "623e4567-e89b-12d3-a456-426614174000",
+          conversationId,
+          role: "user",
+          content: request.goal ?? "测试目标",
+          createdAt: response.generatedAt,
+        },
+        {
+          id: "723e4567-e89b-12d3-a456-426614174001",
+          conversationId,
+          role: "assistant",
+          content: response.reply,
+          plan: response,
+          createdAt: response.generatedAt,
+        },
+      ];
+      return new Response(JSON.stringify(response), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -525,6 +633,43 @@ function mockApis(
       });
     }
 
+    const conversationListUrl = `/api/v1/projects/${exampleProject.id}/ai-conversations`;
+    if (url === conversationListUrl) {
+      if (method === "POST") {
+        const request = JSON.parse(String(init?.body ?? "{}")) as { appId?: string };
+        const created = {
+          ...aiConversation,
+          id: `823e4567-e89b-12d3-a456-42661417400${aiConversations.length}`,
+          ...(request.appId === undefined ? {} : { appId: request.appId }),
+          title: request.appId === undefined ? "新建测试会话" : `${request.appId} 测试会话`,
+        };
+        aiConversations = [created, ...aiConversations];
+        return new Response(JSON.stringify(created), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(
+        JSON.stringify({ projectId: exampleProject.id, conversations: aiConversations }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    const conversationDetailPrefix = "/api/v1/ai-conversations/";
+    if (url.startsWith(conversationDetailPrefix)) {
+      const conversationId = url.slice(conversationDetailPrefix.length);
+      const conversation = aiConversations.find((candidate) => candidate.id === conversationId);
+      return new Response(
+        JSON.stringify({
+          conversation: conversation ?? aiConversation,
+          messages: aiConversationMessages.filter(
+            (message) => message.conversationId === conversationId,
+          ),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
     if (url === "/api/v1/test-runs") {
       if (method === "POST") {
         testExecutionRequests += 1;
@@ -534,10 +679,38 @@ function mockApis(
           headers: { "Content-Type": "application/json" },
         });
       }
-      return new Response(JSON.stringify({ runs: [] }), {
+      return new Response(JSON.stringify({ runs: options.testRuns ?? [] }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
+    }
+
+    const testSuiteBaseUrl = `/api/v1/projects/${exampleProject.id}/test-suites`;
+    if (url === testSuiteBaseUrl) {
+      if (method === "POST") {
+        testSuiteImportRequests += 1;
+        importedTestSuites = [testSuiteRecordResponse, ...importedTestSuites];
+        return new Response(JSON.stringify(testSuiteRecordResponse), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(
+        JSON.stringify({ projectId: exampleProject.id, suites: importedTestSuites }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    if (
+      url === `${testSuiteBaseUrl}/${testSuiteRecordResponse.id}/cases/launch-home/runs` &&
+      method === "POST"
+    ) {
+      testSuiteRunRequests += 1;
+      lastTestSuiteRunRequest = JSON.parse(String(init?.body ?? "{}"));
+      return new Response(
+        JSON.stringify({ ...testExecutionRunResponse, planId: "dsl:smoke:launch-home" }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
     }
 
     if (url.endsWith(`/projects/${indexedProjectResponse.id}/index`) && method === "POST") {
@@ -644,9 +817,9 @@ function mockApis(
           method === "POST"
             ? projectsResponse.projects[0]
             : {
-                projects: [
-                  projectSourceIndexed ? indexedProjectResponse : projectsResponse.projects[0],
-                ],
+                projects: projectDeleted
+                  ? []
+                  : [projectSourceIndexed ? indexedProjectResponse : projectsResponse.projects[0]],
               },
         ),
         {
@@ -654,6 +827,12 @@ function mockApis(
           headers: { "Content-Type": "application/json" },
         },
       );
+    }
+
+    if (url === `/api/v1/projects/${exampleProject.id}` && method === "DELETE") {
+      projectDeleteRequests += 1;
+      projectDeleted = true;
+      return new Response(null, { status: 204 });
     }
 
     if (url === "/api/v1/apks" && method === "POST") {
@@ -753,10 +932,6 @@ function mockApis(
       });
     }
 
-    if (options.healthError !== undefined) {
-      throw options.healthError;
-    }
-
     return new Response(JSON.stringify(healthResponse), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -770,14 +945,19 @@ function mockApis(
     getInstallRequests: () => installRequests,
     getFileUploadRequests: () => fileUploadRequests,
     getProjectCreateRequests: () => projectCreateRequests,
+    getProjectDeleteRequests: () => projectDeleteRequests,
     getProjectReindexRequests: () => projectReindexRequests,
     getProjectBuildRequests: () => projectBuildRequests,
     getProjectArtifactInstallRequests: () => projectArtifactInstallRequests,
     getAiPlanRequests: () => aiPlanRequests,
+    getLastAiPlanRequest: () => lastAiPlanRequest,
     getAiModelListRequests: () => aiModelListRequests,
     getAiConfigurationTestRequests: () => aiConfigurationTestRequests,
     getTestExecutionRequests: () => testExecutionRequests,
     getLastTestExecutionRequest: () => lastTestExecutionRequest,
+    getTestSuiteImportRequests: () => testSuiteImportRequests,
+    getTestSuiteRunRequests: () => testSuiteRunRequests,
+    getLastTestSuiteRunRequest: () => lastTestSuiteRunRequest,
   };
 }
 
@@ -794,32 +974,74 @@ describe("DeviceRobot Web UI", () => {
     expect(screen.getByText("电量 86% 充电中")).toBeInTheDocument();
   });
 
-  it("shows an actionable error when the Agent is unavailable", async () => {
+  it("restores the most recent mirror width while devices are still being scanned", () => {
+    globalThis.localStorage.setItem("device-robot:mirror-width:last", "366");
+    globalThis.localStorage.setItem("device-robot:mirror-aspect-ratio:last", "0.5");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => undefined)),
+    );
+    renderApp();
+
+    const layout = screen.getByRole("separator", { name: "调整左右区域宽度" }).parentElement;
+    const shell = layout?.parentElement;
+    expect(shell?.style.getPropertyValue("--device-sidebar-width")).toBe("366px");
+    expect(shell?.style.getPropertyValue("--last-mirror-aspect-ratio")).toBe("0.5");
+    expect(screen.getByRole("status", { name: "正在扫描设备" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "设备连接状态" })).toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
+    expect(screen.getByRole("region", { name: "设备连接状态" }).parentElement).toHaveClass(
+      "is-empty",
+    );
+  });
+
+  it("remembers the live screen aspect ratio for the no-device placeholder", async () => {
+    mockApis();
+    renderApp();
+
+    await screen.findByRole("img", { name: "设备实时画面：Pixel 3 XL" });
+    await vi.waitFor(() =>
+      expect(globalThis.localStorage.getItem("device-robot:mirror-aspect-ratio:8B3Y0THX0")).toBe(
+        "0.5",
+      ),
+    );
+    expect(globalThis.localStorage.getItem("device-robot:mirror-aspect-ratio:last")).toBe("0.5");
+  });
+
+  it("shows Agent unavailability only in the top status bar", async () => {
     mockApis({ healthError: new Error("Connection refused") });
     renderApp();
 
-    expect(await screen.findByRole("alert", {}, { timeout: 3_000 })).toHaveTextContent(
-      "本地 Agent 不可用",
-    );
-    expect(screen.getByRole("alert")).toHaveTextContent("无法连接本地 Agent");
+    const indicator = await screen.findByText("Agent 不可用", {}, { timeout: 3_000 });
+    expect(indicator).toHaveClass("runtime-indicator", "unavailable");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("adds a hidden workspace tab from the add-tab menu", async () => {
+  it("shows primary workspace tabs in order and adds secondary tabs from the menu", async () => {
     mockApis();
     const user = userEvent.setup();
     renderApp();
 
     await screen.findByRole("heading", { level: 1, name: "概览" });
-    expect(screen.getByRole("button", { name: "文件管理器" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "应用管理器" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "项目" })).not.toBeInTheDocument();
+    const tabBar = screen.getByRole("navigation", { name: "设备工作页签" });
+    const tabLabels = within(tabBar)
+      .getAllByRole("button")
+      .filter((button) => button.getAttribute("aria-label") !== "添加工作页签")
+      .map((button) => button.textContent);
+    expect(tabLabels).toEqual(["概览", "项目", "AI", "文件管理器", "应用管理器"]);
+    expect(screen.queryByRole("button", { name: "设备日志" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "添加工作页签" }));
-    await user.click(screen.getByRole("button", { name: "项目" }));
+    const addMenu = screen.getByLabelText("可添加的工作页签");
+    expect(within(addMenu).getByRole("button", { name: "设备日志" })).toBeInTheDocument();
+    expect(within(addMenu).getByRole("button", { name: "终端" })).toBeInTheDocument();
+    expect(within(addMenu).getByRole("button", { name: "测试报告" })).toBeInTheDocument();
+    await user.click(within(addMenu).getByRole("button", { name: "终端" }));
 
-    expect(screen.getByRole("heading", { level: 1, name: "项目管理" })).toBeInTheDocument();
-    expect(globalThis.location.hash).toBe("#projects");
-    expect(screen.getByRole("button", { name: "项目" })).toBeInTheDocument();
-    expect(await screen.findByText("Example")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "终端" })).toBeInTheDocument();
+    expect(globalThis.location.hash).toBe("#terminal");
+    expect(screen.getByRole("button", { name: "终端" })).toBeInTheDocument();
   });
 
   it("creates a project from the project-management form", async () => {
@@ -827,12 +1049,29 @@ describe("DeviceRobot Web UI", () => {
     const user = userEvent.setup();
     renderApp();
 
-    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
-    await user.click(screen.getByRole("button", { name: "项目" }));
+    await user.click(await screen.findByRole("button", { name: "项目" }));
     await user.type(screen.getByRole("textbox", { name: "本地项目目录" }), "C:\\Github\\Example");
     await user.click(screen.getByRole("button", { name: "接入项目" }));
 
     await vi.waitFor(() => expect(getProjectCreateRequests()).toBe(1));
+  });
+
+  it("opens the project operation menu and deletes only the project registration after confirmation", async () => {
+    const { getProjectDeleteRequests } = mockApis();
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "项目" }));
+    await user.click(await screen.findByRole("button", { name: "Example 的更多项目操作" }));
+    const menu = screen.getByRole("menu", { name: "Example 的项目操作" });
+    await user.click(within(menu).getByRole("menuitem", { name: "删除项目" }));
+
+    const dialog = screen.getByRole("dialog", { name: "确认删除项目" });
+    expect(within(dialog).getByText("项目源码、Git 克隆目录和已生成的 APK 文件都会保留。")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "删除项目" }));
+
+    await vi.waitFor(() => expect(getProjectDeleteRequests()).toBe(1));
+    expect(await screen.findByText("尚未接入 Android 项目。")).toBeInTheDocument();
   });
 
   it("requires an explicit confirmation before starting a discovered Gradle Variant", async () => {
@@ -840,8 +1079,7 @@ describe("DeviceRobot Web UI", () => {
     const user = userEvent.setup();
     renderApp();
 
-    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
-    await user.click(screen.getByRole("button", { name: "项目" }));
+    await user.click(await screen.findByRole("button", { name: "项目" }));
     const variantSelector = await screen.findByRole("combobox", { name: "app 构建变体" });
     expect(within(variantSelector).getByRole("option", { name: "debug" })).toBeInTheDocument();
     expect(within(variantSelector).getByRole("option", { name: "release" })).toBeInTheDocument();
@@ -867,8 +1105,7 @@ describe("DeviceRobot Web UI", () => {
     const user = userEvent.setup();
     renderApp();
 
-    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
-    await user.click(screen.getByRole("button", { name: "项目" }));
+    await user.click(await screen.findByRole("button", { name: "项目" }));
     const output = await screen.findByText("Example_20260721_180200_debug.apk");
     const artifact = output.closest(".project-build-artifact");
     expect(artifact).not.toBeNull();
@@ -898,8 +1135,7 @@ describe("DeviceRobot Web UI", () => {
     const user = userEvent.setup();
     renderApp();
 
-    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
-    await user.click(screen.getByRole("button", { name: "项目" }));
+    await user.click(await screen.findByRole("button", { name: "项目" }));
 
     expect(
       await screen.findByText("Execution failed for task ':app:mergeDebugResources'.", {
@@ -942,8 +1178,7 @@ describe("DeviceRobot Web UI", () => {
     mockApis({ completedProjectBuild: true, projectBuildRuns: [older, previous, latest] });
     renderApp();
 
-    await userEvent.click(await screen.findByRole("button", { name: "添加工作页签" }));
-    await userEvent.click(screen.getByRole("button", { name: "项目" }));
+    await userEvent.click(await screen.findByRole("button", { name: "项目" }));
 
     expect(await screen.findByText("Example_20260722_100200_release.apk")).toBeInTheDocument();
     expect(screen.getByText("Example_20260721_100200_debug.apk")).toBeInTheDocument();
@@ -953,21 +1188,45 @@ describe("DeviceRobot Web UI", () => {
   });
 
   it("uses the configured model to generate a preview-only AI ActionPlan", async () => {
-    const { getAiPlanRequests } = mockApis();
+    const { getAiPlanRequests, getLastAiPlanRequest } = mockApis();
     const user = userEvent.setup();
     renderApp();
 
-    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
-    await user.click(screen.getByRole("button", { name: "AI 与用例" }));
-    expect(await screen.findByText("模型已配置")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "AI" }));
+    expect(await screen.findByRole("combobox", { name: "选择 AI 模型" })).toHaveValue(
+      "test-model",
+    );
+    expect(screen.getByText("1", { selector: ".ai-test-project-title span" })).toBeInTheDocument();
+    expect(screen.getByText("com.example.app", { selector: "small" })).toBeInTheDocument();
+    expect(screen.queryByText("1 个测试应用")).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "测试应用包名" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "当前测试设备" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "项目 AI 会话" })).not.toBeInTheDocument();
     await user.type(screen.getByRole("textbox", { name: "测试目标" }), "验证首页可见");
     await user.click(screen.getByRole("button", { name: "生成操作计划" }));
 
     await vi.waitFor(() => expect(getAiPlanRequests()).toBe(1));
+    expect(getLastAiPlanRequest()).toMatchObject({
+      appId: "com.example.app",
+      conversationId: "723e4567-e89b-12d3-a456-426614174000",
+    });
     expect(await screen.findByText("已生成首页可见性检查计划。")).toBeInTheDocument();
     expect(screen.getByText("ActionPlan 预览")).toBeInTheDocument();
     expect(screen.getByText("assert.visible")).toBeInTheDocument();
     expect(screen.getByText("执行前必须确认")).toBeInTheDocument();
+  });
+
+  it("sends an AI test goal when Enter is pressed in the composer", async () => {
+    const { getAiPlanRequests, getLastAiPlanRequest } = mockApis();
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "AI" }));
+    await user.type(screen.getByRole("textbox", { name: "测试目标" }), "验证首页可见");
+    await user.keyboard("{Enter}");
+
+    await vi.waitFor(() => expect(getAiPlanRequests()).toBe(1));
+    expect(getLastAiPlanRequest()).toMatchObject({ goal: "验证首页可见" });
   });
 
   it("starts an approved AI plan only after explicit confirmation", async () => {
@@ -979,8 +1238,7 @@ describe("DeviceRobot Web UI", () => {
     );
     renderApp();
 
-    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
-    await user.click(screen.getByRole("button", { name: "AI 与用例" }));
+    await user.click(await screen.findByRole("button", { name: "AI" }));
     await user.type(screen.getByRole("textbox", { name: "测试目标" }), "验证首页可见");
     await user.click(screen.getByRole("button", { name: "生成操作计划" }));
     await screen.findByText("ActionPlan 预览");
@@ -993,19 +1251,103 @@ describe("DeviceRobot Web UI", () => {
       approved: true,
       plan: { id: aiPlanResponse.plan.id },
     });
-    expect(await screen.findByRole("heading", { level: 1, name: "测试运行" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "实施测试流程" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "最近测试运行" })).toBeInTheDocument();
   });
 
-  it("shows the test run workspace from the tab menu", async () => {
-    mockApis();
+  it("binds legacy AI app actions to the selected testing application before execution", async () => {
+    const foreignApplicationPlan = {
+      ...aiPlanResponse,
+      plan: {
+        ...aiPlanResponse.plan,
+        actions: [{ action: "app.launch" as const, appId: "com.tracker.anywhere" }],
+      },
+    };
+    const { getLastTestExecutionRequest, getTestExecutionRequests } = mockApis({
+      aiPlan: foreignApplicationPlan,
+    });
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "confirm",
+      vi.fn(() => true),
+    );
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "AI" }));
+    await user.type(screen.getByRole("textbox", { name: "测试目标" }), "验证启动流程");
+    await user.click(screen.getByRole("button", { name: "生成操作计划" }));
+    await screen.findByText("ActionPlan 预览");
+    expect(screen.getByText("com.example.app", { selector: "code" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "执行计划" }));
+
+    await vi.waitFor(() => expect(getTestExecutionRequests()).toBe(1));
+    expect(getLastTestExecutionRequest()).toMatchObject({
+      appId: "com.example.app",
+      plan: { actions: [{ action: "app.launch", appId: "com.example.app" }] },
+    });
+  });
+
+  it("shows complete test-run details in the AI workspace", async () => {
+    const completedRun = {
+      ...testExecutionRunResponse,
+      status: "failed",
+      finishedAt: "2026-07-23T10:03:00.000Z",
+      message: "首页未出现。",
+      steps: [
+        {
+          index: 0,
+          action: { action: "assert.visible", target: { text: "首页" } },
+          status: "failed",
+          message: "找不到文本：首页",
+          screenshotAvailable: true,
+        },
+      ],
+    };
+    mockApis({ testRuns: [completedRun] });
     const user = userEvent.setup();
     renderApp();
 
-    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
-    await user.click(screen.getByRole("button", { name: "测试运行" }));
+    await user.click(await screen.findByRole("button", { name: "AI" }));
+    await user.click(await screen.findByRole("button", { name: "查看 首页可见性检查 的运行详情" }));
 
-    expect(await screen.findByRole("heading", { level: 1, name: "测试运行" })).toBeInTheDocument();
-    expect(screen.getByText("暂无测试运行")).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog", { name: "测试运行详情" });
+    expect(within(dialog).getByText("首页未出现。")).toBeInTheDocument();
+    expect(within(dialog).getByText("找不到文本：首页")).toBeInTheDocument();
+    expect(within(dialog).getByRole("link", { name: "查看报告" })).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "查看步骤截图" }));
+    expect(within(dialog).getByAltText("步骤 1 的设备截图")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "关闭" }));
+    expect(screen.queryByRole("dialog", { name: "测试运行详情" })).not.toBeInTheDocument();
+  });
+
+  it("imports a DSL suite and starts its selected case only after confirmation", async () => {
+    const { getLastTestSuiteRunRequest, getTestSuiteImportRequests, getTestSuiteRunRequests } =
+      mockApis();
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "confirm",
+      vi.fn(() => true),
+    );
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "AI" }));
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "DSL 测试用例" }),
+    ).toBeInTheDocument();
+
+    await user.upload(
+      screen.getByLabelText("导入 DSL 文件"),
+      new File(["schemaVersion: 1"], "smoke.yaml", { type: "application/yaml" }),
+    );
+    await vi.waitFor(() => expect(getTestSuiteImportRequests()).toBe(1));
+    expect(await screen.findByText("示例冒烟测试")).toBeInTheDocument();
+    expect(screen.getByText("启动后显示首页")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "执行" }));
+    await vi.waitFor(() => expect(getTestSuiteRunRequests()).toBe(1));
+    expect(getLastTestSuiteRunRequest()).toEqual({ deviceSerial: "8B3Y0THX0", approved: true });
   });
 
   it("fetches, selects, and tests an OpenAI-compatible model before enabling AI plans", async () => {
@@ -1019,8 +1361,7 @@ describe("DeviceRobot Web UI", () => {
     const user = userEvent.setup();
     renderApp();
 
-    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
-    await user.click(screen.getByRole("button", { name: "AI 与用例" }));
+    await user.click(await screen.findByRole("button", { name: "AI" }));
     expect(
       await screen.findByRole("heading", { level: 2, name: "连接 OpenAI 兼容服务" }),
     ).toBeInTheDocument();
@@ -1039,10 +1380,10 @@ describe("DeviceRobot Web UI", () => {
     await user.click(screen.getByRole("button", { name: "测试并应用配置" }));
 
     await vi.waitFor(() => expect(getAiConfigurationTestRequests()).toBe(1));
-    expect(await screen.findByText("模型已配置")).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { level: 2, name: "描述你想验证的测试目标" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("combobox", { name: "选择 AI 模型" })).toHaveValue(
+      "gpt-4.1",
+    );
+    expect(screen.getByRole("heading", { level: 1, name: "实施测试流程" })).toBeInTheDocument();
     expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument();
   });
 
@@ -1051,8 +1392,8 @@ describe("DeviceRobot Web UI", () => {
     const user = userEvent.setup();
     renderApp();
 
-    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
-    await user.click(screen.getByRole("button", { name: "AI 与用例" }));
+    await user.click(await screen.findByRole("button", { name: "AI" }));
+    await vi.waitFor(() => expect(getAiModelListRequests()).toBe(1));
     await user.click(await screen.findByRole("button", { name: "更换模型" }));
     expect(screen.getByRole("textbox", { name: "Base URL" })).toHaveValue(
       "https://model.example/v1",
@@ -1060,13 +1401,32 @@ describe("DeviceRobot Web UI", () => {
     expect(screen.getByLabelText("API Key")).toHaveValue("");
 
     await user.click(screen.getByRole("button", { name: "拉取模型" }));
-    await vi.waitFor(() => expect(getAiModelListRequests()).toBe(1));
+    await vi.waitFor(() => expect(getAiModelListRequests()).toBe(2));
     await user.selectOptions(screen.getByRole("combobox", { name: "AI 模型" }), "gpt-4.1");
     await user.click(screen.getByRole("button", { name: "测试并应用配置" }));
 
     await vi.waitFor(() => expect(getAiConfigurationTestRequests()).toBe(1));
     expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument();
-    expect(await screen.findByText(/gpt-4\.1/)).toBeInTheDocument();
+    expect(await screen.findByRole("combobox", { name: "选择 AI 模型" })).toHaveValue(
+      "gpt-4.1",
+    );
+  });
+
+  it("selects an existing model from the AI workspace without exposing the provider name", async () => {
+    const { getAiConfigurationTestRequests, getAiModelListRequests } = mockApis();
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "AI" }));
+    const modelSelector = await screen.findByRole("combobox", { name: "选择 AI 模型" });
+    await vi.waitFor(() => expect(getAiModelListRequests()).toBe(1));
+
+    expect(screen.queryByText("openai-compatible")).not.toBeInTheDocument();
+    await user.selectOptions(modelSelector, "gpt-4.1");
+
+    await vi.waitFor(() => expect(getAiConfigurationTestRequests()).toBe(1));
+    expect(modelSelector).toHaveValue("gpt-4.1");
+    expect(screen.getByRole("button", { name: "更换模型" })).toBeInTheDocument();
   });
 
   it("opens device files from the default file manager tab", async () => {
@@ -1131,6 +1491,14 @@ describe("DeviceRobot Web UI", () => {
 
     await user.click(await screen.findByRole("button", { name: "应用管理器" }));
     expect(await screen.findByText("com.example.app")).toBeInTheDocument();
+    const applicationIcon = screen.getByRole("img", { name: "app 图标" });
+    expect(applicationIcon).toHaveAttribute(
+      "src",
+      "/api/v1/devices/8B3Y0THX0/applications/com.example.app/icon",
+    );
+    expect(screen.getByText(/版本 2\.5\.16/u)).toBeInTheDocument();
+    expect(screen.getByText("88 MB")).toBeInTheDocument();
+    expect(screen.getByText("2026年7月22日")).toBeInTheDocument();
     await user.type(screen.getByRole("textbox", { name: "搜索应用包名" }), "settings");
     expect(screen.queryByText("com.example.app")).not.toBeInTheDocument();
 
@@ -1184,6 +1552,32 @@ describe("DeviceRobot Web UI", () => {
     expect(await screen.findByRole("dialog", { name: "安装 APK" })).toBeInTheDocument();
   });
 
+  it("attaches an arbitrary uploaded APK to an AI plan request", async () => {
+    const { getLastAiPlanRequest } = mockApis();
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "AI" }));
+    const goal = await screen.findByRole("textbox", { name: "测试目标" });
+    const apkInput = document.querySelector<HTMLInputElement>(".ai-test-apk-input");
+    expect(apkInput).not.toBeNull();
+    await user.upload(
+      apkInput!,
+      new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], "any-application.apk", {
+        type: "application/vnd.android.package-archive",
+      }),
+    );
+    expect(await screen.findByText("sample.apk")).toBeInTheDocument();
+    await user.type(goal, "安装 APK 后验证应用启动");
+    await user.keyboard("{Enter}");
+
+    await vi.waitFor(() =>
+      expect(getLastAiPlanRequest()).toMatchObject({
+        installableArtifactIds: [apkArtifactResponse.id],
+      }),
+    );
+  });
+
   it("shows a real authorized Android device in the selector", async () => {
     mockApis();
     renderApp();
@@ -1206,6 +1600,81 @@ describe("DeviceRobot Web UI", () => {
     expect(MockWebSocket.instances).toHaveLength(1);
     expect(MockWebSocket.instances[0]?.url).toContain("/api/v1/devices/8B3Y0THX0/scrcpy/stream");
     expect(screen.queryByAltText("设备截图：Pixel 3 XL")).not.toBeInTheDocument();
+  });
+
+  it("automatically reconnects a closed device stream with backoff", async () => {
+    mockApis();
+    renderApp();
+    await screen.findByRole("heading", { level: 1, name: "概览" });
+    const canvas = await screen.findByRole("img", { name: "设备实时画面：Pixel 3 XL" });
+    await vi.waitFor(() => expect(canvas).toHaveAttribute("aria-busy", "false"));
+    const firstSocket = MockWebSocket.instances[0];
+    expect(firstSocket).toBeDefined();
+
+    vi.useFakeTimers();
+    try {
+      firstSocket?.onclose?.();
+      expect(canvas).toHaveAttribute("aria-busy", "false");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(749);
+      });
+      expect(MockWebSocket.instances).toHaveLength(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(MockWebSocket.instances).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reconnects the device stream when a backgrounded page becomes visible again", async () => {
+    mockApis();
+    renderApp();
+    await screen.findByRole("heading", { level: 1, name: "概览" });
+    await screen.findByRole("img", { name: "设备实时画面：Pixel 3 XL" });
+    const firstSocket = MockWebSocket.instances[0];
+    expect(firstSocket).toBeDefined();
+
+    vi.useFakeTimers();
+    try {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+      firstSocket!.readyState = 3;
+      firstSocket?.onclose?.();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(MockWebSocket.instances).toHaveLength(1);
+
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      document.dispatchEvent(new Event("visibilitychange"));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(MockWebSocket.instances).toHaveLength(2);
+    } finally {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a healthy device stream when the page regains focus", async () => {
+    mockApis();
+    renderApp();
+    await screen.findByRole("heading", { level: 1, name: "概览" });
+    expect(MockWebSocket.instances).toHaveLength(1);
+
+    vi.useFakeTimers();
+    try {
+      globalThis.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(MockWebSocket.instances).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows the selected device mirror and collapsed evidence controls", async () => {
@@ -1276,6 +1745,8 @@ describe("DeviceRobot Web UI", () => {
 
     fireEvent.keyDown(divider, { key: "ArrowLeft" });
     expect(shell?.style.getPropertyValue("--device-sidebar-width")).toBe("366px");
+    expect(globalThis.localStorage.getItem("device-robot:mirror-width:8B3Y0THX0")).toBe("366");
+    expect(globalThis.localStorage.getItem("device-robot:mirror-width:last")).toBe("366");
   });
 
   it("maps a mirror click to immediate scrcpy pointer messages", async () => {

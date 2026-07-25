@@ -44,6 +44,7 @@ const shellMetaCharacters = new Set([
 const DEFAULT_LOGCAT_LIMIT = 300;
 const MINIMUM_LOGCAT_LIMIT = 10;
 const MAXIMUM_LOGCAT_LIMIT = 1_000;
+const APPLICATION_SIZE_BATCH_SIZE = 160;
 const logcatLevelByLetter: Record<string, DeviceLogcatLevel> = {
   V: "verbose",
   D: "debug",
@@ -188,6 +189,107 @@ function parseApplications(output: string, source: DeviceApplicationSource): Dev
   });
 }
 
+type ApplicationPackageMetadata = Pick<DeviceApplication, "versionName">;
+
+function readMetadataValue(value: string): string | undefined {
+  const normalized = value.trim();
+  return normalized.length === 0 || normalized === "null" ? undefined : normalized;
+}
+
+export function parseApplicationPackageMetadata(
+  output: string,
+): Map<string, ApplicationPackageMetadata> {
+  const metadataByPackageName = new Map<string, ApplicationPackageMetadata>();
+  let packageName: string | undefined;
+
+  for (const line of output.split(/\r?\n/u)) {
+    const packageHeader = /^\s{2}Package \[([^\]]+)\] \([^)]*\):$/u.exec(line);
+    if (packageHeader !== null) {
+      packageName = packageHeader[1];
+      if (packageName !== undefined) {
+        metadataByPackageName.set(packageName, metadataByPackageName.get(packageName) ?? {});
+      }
+      continue;
+    }
+
+    if (packageName === undefined) {
+      continue;
+    }
+
+    const versionName = /^\s{4}versionName=(.+)$/u.exec(line)?.[1];
+    if (versionName !== undefined) {
+      const normalizedVersionName = readMetadataValue(versionName);
+      if (normalizedVersionName !== undefined) {
+        metadataByPackageName.set(packageName, { versionName: normalizedVersionName });
+      }
+    }
+  }
+
+  return metadataByPackageName;
+}
+
+function parseUsageTimestamp(value: string): string | undefined {
+  const match = /^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2}(?:\.\d+)?)$/u.exec(value.trim());
+  if (match === null) {
+    return undefined;
+  }
+
+  const timestamp = new Date(`${match[1]}T${match[2]}`);
+  return Number.isNaN(timestamp.valueOf()) ? undefined : timestamp.toISOString();
+}
+
+export function parseApplicationLastUsedAt(output: string): Map<string, string> {
+  const lastUsedAtByPackageName = new Map<string, string>();
+
+  for (const line of output.split(/\r?\n/u)) {
+    const match = /\bpackage=([^\s]+).*\blastTimeUsed="([^"]+)"/u.exec(line);
+    const packageName = match?.[1];
+    const lastUsedAt = match === null ? undefined : parseUsageTimestamp(match[2] ?? "");
+    if (packageName === undefined || lastUsedAt === undefined) {
+      continue;
+    }
+
+    const existing = lastUsedAtByPackageName.get(packageName);
+    if (existing === undefined || existing < lastUsedAt) {
+      lastUsedAtByPackageName.set(packageName, lastUsedAt);
+    }
+  }
+
+  return lastUsedAtByPackageName;
+}
+
+export function parseApplicationSizeBytes(output: string): Map<string, number> {
+  const sizeByApkPath = new Map<string, number>();
+
+  for (const line of output.split(/\r?\n/u)) {
+    const separatorIndex = line.lastIndexOf(":");
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const apkPath = line.slice(0, separatorIndex);
+    const sizeBytes = Number(line.slice(separatorIndex + 1));
+    if (apkPath.length === 0 || !Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
+      continue;
+    }
+    sizeByApkPath.set(apkPath, sizeBytes);
+  }
+
+  return sizeByApkPath;
+}
+
+function isSafeApkPathForStat(path: string): boolean {
+  return /^\/[A-Za-z0-9_./=+~@-]+\.apk$/u.test(path);
+}
+
+function chunkValues<T>(values: readonly T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
 function normalizeLogcatLimit(value: number | undefined): number {
   const limit = value ?? DEFAULT_LOGCAT_LIMIT;
   if (!Number.isInteger(limit) || limit < MINIMUM_LOGCAT_LIMIT || limit > MAXIMUM_LOGCAT_LIMIT) {
@@ -276,22 +378,25 @@ export class AdbDeviceManagementService implements DeviceManagementService {
       filter === "all" ? ["user", "system"] : [filter];
 
     try {
-      const results = await Promise.all(
-        sources.map(async (source) => ({
-          source,
-          output: await this.#runner.runText([
-            "-s",
-            serial,
-            "shell",
-            "pm",
-            "list",
-            "packages",
-            "-f",
-            "--show-versioncode",
-            source === "user" ? "-3" : "-s",
-          ]),
-        })),
-      );
+      const packageLists = sources.map(async (source) => ({
+        source,
+        output: await this.#runner.runText([
+          "-s",
+          serial,
+          "shell",
+          "pm",
+          "list",
+          "packages",
+          "-f",
+          "--show-versioncode",
+          source === "user" ? "-3" : "-s",
+        ]),
+      }));
+      const [results, packageMetadata, lastUsedAtByPackageName] = await Promise.all([
+        Promise.all(packageLists),
+        this.#readApplicationPackageMetadata(serial),
+        this.#readApplicationLastUsedAt(serial),
+      ]);
       const byPackageName = new Map<string, DeviceApplication>();
 
       for (const result of results) {
@@ -303,20 +408,93 @@ export class AdbDeviceManagementService implements DeviceManagementService {
         }
       }
 
-      return {
-        serial,
-        filter,
-        applications: [...byPackageName.values()].sort((left, right) => {
+      const applications = [...byPackageName.values()]
+        .map((application) => {
+          const metadata = packageMetadata.get(application.packageName);
+          const lastUsedAt = lastUsedAtByPackageName.get(application.packageName);
+          return {
+            ...application,
+            ...(metadata?.versionName === undefined ? {} : { versionName: metadata.versionName }),
+            ...(lastUsedAt === undefined ? {} : { lastUsedAt }),
+          };
+        })
+        .sort((left, right) => {
           if (left.source !== right.source) {
             return left.source === "user" ? -1 : 1;
           }
           return left.packageName.localeCompare(right.packageName, "en");
-        }),
+        });
+      const sizeByApkPath = await this.#readApplicationSizes(serial, applications);
+
+      return {
+        serial,
+        filter,
+        applications: applications.map((application) => ({
+          ...application,
+          ...(application.apkPath === undefined || !sizeByApkPath.has(application.apkPath)
+            ? {}
+            : { sizeBytes: sizeByApkPath.get(application.apkPath) }),
+        })),
         readAt: new Date().toISOString(),
       };
     } catch (error) {
       throw this.#asManagementError(error, "Application list failed");
     }
+  }
+
+  async #readApplicationPackageMetadata(
+    serial: string,
+  ): Promise<Map<string, ApplicationPackageMetadata>> {
+    try {
+      const output = await this.#runner.runText([
+        "-s",
+        serial,
+        "shell",
+        "dumpsys",
+        "package",
+        "packages",
+      ]);
+      return parseApplicationPackageMetadata(output);
+    } catch {
+      return new Map();
+    }
+  }
+
+  async #readApplicationLastUsedAt(serial: string): Promise<Map<string, string>> {
+    try {
+      const output = await this.#runner.runText(["-s", serial, "shell", "dumpsys", "usagestats"]);
+      return parseApplicationLastUsedAt(output);
+    } catch {
+      return new Map();
+    }
+  }
+
+  async #readApplicationSizes(
+    serial: string,
+    applications: readonly DeviceApplication[],
+  ): Promise<Map<string, number>> {
+    const apkPaths = applications
+      .map((application) => application.apkPath)
+      .filter((path): path is string => path !== undefined && isSafeApkPathForStat(path));
+    const sizeByApkPath = new Map<string, number>();
+
+    for (const apkPathBatch of chunkValues(apkPaths, APPLICATION_SIZE_BATCH_SIZE)) {
+      try {
+        const output = await this.#runner.runText([
+          "-s",
+          serial,
+          "shell",
+          `stat -c %n:%s -- ${apkPathBatch.join(" ")} 2>/dev/null || true`,
+        ]);
+        for (const [apkPath, sizeBytes] of parseApplicationSizeBytes(output)) {
+          sizeByApkPath.set(apkPath, sizeBytes);
+        }
+      } catch {
+        // Application size is optional: a protected or removed APK must not hide the full list.
+      }
+    }
+
+    return sizeByApkPath;
   }
 
   public async readLogcat(

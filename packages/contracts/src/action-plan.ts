@@ -111,13 +111,23 @@ export const agentActionSchema = z.union([
 
 export type AgentAction = z.infer<typeof agentActionSchema>;
 
+export const liveUiExecutionSchema = z
+  .object({
+    goal: z.string().min(1).max(4_000),
+    maxSteps: z.number().int().min(1).max(20),
+  })
+  .strict();
+
 export const actionPlanSchema = z.object({
   id: z.string().min(1),
   projectId: z.string().min(1),
   deviceSerial: z.string().min(1).optional(),
+  targetAppId: z.string().min(1).optional(),
+  liveUiExecution: liveUiExecutionSchema.optional(),
   actions: z.array(agentActionSchema).min(1).max(20),
   requiresApproval: z.boolean(),
 });
 
 export type ActionPlan = z.infer<typeof actionPlanSchema>;
 export type Selector = z.infer<typeof selectorSchema>;
+export type LiveUiExecution = z.infer<typeof liveUiExecutionSchema>;

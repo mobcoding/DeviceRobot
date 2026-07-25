@@ -24,6 +24,9 @@ const GIT_CLONE_RETRY_DELAY_MS = 800;
 const GIT_PARTIAL_CLONE_BLOB_LIMIT = "2m";
 const gitHttpConfiguration = ["-c", "http.version=HTTP/1.1"] as const;
 const gitFallbackSparsePatterns = ["/*", "!/.idea/", "!/docs/", "!/tools/"] as const;
+const appConfigurationFileNames = ["app-config.gradle.kts", "app-config.gradle"] as const;
+const androidApplicationIdPattern =
+  /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/u;
 const ignoredDirectories = new Set([
   ".git",
   ".gradle",
@@ -55,6 +58,7 @@ export interface ProjectCommandRunner {
 export interface ProjectService {
   list(): Promise<AndroidProject[]>;
   add(request: CreateProjectRequest): Promise<AndroidProject>;
+  remove(id: string): Promise<void>;
   reindex(id: string): Promise<AndroidProject>;
 }
 
@@ -130,6 +134,29 @@ function parseApplicationId(content: string | undefined): string | undefined {
   return /\bapplicationId\s*(?:=\s*)?["']([^"']+)["']/u.exec(content ?? "")?.[1]?.trim();
 }
 
+function configuredApplicationId(value: string | undefined): string | undefined {
+  const applicationId = value?.trim();
+  return applicationId !== undefined && androidApplicationIdPattern.test(applicationId)
+    ? applicationId
+    : undefined;
+}
+
+function parseConfiguredApplicationId(content: string | undefined): string | undefined {
+  const source = content ?? "";
+  const patterns = [
+    /\bAPPLICATION_ID\b\s*=\s*["']([^"']+)["']/u,
+    /\b(?:extra|ext)\s*\[\s*["']APPLICATION_ID["']\s*\]\s*=\s*["']([^"']+)["']/u,
+    /\b(?:set|put)\s*\(\s*["']APPLICATION_ID["']\s*,\s*["']([^"']+)["']\s*\)/u,
+  ];
+  for (const pattern of patterns) {
+    const applicationId = configuredApplicationId(pattern.exec(source)?.[1]);
+    if (applicationId !== undefined) {
+      return applicationId;
+    }
+  }
+  return undefined;
+}
+
 function gradleBlockContents(source: string, blockName: string): string | undefined {
   const blockStart = new RegExp(`\\b${blockName}\\s*\\{`, "u").exec(source);
   if (blockStart?.index === undefined) {
@@ -149,6 +176,78 @@ function gradleBlockContents(source: string, blockName: string): string | undefi
     }
   }
   return undefined;
+}
+
+function applicationIdExpression(defaultConfig: string | undefined): string | undefined {
+  return /\bapplicationId\s*(?:=\s*)?([^\r\n;}]+)/u.exec(defaultConfig ?? "")?.[1]?.trim();
+}
+
+function usesConfiguredApplicationId(buildContent: string | undefined): boolean {
+  const source = buildContent ?? "";
+  const expression = applicationIdExpression(gradleBlockContents(source, "defaultConfig"));
+  if (expression === undefined) {
+    return false;
+  }
+  if (/\bAPPLICATION_ID\b/u.test(expression)) {
+    return true;
+  }
+
+  const variableName = /^([A-Za-z_][A-Za-z0-9_]*)\b/u.exec(expression)?.[1];
+  return (
+    variableName !== undefined &&
+    new RegExp(
+      `\\b(?:val|var|def)\\s+${variableName}\\s*=\\s*[^\\r\\n]*\\bAPPLICATION_ID\\b`,
+      "u",
+    ).test(source)
+  );
+}
+
+async function resolveConfiguredApplicationId(
+  rootPath: string,
+  modulePath: string,
+  buildContent: string | undefined,
+): Promise<string | undefined> {
+  const literalApplicationId = parseApplicationId(buildContent);
+  if (literalApplicationId !== undefined || !usesConfiguredApplicationId(buildContent)) {
+    return literalApplicationId;
+  }
+
+  for (const directory of new Set([modulePath, rootPath])) {
+    for (const fileName of appConfigurationFileNames) {
+      const applicationId = parseConfiguredApplicationId(await readableText(join(directory, fileName)));
+      if (applicationId !== undefined) {
+        return applicationId;
+      }
+    }
+  }
+  return undefined;
+}
+
+function hasApplicationConfiguration(rootPath: string): boolean {
+  return appConfigurationFileNames.some((fileName) => existsSync(join(rootPath, fileName)));
+}
+
+function needsApplicationIdRefresh(project: AndroidProject): boolean {
+  return (
+    hasApplicationConfiguration(project.rootPath) &&
+    project.modules.some(
+      (module) =>
+        (module.moduleType === undefined || module.moduleType === "application") &&
+        module.applicationId === undefined,
+    )
+  );
+}
+
+function scanAddsApplicationId(project: AndroidProject, modules: AndroidProjectModule[]): boolean {
+  const existingModules = new Map(project.modules.map((module) => [module.path, module]));
+  return modules.some((module) => {
+    const existing = existingModules.get(module.path);
+    return (
+      module.moduleType === "application" &&
+      module.applicationId !== undefined &&
+      existing?.applicationId !== module.applicationId
+    );
+  });
 }
 
 function namedGradleEntries(block: string | undefined): string[] {
@@ -292,7 +391,7 @@ export async function scanAndroidProject(rootPath: string): Promise<{
         readableText(manifestPath),
       ]);
       const packageName = parseManifestPackage(manifestContent);
-      const applicationId = parseApplicationId(buildContent);
+      const applicationId = await resolveConfiguredApplicationId(rootPath, directory, buildContent);
 
       return {
         name: modulePath === "." ? "根项目" : (modulePath.split("/").at(-1) ?? modulePath),
@@ -362,17 +461,22 @@ export class LocalProjectService implements ProjectService {
   }
 
   public async list(): Promise<AndroidProject[]> {
-    return this.#store.list().map((project) => {
+    const projects: AndroidProject[] = [];
+    for (const storedProject of this.#store.list()) {
+      let project = storedProject;
       if (project.source !== "git" || project.remoteUrl === undefined) {
-        return project;
+        project = await this.#refreshMissingApplicationIds(project);
+      } else {
+        const name = repositoryName(project.remoteUrl);
+        if (project.name !== name) {
+          this.#store.updateName(project.id, name);
+          project = { ...project, name };
+        }
+        project = await this.#refreshMissingApplicationIds(project);
       }
-      const name = repositoryName(project.remoteUrl);
-      if (project.name === name) {
-        return project;
-      }
-      this.#store.updateName(project.id, name);
-      return { ...project, name };
-    });
+      projects.push(project);
+    }
+    return projects;
   }
 
   public async add(request: CreateProjectRequest): Promise<AndroidProject> {
@@ -400,6 +504,15 @@ export class LocalProjectService implements ProjectService {
       }
       throw new ProjectError(`克隆 Git 仓库失败：${toErrorMessage(error)}`, 502);
     }
+  }
+
+  public async remove(id: string): Promise<void> {
+    if (this.#store.findById(id) === undefined) {
+      throw new ProjectError("未找到要删除的项目。", 404);
+    }
+
+    // Removing a project only unregisters it from DeviceRobot. Source files stay untouched.
+    this.#store.delete(id);
   }
 
   public async reindex(id: string): Promise<AndroidProject> {
@@ -575,6 +688,27 @@ export class LocalProjectService implements ProjectService {
     });
     this.#store.create(project);
     return project;
+  }
+
+  async #refreshMissingApplicationIds(project: AndroidProject): Promise<AndroidProject> {
+    if (!needsApplicationIdRefresh(project) || !existsSync(project.rootPath)) {
+      return project;
+    }
+    try {
+      const scan = await scanAndroidProject(project.rootPath);
+      if (!scanAddsApplicationId(project, scan.modules)) {
+        return project;
+      }
+      const refreshedProject = androidProjectSchema.parse({
+        ...project,
+        ...scan,
+        updatedAt: new Date().toISOString(),
+      });
+      this.#store.updateSourceIndex(refreshedProject);
+      return refreshedProject;
+    } catch {
+      return project;
+    }
   }
 
   async #readGitRevision(rootPath: string): Promise<string | undefined> {

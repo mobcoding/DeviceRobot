@@ -12,9 +12,10 @@
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@device-robot/ai-core": "workspace:*",
     "@device-robot/config": "workspace:*",
     "@device-robot/contracts": "workspace:*",
-    "@device-robot/ai-core": "workspace:*",
+    "@device-robot/test-dsl": "workspace:*",
     "@devicefarmer/adbkit": "3.3.9",
     "@fastify/multipart": "9.3.0",
     "@fastify/static": "10.1.0",
@@ -25,13 +26,15 @@
     "@yume-chan/scrcpy": "2.3.0",
     "appium": "3.5.2",
     "appium-uiautomator2-driver": "8.1.0",
+    "archiver": "7.0.1",
     "better-sqlite3": "12.11.1",
     "drizzle-orm": "0.45.2",
-    "fastify": "5.10.0",
     "fast-xml-parser": "5.10.1",
+    "fastify": "5.10.0",
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@types/archiver": "6.0.3",
     "@types/better-sqlite3": "7.6.13",
     "drizzle-kit": "0.31.10",
     "pino-pretty": "13.1.3"

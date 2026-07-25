@@ -43,8 +43,17 @@ export interface ApkCommandRunner {
   ): Promise<{ stdout: string; stderr: string }>;
 }
 
+export type ResolveAaptPathOptions = {
+  paths: AgentPaths;
+  adbExecutable: string;
+  aaptPath?: string;
+  environment?: NodeJS.ProcessEnv;
+  runner: ApkCommandRunner;
+};
+
 export interface ApkArtifactService {
   stage(fileName: string, stream: Readable): Promise<ApkArtifact>;
+  find(artifactId: string): Promise<ApkArtifact>;
   discard(artifactId: string): Promise<void>;
   install(
     serial: string,
@@ -199,6 +208,44 @@ async function findAaptInSdk(sdkRoot: string): Promise<string | undefined> {
   return undefined;
 }
 
+export async function resolveAaptPath(options: ResolveAaptPathOptions): Promise<string> {
+  if (options.aaptPath !== undefined && (await isFile(options.aaptPath))) {
+    return options.aaptPath;
+  }
+
+  const sdkRoots = new Set<string>();
+  for (const configured of [
+    options.environment?.ANDROID_HOME,
+    options.environment?.ANDROID_SDK_ROOT,
+  ]) {
+    if (configured !== undefined && configured.trim().length > 0) {
+      sdkRoots.add(configured.trim());
+    }
+  }
+  sdkRoots.add(options.paths.androidSdk);
+  if (isAbsolute(options.adbExecutable)) {
+    sdkRoots.add(dirname(dirname(options.adbExecutable)));
+  }
+
+  try {
+    const adbVersion = await options.runner.run(options.adbExecutable, ["version"], 10_000);
+    const installedPath = /^Installed as\s+(.+)$/imu.exec(commandOutput(adbVersion))?.[1]?.trim();
+    if (installedPath !== undefined && isAbsolute(installedPath)) {
+      sdkRoots.add(dirname(dirname(installedPath)));
+    }
+  } catch {
+    // An explicit SDK location can still provide aapt when ADB cannot report its installation path.
+  }
+
+  for (const sdkRoot of sdkRoots) {
+    const aaptPath = await findAaptInSdk(sdkRoot);
+    if (aaptPath !== undefined) {
+      return aaptPath;
+    }
+  }
+  throw new ApkArtifactError("未找到 Android build-tools 中的 aapt，无法读取应用图标。", 503);
+}
+
 export class LocalApkArtifactService implements ApkArtifactService {
   readonly #paths: AgentPaths;
   readonly #artifactDirectory: string;
@@ -293,6 +340,10 @@ export class LocalApkArtifactService implements ApkArtifactService {
       rm(this.#metadataPath(artifactId), { force: true }),
       rm(this.#temporaryPath(artifactId), { force: true }),
     ]);
+  }
+
+  public async find(artifactId: string): Promise<ApkArtifact> {
+    return await this.#loadArtifact(artifactId);
   }
 
   public async install(
@@ -401,38 +452,13 @@ export class LocalApkArtifactService implements ApkArtifactService {
   }
 
   async #resolveAaptPath(): Promise<string> {
-    if (this.#configuredAaptPath !== undefined && (await isFile(this.#configuredAaptPath))) {
-      return this.#configuredAaptPath;
-    }
-
-    const sdkRoots = new Set<string>();
-    for (const configured of [this.#environment.ANDROID_HOME, this.#environment.ANDROID_SDK_ROOT]) {
-      if (configured !== undefined && configured.trim().length > 0) {
-        sdkRoots.add(configured.trim());
-      }
-    }
-    sdkRoots.add(this.#paths.androidSdk);
-    if (isAbsolute(this.#adbExecutable)) {
-      sdkRoots.add(dirname(dirname(this.#adbExecutable)));
-    }
-
-    try {
-      const adbVersion = await this.#runner.run(this.#adbExecutable, ["version"], 10_000);
-      const installedPath = /^Installed as\s+(.+)$/imu.exec(commandOutput(adbVersion))?.[1]?.trim();
-      if (installedPath !== undefined && isAbsolute(installedPath)) {
-        sdkRoots.add(dirname(dirname(installedPath)));
-      }
-    } catch {
-      // Installation can still proceed when an SDK path was configured explicitly.
-    }
-
-    for (const sdkRoot of sdkRoots) {
-      const aaptPath = await findAaptInSdk(sdkRoot);
-      if (aaptPath !== undefined) {
-        return aaptPath;
-      }
-    }
-    throw new ApkArtifactError("未找到 Android build-tools 中的 aapt，无法解析 APK。", 503);
+    return await resolveAaptPath({
+      paths: this.#paths,
+      adbExecutable: this.#adbExecutable,
+      ...(this.#configuredAaptPath === undefined ? {} : { aaptPath: this.#configuredAaptPath }),
+      environment: this.#environment,
+      runner: this.#runner,
+    });
   }
 
   async #requireReadyDevice(serial: string): Promise<void> {

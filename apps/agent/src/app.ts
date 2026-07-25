@@ -33,9 +33,13 @@ import {
   projectBuildRunSchema,
   installAndroidSdkRequestSchema,
   startProjectBuildRequestSchema,
+  startTestSuiteCaseRequestSchema,
   startTestExecutionRequestSchema,
   testExecutionRunListResponseSchema,
   testExecutionRunSchema,
+  testExecutionReportSchema,
+  testSuiteListResponseSchema,
+  testSuiteRecordSchema,
 } from "@device-robot/contracts";
 import Fastify, {
   type FastifyInstance,
@@ -62,6 +66,10 @@ import {
   AdbDeviceManagementService,
   type DeviceManagementService,
 } from "./devices/adb-device-management-service.js";
+import {
+  AdbDeviceApplicationIconService,
+  type DeviceApplicationIconService,
+} from "./devices/adb-device-application-icon-service.js";
 import {
   AdbDeviceFileTransferService,
   FileTransferError,
@@ -94,6 +102,7 @@ import { SqliteProjectBuildStore } from "./projects/project-build-store.js";
 import { AiPlanError, LocalAiPlanService, type AiPlanService } from "./ai/ai-plan-service.js";
 import { SqliteAiConfigurationStore } from "./ai/ai-configuration-store.js";
 import { DrizzleAiPlanStore } from "./ai/ai-plan-store.js";
+import { DrizzleAiConversationStore } from "./ai/ai-conversation-store.js";
 import { registerAiRoutes } from "./routes/ai-routes.js";
 import {
   FilesystemLocalDataMaintenanceService,
@@ -106,6 +115,16 @@ import {
   type TestExecutionService,
 } from "./test-execution/test-execution-service.js";
 import { SqliteTestExecutionStore } from "./test-execution/test-execution-store.js";
+import {
+  LocalTestSuiteService,
+  TestSuiteError,
+  type TestSuiteService,
+} from "./test-suites/test-suite-service.js";
+import { SqliteTestSuiteStore } from "./test-suites/test-suite-store.js";
+import {
+  LocalTestReportService,
+  type TestReportService,
+} from "./test-reports/test-report-service.js";
 
 export const AGENT_VERSION = "0.1.0";
 const WEBSOCKET_OPEN = 1;
@@ -119,6 +138,7 @@ export type CreateAgentAppOptions = {
   deviceService?: DeviceDiscoveryService;
   deviceControlService?: DeviceControlService;
   deviceManagementService?: DeviceManagementService;
+  deviceApplicationIconService?: DeviceApplicationIconService;
   deviceFileTransferService?: DeviceFileTransferService;
   projectService?: ProjectService;
   projectBuildService?: ProjectBuildService;
@@ -128,6 +148,8 @@ export type CreateAgentAppOptions = {
   appiumRuntimeService?: AppiumRuntimeService;
   scrcpyStreamService?: ScrcpyStreamService;
   testExecutionService?: TestExecutionService;
+  testSuiteService?: TestSuiteService;
+  testReportService?: TestReportService;
   maintenanceService?: LocalDataMaintenanceService;
 };
 
@@ -138,6 +160,7 @@ export type AgentApp = {
   deviceService: DeviceDiscoveryService;
   deviceControlService: DeviceControlService;
   deviceManagementService: DeviceManagementService;
+  deviceApplicationIconService: DeviceApplicationIconService;
   deviceFileTransferService: DeviceFileTransferService;
   projectService: ProjectService;
   projectBuildService: ProjectBuildService;
@@ -147,6 +170,8 @@ export type AgentApp = {
   appiumRuntimeService: AppiumRuntimeService;
   scrcpyStreamService: ScrcpyStreamService;
   testExecutionService: TestExecutionService;
+  testSuiteService: TestSuiteService;
+  testReportService: TestReportService;
   maintenanceService: LocalDataMaintenanceService;
 };
 
@@ -223,6 +248,48 @@ function parseTestRunId(params: unknown): string {
     throw new TestExecutionError("测试运行编号无效。", 400);
   }
   return runId;
+}
+
+function parseTestSuiteId(params: unknown): string {
+  if (typeof params !== "object" || params === null) {
+    throw new TestSuiteError("缺少测试用例集编号。", 400);
+  }
+  const suiteId = (params as Record<string, unknown>).suiteId;
+  if (
+    typeof suiteId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(suiteId)
+  ) {
+    throw new TestSuiteError("测试用例集编号无效。", 400);
+  }
+  return suiteId;
+}
+
+function parseTestCaseId(params: unknown): string {
+  if (typeof params !== "object" || params === null) {
+    throw new TestSuiteError("缺少测试用例编号。", 400);
+  }
+  const caseId = (params as Record<string, unknown>).caseId;
+  if (typeof caseId !== "string" || caseId.trim().length === 0 || caseId.length > 256) {
+    throw new TestSuiteError("测试用例编号无效。", 400);
+  }
+  return caseId;
+}
+
+async function readUploadContents(
+  source: AsyncIterable<Buffer | string>,
+  maximumBytes: number,
+): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of source) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.byteLength;
+    if (size > maximumBytes) {
+      throw new TestSuiteError("测试用例文件不能超过 1 MB。", 422);
+    }
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks, size);
 }
 
 function parseTestStepIndex(params: unknown): number {
@@ -317,6 +384,23 @@ function parseApplicationFilter(
   } catch {
     throw new DeviceControlError("The application filter is invalid", 400);
   }
+}
+
+function parseApplicationPackage(params: unknown): string {
+  if (typeof params !== "object" || params === null) {
+    throw new DeviceControlError("应用包名无效。", 400);
+  }
+
+  const packageName = (params as Record<string, unknown>).packageName;
+  if (
+    typeof packageName !== "string" ||
+    packageName.length === 0 ||
+    packageName.length > 255 ||
+    !/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*$/u.test(packageName)
+  ) {
+    throw new DeviceControlError("应用包名无效。", 400);
+  }
+  return packageName;
 }
 
 function parseLogcatLimit(query: unknown): number | undefined {
@@ -421,6 +505,9 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     options.deviceControlService ?? new AdbDeviceControlService({ deviceService });
   const deviceManagementService =
     options.deviceManagementService ?? new AdbDeviceManagementService({ deviceService });
+  const deviceApplicationIconService =
+    options.deviceApplicationIconService ??
+    new AdbDeviceApplicationIconService({ paths, deviceService });
   const deviceFileTransferService =
     options.deviceFileTransferService ?? new AdbDeviceFileTransferService({ paths, deviceService });
   const projectStore = new SqliteProjectStore(database.sqlite);
@@ -433,20 +520,22 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
       projectStore,
       buildStore: new SqliteProjectBuildStore(database.sqlite),
     });
-  const aiPlanService =
-    options.aiPlanService ??
-    new LocalAiPlanService({
-      projectStore,
-      configurationStore: new SqliteAiConfigurationStore(database.sqlite),
-      secretProtector: new WindowsDpapiSecretProtector(),
-      planStore: new DrizzleAiPlanStore(database.db),
-    });
   const apkArtifactService =
     options.apkArtifactService ??
     new LocalApkArtifactService({
       paths,
       deviceService,
       auditStore: new SqliteApkInstallAuditStore(database.sqlite),
+    });
+  const aiPlanService =
+    options.aiPlanService ??
+    new LocalAiPlanService({
+      projectStore,
+      apkArtifactService,
+      configurationStore: new SqliteAiConfigurationStore(database.sqlite),
+      secretProtector: new WindowsDpapiSecretProtector(),
+      planStore: new DrizzleAiPlanStore(database.db),
+      conversationStore: new DrizzleAiConversationStore(database.db),
     });
   const deviceActionAuditStore =
     options.deviceActionAuditStore ?? new SqliteDeviceActionAuditStore(database.sqlite);
@@ -461,8 +550,20 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
       projectStore,
       deviceService,
       deviceControlService,
+      deviceManagementService,
+      aiPlanService,
+      apkArtifactService,
       appiumRuntimeService,
     });
+  const testSuiteService =
+    options.testSuiteService ??
+    new LocalTestSuiteService({
+      store: new SqliteTestSuiteStore(database.sqlite),
+      projectStore,
+      testExecutionService,
+    });
+  const testReportService =
+    options.testReportService ?? new LocalTestReportService({ paths, testExecutionService });
   const maintenanceService =
     options.maintenanceService ?? new FilesystemLocalDataMaintenanceService(paths);
   const scrcpyStreamService =
@@ -538,6 +639,61 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
       return projectErrorReply(reply, error);
     }
   });
+
+  app.delete("/api/v1/projects/:projectId", async (request, reply) => {
+    try {
+      await projectService.remove(parseProjectId(request.params));
+      return reply.code(204).send();
+    } catch (error) {
+      return projectErrorReply(reply, error);
+    }
+  });
+
+  app.get("/api/v1/projects/:projectId/test-suites", async (request, reply) => {
+    try {
+      return testSuiteListResponseSchema.parse(
+        await testSuiteService.list(parseProjectId(request.params)),
+      );
+    } catch (error) {
+      return apiErrorReply(reply, error, "测试用例请求失败。");
+    }
+  });
+
+  app.post("/api/v1/projects/:projectId/test-suites", async (request, reply) => {
+    try {
+      const file = await request.file();
+      if (file === undefined) {
+        throw new TestSuiteError("请选择要导入的测试用例文件。", 400);
+      }
+      return testSuiteRecordSchema.parse(
+        await testSuiteService.import(
+          parseProjectId(request.params),
+          file.filename,
+          await readUploadContents(file.file, 1_048_576),
+        ),
+      );
+    } catch (error) {
+      return apiErrorReply(reply, error, "测试用例导入失败。");
+    }
+  });
+
+  app.post(
+    "/api/v1/projects/:projectId/test-suites/:suiteId/cases/:caseId/runs",
+    async (request, reply) => {
+      try {
+        return testExecutionRunSchema.parse(
+          await testSuiteService.startCase(
+            parseProjectId(request.params),
+            parseTestSuiteId(request.params),
+            parseTestCaseId(request.params),
+            startTestSuiteCaseRequestSchema.parse(request.body),
+          ),
+        );
+      } catch (error) {
+        return apiErrorReply(reply, error, "测试用例执行请求失败。");
+      }
+    },
+  );
 
   app.post("/api/v1/projects/:projectId/index", async (request, reply) => {
     try {
@@ -714,6 +870,42 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     }
   });
 
+  app.get("/api/v1/test-runs/:runId/report", async (request, reply) => {
+    try {
+      return testExecutionReportSchema.parse(
+        await testReportService.generate(parseTestRunId(request.params)),
+      );
+    } catch (error) {
+      return apiErrorReply(reply, error, "测试报告生成失败。");
+    }
+  });
+
+  app.get("/api/v1/test-runs/:runId/report/html", async (request, reply) => {
+    try {
+      const path = await testReportService.htmlPath(parseTestRunId(request.params));
+      return reply
+        .header("Cache-Control", "no-store")
+        .header("Content-Disposition", 'inline; filename="DeviceRobot-test-report.html"')
+        .type("text/html; charset=utf-8")
+        .send(createReadStream(path));
+    } catch (error) {
+      return apiErrorReply(reply, error, "测试报告读取失败。");
+    }
+  });
+
+  app.get("/api/v1/test-runs/:runId/report/zip", async (request, reply) => {
+    try {
+      const path = await testReportService.zipPath(parseTestRunId(request.params));
+      return reply
+        .header("Cache-Control", "no-store")
+        .header("Content-Disposition", 'attachment; filename="DeviceRobot-test-report.zip"')
+        .type("application/zip")
+        .send(createReadStream(path));
+    } catch (error) {
+      return apiErrorReply(reply, error, "测试报告导出失败。");
+    }
+  });
+
   app.post("/api/v1/apks", async (request, reply) => {
     try {
       const file = await request.file();
@@ -818,6 +1010,21 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
         parseApplicationFilter(request.query),
       );
       return deviceApplicationListResponseSchema.parse(response);
+    } catch (error) {
+      return controlErrorReply(reply, error);
+    }
+  });
+
+  app.get("/api/v1/devices/:serial/applications/:packageName/icon", async (request, reply) => {
+    try {
+      const icon = await deviceApplicationIconService.readIcon(
+        parseSerial(request.params),
+        parseApplicationPackage(request.params),
+      );
+      return reply
+        .header("Cache-Control", "private, max-age=300")
+        .type(icon.contentType)
+        .send(icon.content);
     } catch (error) {
       return controlErrorReply(reply, error);
     }
@@ -1072,12 +1279,15 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
   if (webAvailable) {
     await app.register(fastifyStatic, {
       root: webRoot,
-      wildcard: false,
     });
 
-    app.get("/*", async (request, reply) => {
+    app.setNotFoundHandler(async (request, reply) => {
       if (request.url.startsWith("/api/")) {
         return reply.code(404).send({ error: "API route not found" });
+      }
+
+      if (request.url.startsWith("/assets/")) {
+        return reply.code(404).send();
       }
 
       return reply.sendFile("index.html");
@@ -1099,6 +1309,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     deviceService,
     deviceControlService,
     deviceManagementService,
+    deviceApplicationIconService,
     deviceFileTransferService,
     projectService,
     projectBuildService,
@@ -1108,6 +1319,8 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     appiumRuntimeService,
     scrcpyStreamService,
     testExecutionService,
+    testSuiteService,
+    testReportService,
     maintenanceService,
   };
 }

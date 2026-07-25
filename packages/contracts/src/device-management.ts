@@ -31,7 +31,10 @@ export const deviceApplicationSchema = z.object({
   packageName: z.string().min(1),
   source: deviceApplicationSourceSchema,
   apkPath: z.string().min(1).optional(),
+  versionName: z.string().min(1).optional(),
   versionCode: z.string().min(1).optional(),
+  sizeBytes: z.number().int().nonnegative().optional(),
+  lastUsedAt: z.iso.datetime().optional(),
 });
 
 export const deviceApplicationListResponseSchema = z.object({

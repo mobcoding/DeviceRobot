@@ -14,11 +14,13 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { AndroidDevice } from "@device-robot/contracts";
 
+import { useAgentUnavailable } from "../agent-availability";
 import { formatDeviceName } from "../ui/formatters";
 
 type DeviceMirrorPanelProps = {
   device: AndroidDevice;
   onPreferredSidebarWidth?(width: number): void;
+  onScreenSize?(size: { width: number; height: number }): void;
   onApkDrop?(file: File): void;
 };
 
@@ -51,6 +53,9 @@ type StreamControl =
 type ActivePointer = DevicePoint & {
   pointerId: number;
 };
+
+const INITIAL_RECONNECT_DELAY_MS = 750;
+const MAX_RECONNECT_DELAY_MS = 10_000;
 
 function streamUrl(serial: string): string {
   const protocol = globalThis.location.protocol === "https:" ? "wss:" : "ws:";
@@ -91,6 +96,13 @@ function parseConfiguration(value: unknown): StreamConfiguration | undefined {
   };
 }
 
+function reconnectDelay(attempt: number): number {
+  return Math.min(
+    MAX_RECONNECT_DELAY_MS,
+    INITIAL_RECONNECT_DELAY_MS * 2 ** Math.min(Math.max(attempt - 1, 0), 4),
+  );
+}
+
 function pointFromPointer(
   event: React.PointerEvent<HTMLCanvasElement>,
   deviceSize: DevicePoint,
@@ -125,14 +137,18 @@ function pointFromPointer(
 export function DeviceMirrorPanel({
   device,
   onPreferredSidebarWidth,
+  onScreenSize,
   onApkDrop,
 }: DeviceMirrorPanelProps): React.JSX.Element {
+  const agentUnavailable = useAgentUnavailable();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
   const decoderRef = useRef<VideoDecoder | undefined>(undefined);
   const socketRef = useRef<WebSocket | undefined>(undefined);
   const pointerStart = useRef<ActivePointer | undefined>(undefined);
   const apkDragDepth = useRef(0);
+  const reconnectFailuresRef = useRef(0);
+  const screenSerialRef = useRef<string | undefined>(undefined);
   const [streamAttempt, setStreamAttempt] = useState(0);
   const [streamState, setStreamState] = useState<"connecting" | "live" | "error">("connecting");
   const [streamError, setStreamError] = useState<string>();
@@ -142,9 +158,15 @@ export function DeviceMirrorPanel({
   const [apkDragActive, setApkDragActive] = useState(false);
   const serial = device.serial;
 
+  const reconnectNow = (): void => {
+    reconnectFailuresRef.current = 0;
+    setStreamAttempt((attempt) => attempt + 1);
+  };
+
   useEffect(() => {
     let disposed = false;
     let decoder: VideoDecoder | undefined;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
     const closeDecoder = (): void => {
       if (decoder !== undefined && decoder.state !== "closed") {
@@ -162,6 +184,22 @@ export function DeviceMirrorPanel({
 
       setStreamState("error");
       setStreamError(message);
+    };
+
+    const scheduleReconnect = (immediate = false): void => {
+      if (disposed || reconnectTimer !== undefined || document.visibilityState === "hidden") {
+        return;
+      }
+
+      const delay = immediate ? 0 : reconnectDelay(++reconnectFailuresRef.current);
+      setStreamState("connecting");
+      setStreamError("实时画面连接已断开，正在重连。");
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = undefined;
+        if (!disposed && document.visibilityState !== "hidden") {
+          setStreamAttempt((attempt) => attempt + 1);
+        }
+      }, delay);
     };
 
     if (!("WebSocket" in globalThis) || !("VideoDecoder" in globalThis)) {
@@ -191,6 +229,7 @@ export function DeviceMirrorPanel({
       canvas.height = frame.displayHeight;
       context.drawImage(frame, 0, 0, canvas.width, canvas.height);
       frame.close();
+      reconnectFailuresRef.current = 0;
       setScreenSize((current) =>
         current?.x === canvas.width && current.y === canvas.height
           ? current
@@ -223,6 +262,7 @@ export function DeviceMirrorPanel({
           canvas.height = configuration.height;
         }
         setScreenSize({ x: configuration.width, y: configuration.height });
+        reconnectFailuresRef.current = 0;
       } catch {
         fail("设备视频格式无法在当前浏览器中解码");
       }
@@ -230,7 +270,10 @@ export function DeviceMirrorPanel({
 
     setStreamState("connecting");
     setStreamError(undefined);
-    setScreenSize(undefined);
+    if (screenSerialRef.current !== serial) {
+      screenSerialRef.current = serial;
+      setScreenSize(undefined);
+    }
     pointerStart.current = undefined;
     const socket = new WebSocket(streamUrl(serial));
     socketRef.current = socket;
@@ -300,11 +343,31 @@ export function DeviceMirrorPanel({
     socket.onclose = () => {
       if (!disposed) {
         fail("实时画面已断开");
+        scheduleReconnect();
       }
     };
 
+    const reconnectAfterPageRestore = (): void => {
+      if (document.visibilityState === "hidden") {
+        return;
+      }
+
+      if (socket.readyState !== WebSocket.OPEN) {
+        scheduleReconnect(true);
+      }
+    };
+    document.addEventListener("visibilitychange", reconnectAfterPageRestore);
+    globalThis.addEventListener("focus", reconnectAfterPageRestore);
+    globalThis.addEventListener("online", reconnectAfterPageRestore);
+
     return () => {
       disposed = true;
+      if (reconnectTimer !== undefined) {
+        clearTimeout(reconnectTimer);
+      }
+      document.removeEventListener("visibilitychange", reconnectAfterPageRestore);
+      globalThis.removeEventListener("focus", reconnectAfterPageRestore);
+      globalThis.removeEventListener("online", reconnectAfterPageRestore);
       socket.close();
       if (socketRef.current === socket) {
         socketRef.current = undefined;
@@ -324,6 +387,14 @@ export function DeviceMirrorPanel({
       onPreferredSidebarWidth(Math.ceil(frameHeight * deviceAspectRatio) + 28);
     }
   }, [onPreferredSidebarWidth, screenSize]);
+
+  useEffect(() => {
+    if (screenSize === undefined || onScreenSize === undefined) {
+      return;
+    }
+
+    onScreenSize({ width: screenSize.x, height: screenSize.y });
+  }, [onScreenSize, screenSize]);
 
   const sendControl = (command: StreamControl): boolean => {
     const socket = socketRef.current;
@@ -434,7 +505,7 @@ export function DeviceMirrorPanel({
     });
   };
 
-  const error = controlError ?? streamError;
+  const error = agentUnavailable ? undefined : (controlError ?? streamError);
 
   const handleApkDragEnter = (event: React.DragEvent<HTMLDivElement>): void => {
     if (onApkDrop === undefined || !Array.from(event.dataTransfer.types).includes("Files")) {
@@ -481,7 +552,7 @@ export function DeviceMirrorPanel({
             className="mirror-refresh"
             aria-label="重新连接实时画面"
             title="重新连接实时画面"
-            onClick={() => setStreamAttempt((attempt) => attempt + 1)}
+            onClick={reconnectNow}
           >
             <RefreshCw aria-hidden="true" size={16} strokeWidth={1.8} />
           </button>

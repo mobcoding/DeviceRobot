@@ -21,7 +21,7 @@ describe("AI action policy", () => {
     expect(decision).toMatchObject({ allowed: true, requiresApproval: false });
   });
 
-  it("requires explicit approval for an AI-requested APK installation, including trusted projects", () => {
+  it("allows a user-staged APK installation without separate approval", () => {
     const decision = evaluateActionPolicy(
       {
         action: "app.install",
@@ -33,7 +33,7 @@ describe("AI action policy", () => {
       { stagedArtifactIds: new Set(["123e4567-e89b-12d3-a456-426614174000"]) },
     );
 
-    expect(decision).toMatchObject({ allowed: true, requiresApproval: true });
+    expect(decision).toMatchObject({ allowed: true, requiresApproval: false });
   });
 
   it("rejects installation of an APK that was not staged for the conversation", () => {
@@ -70,6 +70,6 @@ describe("AI action policy", () => {
       { stagedArtifactIds: new Set(["123e4567-e89b-12d3-a456-426614174000"]) },
     );
 
-    expect(decision).toMatchObject({ allowed: true, requiresApproval: true });
+    expect(decision).toMatchObject({ allowed: true, requiresApproval: false });
   });
 });

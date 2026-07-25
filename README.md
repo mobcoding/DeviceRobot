@@ -14,6 +14,10 @@ The repository discovers locally connected Android devices through ADB and repor
 
 ## Get started
 
+For daily local use on Windows, double-click `start-devicerobot.bat`. The script builds the Web UI and Agent, starts the production Agent in the background, and then exits. Open `http://127.0.0.1:43110`; the command window may be closed after the success message. Double-click `stop-devicerobot.bat` to stop the background Agent. Its logs are stored under `%LOCALAPPDATA%\AIMobileTester\logs`.
+
+For development with Vite hot reload:
+
 ```powershell
 pnpm install
 pnpm dev

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { AgentPaths } from "@device-robot/config";
@@ -13,8 +13,11 @@ import {
 } from "@device-robot/contracts";
 
 import type { AppiumRuntimeService } from "../appium/appium-runtime-service.js";
+import type { AiPlanService } from "../ai/ai-plan-service.js";
+import type { ApkArtifactService } from "../apks/apk-artifact-service.js";
 import type { DeviceControlService } from "../devices/adb-device-control-service.js";
 import type { DeviceDiscoveryService } from "../devices/adb-device-service.js";
+import type { DeviceManagementService } from "../devices/adb-device-management-service.js";
 import type { ProjectStore } from "../projects/project-store.js";
 import type { TestExecutionStore } from "./test-execution-store.js";
 
@@ -22,8 +25,11 @@ const execFileAsync = promisify(execFile);
 const APPIUM_BASE_URL = "http://127.0.0.1:4723";
 const DEFAULT_ACTION_TIMEOUT_MS = 8_000;
 const MAX_ACTION_TIMEOUT_MS = 120_000;
+const MAX_TEST_RUN_STEPS = 20;
 const POLL_INTERVAL_MS = 250;
 const WEB_DRIVER_ELEMENT_KEY = "element-6066-11e4-a52e-4f735466cecf";
+const MAX_RUNTIME_SCREENSHOT_BYTES = 12 * 1_024 * 1_024;
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export class TestExecutionError extends Error {
   public constructor(
@@ -68,6 +74,9 @@ export type LocalTestExecutionServiceOptions = {
   projectStore: ProjectStore;
   deviceService: DeviceDiscoveryService;
   deviceControlService: DeviceControlService;
+  deviceManagementService?: DeviceManagementService;
+  aiPlanService?: AiPlanService;
+  apkArtifactService?: ApkArtifactService;
   appiumRuntimeService: AppiumRuntimeService;
   transport?: WebDriverTransport;
   applicationDataService?: ApplicationDataService;
@@ -452,6 +461,95 @@ function ensureActionScope(action: AgentAction, appId: string): void {
   }
 }
 
+function xmlAttribute(source: string, name: string): string | undefined {
+  const expression = new RegExp(`\\b${name}="([^"]*)"`, "u");
+  return expression.exec(source)?.[1]?.trim();
+}
+
+function boundsCenter(bounds: string | undefined): { x: number; y: number } | undefined {
+  const match = /^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/u.exec(bounds ?? "");
+  if (match === null) {
+    return undefined;
+  }
+  const values = match.slice(1).map(Number);
+  if (!values.every(Number.isFinite)) {
+    return undefined;
+  }
+  const [left, top, right, bottom] = values as [number, number, number, number];
+  return { x: Math.round((left + right) / 2), y: Math.round((top + bottom) / 2) };
+}
+
+function conciseUiContext(xml: string): string {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  for (const match of xml.matchAll(/<node\b[^>]*>/gu)) {
+    const node = match[0];
+    const enabled = xmlAttribute(node, "enabled");
+    if (enabled === "false") {
+      continue;
+    }
+    const password = xmlAttribute(node, "password") === "true";
+    const text = password ? undefined : xmlAttribute(node, "text");
+    const resourceId = xmlAttribute(node, "resource-id");
+    const accessibilityId = xmlAttribute(node, "content-desc");
+    const className = xmlAttribute(node, "class");
+    const clickable = xmlAttribute(node, "clickable") === "true";
+    const center = boundsCenter(xmlAttribute(node, "bounds"));
+    if (
+      !clickable &&
+      text === undefined &&
+      resourceId === undefined &&
+      accessibilityId === undefined
+    ) {
+      continue;
+    }
+    const parts = [
+      text === undefined ? undefined : `text=${JSON.stringify(text.slice(0, 160))}`,
+      resourceId === undefined ? undefined : `resourceId=${JSON.stringify(resourceId)}`,
+      accessibilityId === undefined
+        ? undefined
+        : `accessibilityId=${JSON.stringify(accessibilityId.slice(0, 160))}`,
+      className === undefined ? undefined : `className=${JSON.stringify(className)}`,
+      clickable ? "clickable=true" : undefined,
+      center === undefined ? undefined : `x=${center.x},y=${center.y}`,
+    ].filter((part): part is string => part !== undefined);
+    const candidate = parts.join("; ");
+    if (candidate.length === 0 || seen.has(candidate)) {
+      continue;
+    }
+    seen.add(candidate);
+    candidates.push(candidate);
+    if (candidates.length >= 80) {
+      break;
+    }
+  }
+  return candidates.length === 0
+    ? "未发现可安全定位的可见控件。"
+    : candidates.map((candidate, index) => `${index + 1}. ${candidate}`).join("\n");
+}
+
+function runtimeScreenshot(
+  buffer: Buffer,
+): { dataUrl: string; width: number; height: number } | undefined {
+  if (
+    buffer.byteLength > MAX_RUNTIME_SCREENSHOT_BYTES ||
+    buffer.byteLength < 24 ||
+    !buffer.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)
+  ) {
+    return undefined;
+  }
+  const width = buffer.readUInt32BE(16);
+  const height = buffer.readUInt32BE(20);
+  if (width === 0 || height === 0) {
+    return undefined;
+  }
+  return {
+    dataUrl: `data:image/png;base64,${buffer.toString("base64")}`,
+    width,
+    height,
+  };
+}
+
 function testName(request: StartTestExecutionRequest): string {
   return request.name?.trim() || "AI 操作计划";
 }
@@ -462,6 +560,9 @@ export class LocalTestExecutionService implements TestExecutionService {
   readonly #projectStore: ProjectStore;
   readonly #deviceService: DeviceDiscoveryService;
   readonly #deviceControlService: DeviceControlService;
+  readonly #deviceManagementService: DeviceManagementService | undefined;
+  readonly #aiPlanService: AiPlanService | undefined;
+  readonly #apkArtifactService: ApkArtifactService | undefined;
   readonly #appiumRuntimeService: AppiumRuntimeService;
   readonly #transport: WebDriverTransport;
   readonly #applicationDataService: ApplicationDataService;
@@ -473,6 +574,9 @@ export class LocalTestExecutionService implements TestExecutionService {
     this.#projectStore = options.projectStore;
     this.#deviceService = options.deviceService;
     this.#deviceControlService = options.deviceControlService;
+    this.#deviceManagementService = options.deviceManagementService;
+    this.#aiPlanService = options.aiPlanService;
+    this.#apkArtifactService = options.apkArtifactService;
     this.#appiumRuntimeService = options.appiumRuntimeService;
     this.#transport = options.transport ?? defaultTransport();
     this.#applicationDataService =
@@ -498,10 +602,27 @@ export class LocalTestExecutionService implements TestExecutionService {
     if (!packageNameIsValid(request.appId)) {
       throw new TestExecutionError("测试目标包名无效。", 422);
     }
+    if (
+      request.plan.liveUiExecution !== undefined &&
+      this.#aiPlanService?.decideRuntimeStep === undefined
+    ) {
+      throw new TestExecutionError("当前 Agent 未配置支持实时页面执行的 AI 服务。", 503);
+    }
+    let reachedNonInstallAction = false;
     for (const action of request.plan.actions) {
       ensureActionScope(action, request.appId);
-      if (action.action === "adb.shell" || action.action === "app.install") {
-        throw new TestExecutionError("测试执行不接受 adb.shell 或 app.install 操作。", 422);
+      if (action.action === "adb.shell") {
+        throw new TestExecutionError("测试执行不接受 adb.shell 操作。", 422);
+      }
+      if (action.action === "app.install") {
+        if (reachedNonInstallAction) {
+          throw new TestExecutionError("APK 安装必须位于测试计划的开头。", 422);
+        }
+        if (this.#apkArtifactService === undefined) {
+          throw new TestExecutionError("当前 Agent 未启用本地 APK 暂存服务。", 503);
+        }
+      } else {
+        reachedNonInstallAction = true;
       }
     }
     const deviceList = await this.#deviceService.listDevices();
@@ -530,7 +651,10 @@ export class LocalTestExecutionService implements TestExecutionService {
       deviceSerial: request.deviceSerial,
       appId: request.appId,
       status: "running",
-      steps: request.plan.actions.map((action, index) => ({
+      steps: (request.plan.liveUiExecution === undefined
+        ? request.plan.actions
+        : request.plan.actions.filter((action) => action.action === "app.install")
+      ).map((action, index) => ({
         index,
         action,
         status: "pending",
@@ -544,9 +668,11 @@ export class LocalTestExecutionService implements TestExecutionService {
       controller,
       completion: Promise.resolve(),
     };
-    active.completion = this.#execute(run, controller.signal).finally(() => {
-      this.#activeRuns.delete(run.id);
-    });
+    active.completion = this.#execute(run, controller.signal, request.plan.liveUiExecution).finally(
+      () => {
+        this.#activeRuns.delete(run.id);
+      },
+    );
     this.#activeRuns.set(run.id, active);
     return run;
   }
@@ -585,9 +711,19 @@ export class LocalTestExecutionService implements TestExecutionService {
     );
   }
 
-  async #execute(run: TestExecutionRun, signal: AbortSignal): Promise<void> {
+  async #execute(
+    run: TestExecutionRun,
+    signal: AbortSignal,
+    liveUiExecution: StartTestExecutionRequest["plan"]["liveUiExecution"],
+  ): Promise<void> {
     let session: WebDriverSession | undefined;
     try {
+      for (const step of run.steps.filter(
+        (candidate) => candidate.action.action === "app.install",
+      )) {
+        assertNotCancelled(signal);
+        await this.#executeInstallStep(run, step, signal);
+      }
       const runtime = await this.#appiumRuntimeService.start();
       if (runtime.server.state !== "running") {
         throw new TestExecutionError(runtime.server.error ?? "Appium 服务未能启动。", 503);
@@ -601,11 +737,25 @@ export class LocalTestExecutionService implements TestExecutionService {
         script: "mobile: activateApp",
         args: [{ appId: run.appId }],
       });
-      for (const step of run.steps) {
-        assertNotCancelled(signal);
-        await this.#executeStep(run, step, session, signal);
+      const completionMessage =
+        liveUiExecution === undefined
+          ? "测试运行完成。"
+          : await this.#executeLiveUiFlow(
+              run,
+              session,
+              signal,
+              liveUiExecution.goal,
+              liveUiExecution.maxSteps,
+            );
+      if (liveUiExecution === undefined) {
+        for (const step of run.steps.filter(
+          (candidate) => candidate.action.action !== "app.install",
+        )) {
+          assertNotCancelled(signal);
+          await this.#executeStep(run, step, session, signal);
+        }
       }
-      this.#finishRun(run.id, "succeeded", "测试运行完成。");
+      this.#finishRun(run.id, "succeeded", completionMessage);
     } catch (error) {
       const cancelled = signal.aborted;
       const message = cancelled ? "测试运行已取消。" : errorMessage(error);
@@ -628,6 +778,80 @@ export class LocalTestExecutionService implements TestExecutionService {
         await deleteSession(session);
       }
     }
+  }
+
+  #nextStepIndex(runId: string): number {
+    return this.#store.findById(runId)?.steps.length ?? 0;
+  }
+
+  async #appendAndExecuteStep(
+    run: TestExecutionRun,
+    action: AgentAction,
+    session: WebDriverSession,
+    signal: AbortSignal,
+    message?: string,
+  ): Promise<void> {
+    const index = this.#nextStepIndex(run.id);
+    if (index >= MAX_TEST_RUN_STEPS) {
+      throw new TestExecutionError(`实时页面执行已达到 ${MAX_TEST_RUN_STEPS} 步上限。`, 422);
+    }
+    const step: TestStepExecution = {
+      index,
+      action,
+      status: "pending",
+      screenshotAvailable: false,
+      ...(message === undefined ? {} : { message }),
+    };
+    this.#store.appendStep(run.id, step);
+    await this.#executeStep(run, step, session, signal);
+  }
+
+  async #executeLiveUiFlow(
+    run: TestExecutionRun,
+    session: WebDriverSession,
+    signal: AbortSignal,
+    goal: string,
+    maxSteps: number,
+  ): Promise<string> {
+    const aiPlanService = this.#aiPlanService;
+    if (aiPlanService?.decideRuntimeStep === undefined) {
+      throw new TestExecutionError("当前 Agent 未配置支持实时页面执行的 AI 服务。", 503);
+    }
+
+    await sleep(800, signal);
+    const runtimeHistory: string[] = [];
+    for (let stepNumber = 1; stepNumber <= maxSteps; stepNumber += 1) {
+      assertNotCancelled(signal);
+      const [tree, screenshot] = await Promise.all([
+        this.#deviceControlService.readUiTree(run.deviceSerial),
+        this.#deviceControlService.captureScreenshot(run.deviceSerial),
+      ]);
+      const vision = runtimeScreenshot(screenshot);
+      const decision = await aiPlanService.decideRuntimeStep({
+        projectId: run.projectId,
+        appId: run.appId,
+        deviceSerial: run.deviceSerial,
+        goal,
+        stepNumber,
+        uiContext: conciseUiContext(tree.xml),
+        ...(runtimeHistory.length === 0 ? {} : { runtimeHistory }),
+        ...(vision === undefined ? {} : { screenshot: vision }),
+      });
+      if (decision.status === "blocked") {
+        await this.#captureFailureEvidence(run.id, this.#nextStepIndex(run.id), run.deviceSerial);
+        throw new TestExecutionError(`AI 无法继续当前页面流程：${decision.reason}`, 422);
+      }
+      if (decision.status === "completed") {
+        await this.#appendAndExecuteStep(run, decision.assertion, session, signal, decision.reason);
+        return `自主执行完成：${decision.reason}`;
+      }
+      await this.#appendAndExecuteStep(run, decision.action, session, signal, decision.reason);
+      runtimeHistory.push(
+        `${stepNumber}. ${decision.action.action}：${decision.reason.slice(0, 500)}`,
+      );
+    }
+    await this.#captureFailureEvidence(run.id, this.#nextStepIndex(run.id), run.deviceSerial);
+    throw new TestExecutionError(`AI 未能在 ${maxSteps} 步内完成测试目标。`, 422);
   }
 
   async #executeStep(
@@ -663,6 +887,9 @@ export class LocalTestExecutionService implements TestExecutionService {
         originalStep.index,
         run.deviceSerial,
       ).catch(() => undefined);
+      if (!signal.aborted) {
+        await this.#captureFailureEvidence(run.id, originalStep.index, run.deviceSerial);
+      }
       const message = signal.aborted ? "测试运行已取消。" : errorMessage(error);
       this.#store.updateStep(
         run.id,
@@ -679,11 +906,49 @@ export class LocalTestExecutionService implements TestExecutionService {
     }
   }
 
-  #finishRun(
-    runId: string,
-    status: TestExecutionRun["status"],
-    message: string,
-  ): void {
+  async #executeInstallStep(
+    run: TestExecutionRun,
+    originalStep: TestStepExecution,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (originalStep.action.action !== "app.install" || this.#apkArtifactService === undefined) {
+      throw new TestExecutionError("当前 Agent 未启用本地 APK 暂存服务。", 503);
+    }
+    const startedAt = now();
+    const runningStep = { ...originalStep, status: "running" as const, startedAt };
+    this.#store.updateStep(run.id, runningStep);
+    try {
+      assertNotCancelled(signal);
+      const installed = await this.#apkArtifactService.install(
+        run.deviceSerial,
+        originalStep.action.artifactId,
+        {
+          replaceExisting: originalStep.action.replaceExisting,
+          allowTestPackage: originalStep.action.allowTestPackage,
+          uninstallExisting: false,
+        },
+      );
+      this.#store.updateStep(run.id, {
+        ...runningStep,
+        status: "succeeded",
+        message: `已安装 ${installed.packageName}。`,
+        finishedAt: now(),
+      });
+    } catch (error) {
+      if (!signal.aborted) {
+        await this.#captureFailureEvidence(run.id, originalStep.index, run.deviceSerial);
+      }
+      this.#store.updateStep(run.id, {
+        ...runningStep,
+        status: signal.aborted ? "cancelled" : "failed",
+        message: signal.aborted ? "测试运行已取消。" : errorMessage(error),
+        finishedAt: now(),
+      });
+      throw error;
+    }
+  }
+
+  #finishRun(runId: string, status: TestExecutionRun["status"], message: string): void {
     const current = this.#store.findById(runId);
     if (current === undefined) {
       return;
@@ -698,6 +963,51 @@ export class LocalTestExecutionService implements TestExecutionService {
     const path = join(directory, `${String(stepIndex + 1).padStart(3, "0")}.png`);
     await writeFile(path, screenshot);
     return path;
+  }
+
+  async #captureFailureEvidence(runId: string, stepIndex: number, serial: string): Promise<void> {
+    const directory = join(this.#paths.reports, runId, "evidence");
+    const filePrefix = `step-${String(stepIndex + 1).padStart(3, "0")}`;
+    await mkdir(directory, { recursive: true });
+    const tasks: Promise<void>[] = [
+      this.#deviceControlService
+        .readUiTree(serial)
+        .then(
+          async (tree) => await writeFile(join(directory, `${filePrefix}.xml`), tree.xml, "utf8"),
+        ),
+      this.#captureFailureLogcat(directory, filePrefix, serial),
+      this.#captureAppiumLog(directory),
+    ];
+    await Promise.allSettled(tasks);
+  }
+
+  async #captureFailureLogcat(
+    directory: string,
+    filePrefix: string,
+    serial: string,
+  ): Promise<void> {
+    if (this.#deviceManagementService === undefined) {
+      return;
+    }
+    const response = await this.#deviceManagementService.readLogcat(serial, 500);
+    const text = response.entries
+      .map(
+        (entry) =>
+          `${entry.timestamp} ${entry.processId} ${entry.threadId} ${entry.level} ${entry.tag}: ${entry.message}`,
+      )
+      .join("\n");
+    await writeFile(join(directory, `${filePrefix}-logcat.log`), text, "utf8");
+  }
+
+  async #captureAppiumLog(directory: string): Promise<void> {
+    try {
+      const contents = await readFile(join(this.#paths.logs, "appium.log"));
+      const maximumBytes = 1_048_576;
+      const tail = contents.subarray(Math.max(0, contents.byteLength - maximumBytes));
+      await writeFile(join(directory, "appium.log"), tail);
+    } catch {
+      // The Appium process may fail before it has produced a log file.
+    }
   }
 
   async #performAction(
@@ -833,6 +1143,7 @@ export class LocalTestExecutionService implements TestExecutionService {
       case "device.screenshot":
         return;
       case "app.install":
+        throw new TestExecutionError("APK 安装仅能作为测试计划的第一个步骤执行。", 422);
       case "adb.shell":
         throw new TestExecutionError(`暂不支持执行 ${action.action} 操作。`, 422);
     }

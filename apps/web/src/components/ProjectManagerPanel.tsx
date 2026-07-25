@@ -12,9 +12,11 @@ import {
   FolderGit2,
   FolderOpen,
   GitBranch,
+  MoreHorizontal,
   PackageCheck,
   Play,
   RefreshCw,
+  Trash2,
 } from "lucide-react";
 import { useState } from "react";
 import type {
@@ -26,8 +28,10 @@ import type {
   ProjectSource,
 } from "@device-robot/contracts";
 
+import { useAgentUnavailable } from "../agent-availability";
 import {
   createProject,
+  deleteProject,
   fetchProjectBuildLog,
   fetchProjectBuildRuns,
   fetchProjectBuildTargets,
@@ -340,11 +344,14 @@ export function ProjectManagerPanel({
 }: {
   device: AndroidDevice | undefined;
 }): React.JSX.Element {
+  const agentUnavailable = useAgentUnavailable();
   const queryClient = useQueryClient();
   const [source, setSource] = useState<ProjectSource>("local");
   const [localPath, setLocalPath] = useState("");
   const [remoteUrl, setRemoteUrl] = useState("");
   const [pendingBuild, setPendingBuild] = useState<PendingBuild>();
+  const [projectMenuId, setProjectMenuId] = useState<string>();
+  const [pendingProjectDeletion, setPendingProjectDeletion] = useState<AndroidProject>();
   const [failureDetail, setFailureDetail] = useState<{
     project: AndroidProject;
     run: ProjectBuildRun;
@@ -367,6 +374,16 @@ export function ProjectManagerPanel({
     onSuccess: async () => {
       setLocalPath("");
       setRemoteUrl("");
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+  const deleteMutation = useMutation({
+    mutationFn: async (projectId: string) => await deleteProject(projectId),
+    onSuccess: async (_result, projectId) => {
+      setProjectMenuId(undefined);
+      setPendingProjectDeletion(undefined);
+      queryClient.removeQueries({ queryKey: ["project-build-data", projectId] });
+      queryClient.removeQueries({ queryKey: ["project-build-log", projectId] });
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
     },
   });
@@ -467,19 +484,23 @@ export function ProjectManagerPanel({
   });
   const submitting = createMutation.isPending;
   const value = source === "local" ? localPath : remoteUrl;
-  const error = projectsQuery.isError
-    ? projectsQuery.error.message
-    : createMutation.isError
-      ? createMutation.error?.message
-      : projectBuildError !== undefined
-        ? projectBuildError.message
-        : buildMutation.isError
-          ? buildMutation.error?.message
-          : installSdkMutation.isError
-            ? installSdkMutation.error?.message
-            : installArtifactMutation.isError && pendingSignatureConflict === undefined
-              ? installArtifactMutation.error?.message
-              : undefined;
+  const error = agentUnavailable
+    ? undefined
+    : projectsQuery.isError
+      ? projectsQuery.error.message
+      : createMutation.isError
+        ? createMutation.error?.message
+        : deleteMutation.isError
+          ? deleteMutation.error?.message
+        : projectBuildError !== undefined
+          ? projectBuildError.message
+          : buildMutation.isError
+            ? buildMutation.error?.message
+            : installSdkMutation.isError
+              ? installSdkMutation.error?.message
+              : installArtifactMutation.isError && pendingSignatureConflict === undefined
+                ? installArtifactMutation.error?.message
+                : undefined;
   const pendingBuildSubmitting =
     pendingBuild !== undefined &&
     buildMutation.isPending &&
@@ -598,7 +619,10 @@ export function ProjectManagerPanel({
       ) : (
         <div className="project-list">
           {projectsQuery.data?.projects.map((project) => (
-            <article key={project.id} className="project-item">
+            <article
+              key={project.id}
+              className={`project-item${projectMenuId === project.id ? " menu-open" : ""}`}
+            >
               <header className="project-summary">
                 <span className="project-summary-heading">
                   {project.source === "local" ? (
@@ -611,6 +635,41 @@ export function ProjectManagerPanel({
                     {sourceLabel(project.source)}
                   </span>
                 </span>
+                <div className="project-summary-actions">
+                  <button
+                    className="icon-button project-more-button"
+                    type="button"
+                    aria-label={`${project.name} 的更多项目操作`}
+                    aria-expanded={projectMenuId === project.id}
+                    aria-haspopup="menu"
+                    title="更多项目操作"
+                    onClick={() =>
+                      setProjectMenuId((current) => (current === project.id ? undefined : project.id))
+                    }
+                  >
+                    <MoreHorizontal aria-hidden="true" size={18} strokeWidth={2} />
+                  </button>
+                  {projectMenuId === project.id && (
+                    <div
+                      className="project-action-menu"
+                      role="menu"
+                      aria-label={`${project.name} 的项目操作`}
+                    >
+                      <button
+                        className="project-action-menu-danger"
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setProjectMenuId(undefined);
+                          setPendingProjectDeletion(project);
+                        }}
+                      >
+                        <Trash2 aria-hidden="true" size={15} strokeWidth={1.9} />
+                        删除项目
+                      </button>
+                    </div>
+                  )}
+                </div>
               </header>
               <ProjectBuildSection
                 project={project}
@@ -641,6 +700,42 @@ export function ProjectManagerPanel({
               />
             </article>
           ))}
+        </div>
+      )}
+      {pendingProjectDeletion !== undefined && (
+        <div className="modal-backdrop" role="presentation">
+          <section
+            className="project-build-dialog project-delete-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="确认删除项目"
+          >
+            <h2>删除项目</h2>
+            <p>
+              确定删除 <strong>{pendingProjectDeletion.name}</strong> 的项目接入记录吗？
+            </p>
+            <p>项目源码、Git 克隆目录和已生成的 APK 文件都会保留。</p>
+            <footer>
+              <button
+                type="button"
+                disabled={deleteMutation.isPending}
+                onClick={() => {
+                  setPendingProjectDeletion(undefined);
+                  deleteMutation.reset();
+                }}
+              >
+                取消
+              </button>
+              <button
+                className="project-delete-command"
+                type="button"
+                disabled={deleteMutation.isPending}
+                onClick={() => deleteMutation.mutate(pendingProjectDeletion.id)}
+              >
+                {deleteMutation.isPending ? "正在删除" : "删除项目"}
+              </button>
+            </footer>
+          </section>
         </div>
       )}
       {pendingBuild !== undefined && (

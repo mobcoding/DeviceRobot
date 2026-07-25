@@ -1,0 +1,19 @@
+schemaVersion: 1
+appId: com.example.app
+suite:
+  id: smoke
+  name: 示例冒烟测试
+  sourceRevision: main
+cases:
+  - id: launch-home
+    name: 启动后显示首页
+    priority: P0
+    tags:
+      - smoke
+    steps:
+      - id: wait-home
+        action:
+          action: assert.visible
+          target:
+            text: 首页
+          timeoutMs: 8000

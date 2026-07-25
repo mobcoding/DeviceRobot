@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { AppWindow, Package, Play, RefreshCw, Search, Square, Upload } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { AppWindow, Play, RefreshCw, Search, Square, Upload } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AndroidDevice,
   DeviceApplication,
@@ -8,8 +8,9 @@ import type {
   DeviceControlAction,
 } from "@device-robot/contracts";
 
+import { useAgentUnavailable } from "../agent-availability";
 import { executeDeviceAction } from "../api/device-control";
-import { fetchDeviceApplications } from "../api/device-management";
+import { deviceApplicationIconUrl, fetchDeviceApplications } from "../api/device-management";
 
 type ApplicationManagerPanelProps = {
   device: AndroidDevice;
@@ -18,14 +19,116 @@ type ApplicationManagerPanelProps = {
 
 const APPLICATIONS_PER_PAGE = 50;
 
+function formatApplicationSize(sizeBytes: number | undefined): string {
+  if (sizeBytes === undefined) {
+    return "未读取";
+  }
+  if (sizeBytes < 1_024) {
+    return `${sizeBytes} B`;
+  }
+
+  const units = ["KB", "MB", "GB"];
+  let value = sizeBytes / 1_024;
+  let unitIndex = 0;
+  while (value >= 1_024 && unitIndex < units.length - 1) {
+    value /= 1_024;
+    unitIndex += 1;
+  }
+  return `${value.toLocaleString("zh-CN", {
+    maximumFractionDigits: value >= 10 ? 0 : 1,
+  })} ${units[unitIndex]}`;
+}
+
+function formatLastUsedAt(lastUsedAt: string | undefined): string {
+  if (lastUsedAt === undefined) {
+    return "未记录";
+  }
+
+  const date = new Date(lastUsedAt);
+  if (Number.isNaN(date.valueOf())) {
+    return "未记录";
+  }
+  return date.toLocaleDateString("zh-CN", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
 function sourceLabel(source: DeviceApplication["source"]): string {
-  return source === "user" ? "用户安装" : "系统预装";
+  return source === "user" ? "用户" : "系统";
+}
+
+function applicationDisplayName(application: DeviceApplication): string {
+  const lastSegment = application.packageName.split(".").at(-1) ?? application.packageName;
+  const spaced = lastSegment.replaceAll(/([a-z])([A-Z])/gu, "$1 $2").replaceAll(/[_-]+/gu, " ");
+  return spaced.length === 0 ? application.packageName : spaced;
+}
+
+function ApplicationIcon({
+  serial,
+  application,
+}: {
+  serial: string;
+  application: DeviceApplication;
+}): React.JSX.Element {
+  const [failed, setFailed] = useState(false);
+  const [shouldLoad, setShouldLoad] = useState(
+    () => typeof globalThis.IntersectionObserver !== "function",
+  );
+  const iconRef = useRef<HTMLSpanElement>(null);
+  const displayName = applicationDisplayName(application);
+
+  useEffect(() => {
+    setFailed(false);
+    if (typeof globalThis.IntersectionObserver !== "function") {
+      setShouldLoad(true);
+      return;
+    }
+
+    setShouldLoad(false);
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setShouldLoad(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "160px 0px" },
+    );
+    const element = iconRef.current;
+    if (element !== null) {
+      observer.observe(element);
+    }
+    return () => observer.disconnect();
+  }, [serial, application.packageName]);
+
+  return (
+    <span ref={iconRef} className="application-icon-shell">
+      {shouldLoad && !failed ? (
+        <img
+          className="application-icon-image"
+          src={deviceApplicationIconUrl(serial, application.packageName)}
+          alt={`${displayName} 图标`}
+          width={36}
+          height={36}
+          decoding="async"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <span className="application-icon-fallback" aria-label={`${displayName} 默认图标`}>
+          {displayName.slice(0, 1).toLocaleUpperCase()}
+        </span>
+      )}
+    </span>
+  );
 }
 
 export function ApplicationManagerPanel({
   device,
   onRequestApkInstall,
 }: ApplicationManagerPanelProps): React.JSX.Element {
+  const agentUnavailable = useAgentUnavailable();
   const [filter, setFilter] = useState<DeviceApplicationFilter>("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [page, setPage] = useState(0);
@@ -41,8 +144,10 @@ export function ApplicationManagerPanel({
 
   const filteredApplications = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLocaleLowerCase();
-    return (applicationsQuery.data?.applications ?? []).filter((application) =>
-      application.packageName.toLocaleLowerCase().includes(normalizedSearch),
+    return (applicationsQuery.data?.applications ?? []).filter(
+      (application) =>
+        application.packageName.toLocaleLowerCase().includes(normalizedSearch) ||
+        applicationDisplayName(application).toLocaleLowerCase().includes(normalizedSearch),
     );
   }, [applicationsQuery.data?.applications, searchTerm]);
   const pageCount = Math.max(1, Math.ceil(filteredApplications.length / APPLICATIONS_PER_PAGE));
@@ -107,7 +212,7 @@ export function ApplicationManagerPanel({
         </label>
       </div>
 
-      {(applicationsQuery.isError || actionError !== undefined) && (
+      {!agentUnavailable && (applicationsQuery.isError || actionError !== undefined) && (
         <p className="management-error" role="alert">
           {applicationsQuery.isError ? applicationsQuery.error.message : actionError}
         </p>
@@ -122,10 +227,11 @@ export function ApplicationManagerPanel({
           <table className="manager-table applications-table">
             <thead>
               <tr>
-                <th scope="col">应用包名</th>
+                <th scope="col">应用</th>
                 <th scope="col">来源</th>
-                <th scope="col">版本号</th>
-                <th scope="col">安装路径</th>
+                <th scope="col">大小</th>
+                <th scope="col">最后使用时间</th>
+                <th scope="col">包名</th>
                 <th scope="col" aria-label="操作" />
               </tr>
             </thead>
@@ -133,19 +239,34 @@ export function ApplicationManagerPanel({
               {applications.map((application) => (
                 <tr key={application.packageName}>
                   <td>
-                    <span className="application-name">
-                      <Package aria-hidden="true" size={19} strokeWidth={1.7} />
-                      <code>{application.packageName}</code>
-                    </span>
+                    <div className="application-identity">
+                      <ApplicationIcon serial={device.serial} application={application} />
+                      <div>
+                        <strong>{applicationDisplayName(application)}</strong>
+                        <span>
+                          版本 {application.versionName ?? "未读取"} · 版本代码{" "}
+                          {application.versionCode ?? "未读取"}
+                        </span>
+                      </div>
+                    </div>
                   </td>
                   <td>
                     <span className={`application-source ${application.source}`}>
                       {sourceLabel(application.source)}
                     </span>
                   </td>
-                  <td>{application.versionCode ?? "未读取"}</td>
                   <td>
-                    <code className="application-path">{application.apkPath ?? "未读取"}</code>
+                    <span className="application-size">
+                      {formatApplicationSize(application.sizeBytes)}
+                    </span>
+                  </td>
+                  <td>
+                    <time className="application-last-used-at" dateTime={application.lastUsedAt}>
+                      {formatLastUsedAt(application.lastUsedAt)}
+                    </time>
+                  </td>
+                  <td>
+                    <code className="application-package-name">{application.packageName}</code>
                   </td>
                   <td>
                     <div className="application-actions">

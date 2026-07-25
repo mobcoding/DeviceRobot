@@ -13,6 +13,7 @@ export interface TestExecutionStore {
   findById(runId: string): TestExecutionRun | undefined;
   list(): TestExecutionRun[];
   updateRun(run: TestExecutionRun): void;
+  appendStep(runId: string, step: TestStepExecution): void;
   updateStep(runId: string, step: TestStepExecution, screenshotPath?: string): void;
   screenshotPath(runId: string, stepIndex: number): string | undefined;
 }
@@ -150,6 +151,27 @@ export class SqliteTestExecutionStore implements TestExecutionStore {
         `,
       )
       .run(run.status, run.message ?? null, run.finishedAt ?? null, run.id);
+  }
+
+  public appendStep(runId: string, step: TestStepExecution): void {
+    this.#sqlite
+      .prepare(
+        `
+          INSERT INTO test_execution_steps (
+            run_id, step_index, action_json, status, message, screenshot_path, started_at, finished_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        runId,
+        step.index,
+        JSON.stringify(step.action),
+        step.status,
+        step.message ?? null,
+        null,
+        step.startedAt ?? null,
+        step.finishedAt ?? null,
+      );
   }
 
   public updateStep(runId: string, step: TestStepExecution, screenshotPath?: string): void {

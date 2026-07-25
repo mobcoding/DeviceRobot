@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AppiumRuntime } from "@device-robot/contracts";
 
+import { useAgentUnavailable } from "../agent-availability";
 import { fetchAppiumRuntime, startAppiumRuntime, stopAppiumRuntime } from "../api/appium";
 
 function stateLabel(state: AppiumRuntime["server"]["state"]): string {
@@ -29,6 +30,7 @@ export function AppiumRuntimePanel({
   variant = "details",
   controls = true,
 }: AppiumRuntimePanelProps): React.JSX.Element {
+  const agentUnavailable = useAgentUnavailable();
   const queryClient = useQueryClient();
   const runtimeQuery = useQuery({
     queryKey: ["appium-runtime"],
@@ -116,7 +118,9 @@ export function AppiumRuntimePanel({
       </div>
 
       {runtimeQuery.isError ? (
-        <p className="control-error">{runtimeQuery.error.message}</p>
+        agentUnavailable ? null : (
+          <p className="control-error">{runtimeQuery.error.message}</p>
+        )
       ) : runtime === undefined ? (
         <p className="control-empty">正在检查本机 Appium 运行环境...</p>
       ) : (

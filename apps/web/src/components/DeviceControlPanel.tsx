@@ -13,6 +13,7 @@ import {
 import { useEffect, useState } from "react";
 import type { AndroidDevice, DeviceControlAction } from "@device-robot/contracts";
 
+import { useAgentUnavailable } from "../agent-availability";
 import {
   executeDeviceAction,
   fetchDeviceActionHistory,
@@ -107,6 +108,7 @@ function androidLabel(device: AndroidDevice): string {
 }
 
 export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.JSX.Element {
+  const agentUnavailable = useAgentUnavailable();
   const queryClient = useQueryClient();
   const serial = device.serial;
   const [tapX, setTapX] = useState("");
@@ -192,7 +194,8 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
   };
 
   const errorMessage =
-    validationError ?? (actionMutation.isError ? actionMutation.error.message : undefined);
+    validationError ??
+    (!agentUnavailable && actionMutation.isError ? actionMutation.error.message : undefined);
 
   return (
     <section className="device-overview" aria-label="设备工作台">
@@ -497,7 +500,9 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
               </button>
             </div>
             {uiTreeQuery.isError ? (
-              <p className="control-error">{uiTreeQuery.error.message}</p>
+              agentUnavailable ? null : (
+                <p className="control-error">{uiTreeQuery.error.message}</p>
+              )
             ) : uiTreeQuery.data === undefined ? (
               <p className="control-empty">正在读取 UI 层级...</p>
             ) : (
@@ -507,7 +512,9 @@ export function DeviceControlPanel({ device }: DeviceControlPanelProps): React.J
           <section>
             <h2>操作审计</h2>
             {actionHistoryQuery.isError ? (
-              <p className="control-error">{actionHistoryQuery.error.message}</p>
+              agentUnavailable ? null : (
+                <p className="control-error">{actionHistoryQuery.error.message}</p>
+              )
             ) : actionHistoryQuery.data === undefined ? (
               <p className="control-empty">正在加载操作记录...</p>
             ) : actionHistoryQuery.data.actions.length === 0 ? (

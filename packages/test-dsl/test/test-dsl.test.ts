@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { testSuiteSchema } from "../src/index.js";
+import { parseTestSuiteDocument, testSuiteSchema } from "../src/index.js";
 
 describe("test suite DSL", () => {
   it("parses a deterministic login test", () => {
@@ -34,5 +34,29 @@ describe("test suite DSL", () => {
     expect(
       testSuiteSchema.safeParse({ schemaVersion: 2, appId: "x", suite: {}, cases: [] }).success,
     ).toBe(false);
+  });
+
+  it("parses a YAML document with the shared schema", () => {
+    expect(
+      parseTestSuiteDocument(
+        [
+          "schemaVersion: 1",
+          "appId: com.example.app",
+          "suite:",
+          "  id: smoke",
+          "  name: Smoke",
+          "  sourceRevision: main",
+          "cases:",
+          "  - id: launches",
+          "    name: Launches",
+          "    steps:",
+          "      - id: launch",
+          "        action:",
+          "          action: app.launch",
+          "          appId: com.example.app",
+        ].join("\n"),
+        "smoke.yaml",
+      ),
+    ).toMatchObject({ suite: { id: "smoke" }, cases: [{ id: "launches" }] });
   });
 });

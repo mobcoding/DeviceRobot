@@ -57,8 +57,8 @@ export function evaluateActionPolicy(
 
     return {
       allowed: true,
-      requiresApproval: true,
-      reason: "APK installation requires explicit user approval",
+      requiresApproval: false,
+      reason: "User-staged APK installation",
     };
   }
 

@@ -4,15 +4,39 @@ import {
   aiModelListRequestSchema,
   aiModelListResponseSchema,
   aiModelStatusSchema,
+  aiConversationDetailResponseSchema,
+  aiConversationListResponseSchema,
+  aiConversationSchema,
   aiPlanListResponseSchema,
   aiPlanResponseSchema,
+  createAiConversationRequestSchema,
   generateAiPlanRequestSchema,
 } from "@device-robot/contracts";
 import type { FastifyInstance, FastifyReply } from "fastify";
+import { z } from "zod";
 
 import { AiPlanError, type AiPlanService } from "../ai/ai-plan-service.js";
 
 type ReplyError = (reply: FastifyReply, error: unknown) => FastifyReply;
+
+const projectParamsSchema = z.object({ projectId: z.uuid() });
+const conversationParamsSchema = z.object({ conversationId: z.uuid() });
+
+function parseProjectId(params: unknown): string {
+  try {
+    return projectParamsSchema.parse(params).projectId;
+  } catch {
+    throw new AiPlanError("项目标识无效。", 400);
+  }
+}
+
+function parseConversationId(params: unknown): string {
+  try {
+    return conversationParamsSchema.parse(params).conversationId;
+  } catch {
+    throw new AiPlanError("AI 会话标识无效。", 400);
+  }
+}
 
 function parseModelListRequest(body: unknown): ReturnType<typeof aiModelListRequestSchema.parse> {
   try {
@@ -44,6 +68,48 @@ export function registerAiRoutes(
   app.get("/api/v1/ai/plans", async (_request, reply) => {
     try {
       return aiPlanListResponseSchema.parse(await aiPlanService.list());
+    } catch (error) {
+      return replyError(reply, error);
+    }
+  });
+
+  app.get("/api/v1/projects/:projectId/ai-conversations", async (request, reply) => {
+    try {
+      if (aiPlanService.listConversations === undefined) {
+        throw new AiPlanError("当前 Agent 未启用 AI 会话存储。", 503);
+      }
+      return aiConversationListResponseSchema.parse(
+        await aiPlanService.listConversations(parseProjectId(request.params)),
+      );
+    } catch (error) {
+      return replyError(reply, error);
+    }
+  });
+
+  app.post("/api/v1/projects/:projectId/ai-conversations", async (request, reply) => {
+    try {
+      if (aiPlanService.createConversation === undefined) {
+        throw new AiPlanError("当前 Agent 未启用 AI 会话存储。", 503);
+      }
+      return aiConversationSchema.parse(
+        await aiPlanService.createConversation(
+          parseProjectId(request.params),
+          createAiConversationRequestSchema.parse(request.body),
+        ),
+      );
+    } catch (error) {
+      return replyError(reply, error);
+    }
+  });
+
+  app.get("/api/v1/ai-conversations/:conversationId", async (request, reply) => {
+    try {
+      if (aiPlanService.getConversation === undefined) {
+        throw new AiPlanError("当前 Agent 未启用 AI 会话存储。", 503);
+      }
+      return aiConversationDetailResponseSchema.parse(
+        await aiPlanService.getConversation(parseConversationId(request.params)),
+      );
     } catch (error) {
       return replyError(reply, error);
     }

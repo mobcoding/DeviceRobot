@@ -69,9 +69,40 @@ export const aiModelConfigurations = sqliteTable("ai_model_configurations", {
   updatedAt: text("updated_at").notNull(),
 });
 
+export const aiConversations = sqliteTable("ai_conversations", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  appId: text("app_id"),
+  variant: text("variant"),
+  title: text("title").notNull(),
+  sourceRevision: text("source_revision"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const aiContextSnapshots = sqliteTable("ai_context_snapshots", {
+  id: text("id").primaryKey(),
+  conversationId: text("conversation_id").notNull(),
+  projectId: text("project_id").notNull(),
+  sourceRevision: text("source_revision"),
+  contextJson: text("context_json").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
+export const aiConversationMessages = sqliteTable("ai_conversation_messages", {
+  id: text("id").primaryKey(),
+  conversationId: text("conversation_id").notNull(),
+  role: text("role").notNull(),
+  content: text("content").notNull(),
+  planId: text("plan_id"),
+  contextSnapshotId: text("context_snapshot_id"),
+  createdAt: text("created_at").notNull(),
+});
+
 export const aiPlans = sqliteTable("ai_plans", {
   id: text("id").primaryKey(),
   projectId: text("project_id").notNull(),
+  conversationId: text("conversation_id"),
   goal: text("goal").notNull(),
   reply: text("reply").notNull(),
   planJson: text("plan_json").notNull(),
@@ -102,4 +133,12 @@ export const testExecutionSteps = sqliteTable("test_execution_steps", {
   screenshotPath: text("screenshot_path"),
   startedAt: text("started_at"),
   finishedAt: text("finished_at"),
+});
+
+export const testSuites = sqliteTable("test_suites", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  fileName: text("file_name").notNull(),
+  suiteJson: text("suite_json").notNull(),
+  importedAt: text("imported_at").notNull(),
 });

@@ -97,6 +97,10 @@ export async function fetchDeviceApplications(
   );
 }
 
+export function deviceApplicationIconUrl(serial: string, packageName: string): string {
+  return `/api/v1/devices/${encodeURIComponent(serial)}/applications/${encodeURIComponent(packageName)}/icon`;
+}
+
 export async function fetchDeviceLogcat(
   serial: string,
   limit: number,

@@ -14,6 +14,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { AndroidDevice, DeviceFileEntry } from "@device-robot/contracts";
 
+import { useAgentUnavailable } from "../agent-availability";
 import { deviceFileDownloadUrl, fetchDeviceFiles } from "../api/device-management";
 import { FileUploadDialog } from "./FileUploadDialog";
 
@@ -47,6 +48,7 @@ function fileKindLabel(entry: DeviceFileEntry): string {
 }
 
 export function FileManagerPanel({ device }: FileManagerPanelProps): React.JSX.Element {
+  const agentUnavailable = useAgentUnavailable();
   const [currentPath, setCurrentPath] = useState<string>();
   const [pathInput, setPathInput] = useState("");
   const [fileToUpload, setFileToUpload] = useState<File>();
@@ -159,7 +161,7 @@ export function FileManagerPanel({ device }: FileManagerPanelProps): React.JSX.E
         </form>
       </div>
 
-      {filesQuery.isError && (
+      {filesQuery.isError && !agentUnavailable && (
         <p className="management-error" role="alert">
           {filesQuery.error.message}
         </p>

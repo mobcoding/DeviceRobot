@@ -6,6 +6,8 @@ import {
   aiModelConnectionTestResponseSchema,
   aiModelListResponseSchema,
   aiModelStatusSchema,
+  aiConversationDetailResponseSchema,
+  aiConversationListResponseSchema,
   aiPlanListResponseSchema,
   aiPlanResponseSchema,
   type AgentAction,
@@ -14,21 +16,29 @@ import {
   type AiModelListRequest,
   type AiModelListResponse,
   type AiModelStatus,
+  type AiConversation,
+  type AiConversationDetailResponse,
+  type AiConversationListResponse,
   type AiPlanResponse,
   type AiPlanListResponse,
   type AndroidProject,
+  type CreateAiConversationRequest,
   type GenerateAiPlanRequest,
 } from "@device-robot/contracts";
 import { z } from "zod";
 
 import type { AiConfigurationStore } from "./ai-configuration-store.js";
+import type { AiConversationStore, StoredAiConversationMessage } from "./ai-conversation-store.js";
 import type { AiPlanStore } from "./ai-plan-store.js";
 import type { AiSecretProtector } from "./ai-secret-protector.js";
 import type { ProjectStore } from "../projects/project-store.js";
+import type { ApkArtifactService } from "../apks/apk-artifact-service.js";
 
 const MODEL_TIMEOUT_MS = 90_000;
 const MODEL_CONFIGURATION_TIMEOUT_MS = 30_000;
 const MAX_CONTEXT_EVIDENCE = 80;
+const MAX_CONVERSATION_HISTORY_MESSAGES = 12;
+const MAX_CONVERSATION_HISTORY_CHARACTERS = 12_000;
 
 const modelPlanPayloadSchema = z.object({
   reply: z.string().min(1).max(8_000),
@@ -36,6 +46,31 @@ const modelPlanPayloadSchema = z.object({
 });
 
 type ModelPlanPayload = z.infer<typeof modelPlanPayloadSchema>;
+
+const runtimeContinueDecisionSchema = z
+  .object({
+    status: z.literal("continue"),
+    action: agentActionSchema,
+    reason: z.string().min(1).max(2_000),
+  })
+  .strict();
+const runtimeCompletedDecisionSchema = z
+  .object({
+    status: z.literal("completed"),
+    assertion: agentActionSchema,
+    reason: z.string().min(1).max(2_000),
+  })
+  .strict();
+const runtimeBlockedDecisionSchema = z
+  .object({ status: z.literal("blocked"), reason: z.string().min(1).max(2_000) })
+  .strict();
+const runtimeDecisionPayloadSchema = z.discriminatedUnion("status", [
+  runtimeContinueDecisionSchema,
+  runtimeCompletedDecisionSchema,
+  runtimeBlockedDecisionSchema,
+]);
+
+type ModelRuntimeDecision = z.infer<typeof runtimeDecisionPayloadSchema>;
 
 type ChatMessage = {
   role: "system" | "user";
@@ -54,7 +89,31 @@ export class AiPlanError extends Error {
 export interface AiPlanModelProvider {
   status(): AiModelStatus;
   createPlan(input: { system: string; user: string }): Promise<ModelPlanPayload>;
+  createRuntimeDecision?(input: {
+    system: string;
+    user: string;
+    screenshot?: AiRuntimeScreenshot;
+  }): Promise<ModelRuntimeDecision>;
 }
+
+export type AiRuntimeScreenshot = {
+  dataUrl: string;
+  width: number;
+  height: number;
+};
+
+export type AiRuntimeStepRequest = {
+  projectId: string;
+  appId: string;
+  deviceSerial: string;
+  goal: string;
+  stepNumber: number;
+  uiContext: string;
+  runtimeHistory?: readonly string[];
+  screenshot?: AiRuntimeScreenshot;
+};
+
+export type AiRuntimeStepDecision = ModelRuntimeDecision;
 
 export interface AiPlanService {
   status(): Promise<AiModelStatus>;
@@ -62,14 +121,23 @@ export interface AiPlanService {
   listModels(request: AiModelListRequest): Promise<AiModelListResponse>;
   testConfiguration(request: AiModelConnectionTestRequest): Promise<AiModelConnectionTestResponse>;
   generate(request: GenerateAiPlanRequest): Promise<AiPlanResponse>;
+  listConversations?(projectId: string): Promise<AiConversationListResponse>;
+  createConversation?(
+    projectId: string,
+    request: CreateAiConversationRequest,
+  ): Promise<AiConversation>;
+  getConversation?(conversationId: string): Promise<AiConversationDetailResponse>;
+  decideRuntimeStep?(request: AiRuntimeStepRequest): Promise<AiRuntimeStepDecision>;
 }
 
 export type LocalAiPlanServiceOptions = {
   projectStore: ProjectStore;
+  apkArtifactService?: ApkArtifactService;
   modelProvider?: AiPlanModelProvider;
   configurationStore?: AiConfigurationStore;
   secretProtector?: AiSecretProtector;
   planStore?: AiPlanStore;
+  conversationStore?: AiConversationStore;
 };
 
 type OpenAiCompatibleConfiguration = {
@@ -412,14 +480,57 @@ function parseModelPlan(content: string): ModelPlanPayload {
   throw new AiPlanError("模型未返回有效的 JSON 操作计划。", 422);
 }
 
+function parseRuntimeDecision(content: string): ModelRuntimeDecision {
+  let validationError: z.ZodError | undefined;
+  for (const candidate of jsonCandidates(content)) {
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      const result = runtimeDecisionPayloadSchema.safeParse(parsed);
+      if (result.success) {
+        return result.data;
+      }
+      validationError ??= result.error;
+    } catch {
+      // Continue with a fenced or embedded JSON object, if one was returned.
+    }
+  }
+  if (validationError !== undefined) {
+    throw new AiPlanError(modelPlanValidationMessage(validationError), 422);
+  }
+  throw new AiPlanError("模型未返回有效的实时页面决策。", 422);
+}
+
+function isRuntimeAction(action: AgentAction): boolean {
+  return [
+    "ui.tap",
+    "ui.longPress",
+    "ui.input",
+    "ui.swipe",
+    "ui.back",
+    "ui.wait",
+    "assert.visible",
+    "assert.notVisible",
+    "assert.text",
+    "assert.activity",
+    "device.screenshot",
+  ].includes(action.action);
+}
+
+function isRuntimeCompletionAssertion(action: AgentAction): boolean {
+  return ["assert.visible", "assert.notVisible", "assert.text", "assert.activity"].includes(
+    action.action,
+  );
+}
+
 function planPromptRules(): string[] {
   return [
     "必须只输出 JSON 对象，格式为 {reply:string,actions:AgentAction[]}。reply 使用简体中文。",
-    "actions 至少一项、最多二十项。只能使用 app.launch、app.stop、ui.tap、ui.longPress、ui.input、ui.swipe、ui.back、ui.wait、assert.visible、assert.notVisible、assert.text、assert.activity、device.permission、device.orientation、device.screenshot。",
+    "actions 至少一项、最多二十项。只能使用 app.install、app.launch、app.stop、ui.tap、ui.longPress、ui.input、ui.swipe、ui.back、ui.wait、assert.visible、assert.notVisible、assert.text、assert.activity、device.permission、device.orientation、device.screenshot。",
     '严格示例：{"reply":"先记录启动流程的可观察证据。","actions":[{"action":"ui.wait","durationMs":1500},{"action":"device.screenshot","name":"启动页"}]}。',
     "动作字段：app.launch/app.stop 必须有 appId；ui.tap、ui.longPress、assert.visible、assert.notVisible 必须有 target；assert.text 还必须有 expected；ui.input 必须有 value；ui.swipe 必须有 start 和 end，二者均为 {x:number,y:number}；ui.wait 必须有 durationMs:number；assert.activity 必须有 expected；device.screenshot 可选 name。",
     "target 必须是对象，且包含 text、resourceId、accessibilityId、className 之一，或同时包含 x:number 与 y:number；不得写成 selector、element、description、page、route 或字符串。",
-    "严禁输出 adb.shell、app.install、文件路径、命令行、未在证据中出现的 resourceId、accessibilityId、页面文案或路由。证据不足时使用 ui.wait、device.screenshot 或在 reply 中说明限制。",
+    "严禁输出 adb.shell、文件路径、命令行、未在证据中出现的 resourceId、accessibilityId、页面文案或路由。证据不足时使用 ui.wait、device.screenshot 或在 reply 中说明限制。",
+    "仅当请求明确提供“可安装的本地 APK”时才可输出 app.install。app.install 必须是第一个动作，并且 artifactId 必须逐字使用列表中的 ID；不得猜测、编造或使用文件路径。",
     "每个 ui.tap、ui.longPress、assert.visible、assert.notVisible、assert.text 都必须提供 target；优先使用 text、resourceId、accessibilityId 等语义定位器。",
   ];
 }
@@ -560,6 +671,55 @@ export class OpenAiCompatiblePlanProvider implements AiPlanModelProvider {
     throw new AiPlanError("模型未返回可用的操作计划。", 422);
   }
 
+  public async createRuntimeDecision(input: {
+    system: string;
+    user: string;
+    screenshot?: AiRuntimeScreenshot;
+  }): Promise<ModelRuntimeDecision> {
+    const status = this.status();
+    if (
+      !status.configured ||
+      this.#configuration.baseUrl === undefined ||
+      this.#configuration.apiKey === undefined ||
+      this.#configuration.model === undefined
+    ) {
+      throw new AiPlanError(status.reason ?? "模型尚未配置。", 503);
+    }
+
+    const payload = await callModelApi(
+      modelEndpoint(this.#configuration.baseUrl),
+      this.#configuration.apiKey,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          model: this.#configuration.model,
+          temperature: 0,
+          max_tokens: 1_024,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: input.system },
+            {
+              role: "user",
+              content:
+                input.screenshot === undefined
+                  ? input.user
+                  : [
+                      { type: "text", text: input.user },
+                      {
+                        type: "image_url",
+                        image_url: { url: input.screenshot.dataUrl },
+                      },
+                    ],
+            },
+          ],
+        }),
+      },
+      MODEL_TIMEOUT_MS,
+      "请求模型",
+    );
+    return parseRuntimeDecision(extractContent(payload));
+  }
+
   public async testConnection(): Promise<void> {
     const status = this.status();
     if (
@@ -614,22 +774,77 @@ function sourceEvidenceText(project: AndroidProject): string {
     .join("\n");
 }
 
-function systemPrompt(): string {
+function systemPrompt(liveUiExecution = false): string {
   return [
     ...planPromptRules(),
     "你是 Android 自动化测试规划助手。只生成可审阅的测试操作计划，不执行设备操作。",
     "必须只输出 JSON 对象，格式为 {reply:string,actions:AgentAction[]}。reply 使用简体中文。",
-    "actions 至少一项、最多二十项。只能使用 app.launch、app.stop、ui.tap、ui.longPress、ui.input、ui.swipe、ui.back、ui.wait、assert.visible、assert.notVisible、assert.text、assert.activity、device.permission、device.orientation、device.screenshot。",
-    "严禁输出 adb.shell、app.install、文件路径、命令行、未在证据中出现的 resourceId、accessibilityId、页面文案或路由。证据不足时使用 ui.wait、device.screenshot 或解释限制。",
+    "actions 至少一项、最多二十项。只能使用 app.install、app.launch、app.stop、ui.tap、ui.longPress、ui.input、ui.swipe、ui.back、ui.wait、assert.visible、assert.notVisible、assert.text、assert.activity、device.permission、device.orientation、device.screenshot。",
+    "严禁输出 adb.shell、文件路径、命令行、未在证据中出现的 resourceId、accessibilityId、页面文案或路由。证据不足时使用 ui.wait、device.screenshot 或解释限制。",
+    "仅当请求明确提供“可安装的本地 APK”时才可输出 app.install。app.install 必须是第一个动作，并且 artifactId 必须逐字使用列表中的 ID；不得猜测、编造或使用文件路径。",
+    "若已提供测试应用包名，app.launch、app.stop 和 device.permission 必须且只能使用该包名；不得从其他源码证据猜测或替换测试应用。",
     "每个 ui.tap、ui.longPress、assert.visible、assert.notVisible、assert.text 都必须提供 target；优先 text、resourceId、accessibilityId 等语义定位器。",
+    ...(liveUiExecution
+      ? [
+          "当前请求已启用自主执行。此阶段的 ActionPlan 仅用于启动运行时 Agent；实际页面识别和操作将在执行后基于真实截图与 UI 树完成。不要因静态源码索引缺少页面文案或控件而声称无法执行；使用 ui.wait 或 device.screenshot 作为计划占位步骤即可。",
+        ]
+      : []),
   ].join("\n");
 }
 
-function userPrompt(project: AndroidProject, request: GenerateAiPlanRequest): string {
+function projectContextRevision(project: AndroidProject): string {
+  return project.revision ?? project.updatedAt;
+}
+
+function conversationHistoryText(messages: readonly StoredAiConversationMessage[]): string {
+  const selected = messages.slice(-MAX_CONVERSATION_HISTORY_MESSAGES);
+  const lines: string[] = [];
+  let usedCharacters = 0;
+  for (const message of selected) {
+    const content = message.content.trim();
+    if (content.length === 0) {
+      continue;
+    }
+    const label = message.role === "user" ? "用户" : "助手";
+    const remaining = MAX_CONVERSATION_HISTORY_CHARACTERS - usedCharacters;
+    if (remaining <= 0) {
+      break;
+    }
+    const rendered = `${label}：${content.slice(0, Math.max(0, remaining - label.length - 2))}`;
+    lines.push(rendered);
+    usedCharacters += rendered.length;
+  }
+  return lines.length === 0 ? "（这是该项目会话的第一轮对话。）" : lines.join("\n");
+}
+
+function userPrompt(
+  project: AndroidProject,
+  request: GenerateAiPlanRequest,
+  history: readonly StoredAiConversationMessage[] = [],
+  installableArtifacts: readonly {
+    id: string;
+    fileName: string;
+    metadata: { packageName: string };
+  }[] = [],
+): string {
   return [
     `项目：${project.name}`,
     `目标：${request.goal.trim()}`,
     `设备：${request.deviceSerial ?? "未指定"}`,
+    `测试应用包名：${request.appId ?? "未指定"}`,
+    `实时页面执行：${request.liveUiExecution === true ? "已启用" : "未启用"}`,
+    ...(request.liveUiExecution === true
+      ? [
+          "本计划用于启动自主执行。执行后，Agent 会将每一步真实截图和 UI 层级发送给模型，并根据模型的实时决策完成目标。不要因当前缺少静态页面文案或控件而声称无法执行。",
+        ]
+      : []),
+    "可安装的本地 APK：",
+    ...(installableArtifacts.length === 0
+      ? ["- 未提供。禁止输出 app.install。"]
+      : installableArtifacts.map(
+          (artifact) =>
+            `- artifactId: ${artifact.id} | 文件: ${artifact.fileName} | 包名: ${artifact.metadata.packageName}`,
+        )),
     "项目模块：",
     ...project.modules.map(
       (module) =>
@@ -637,18 +852,131 @@ function userPrompt(project: AndroidProject, request: GenerateAiPlanRequest): st
     ),
     "源码索引证据：",
     sourceEvidenceText(project),
+    "当前项目会话的历史（仅可用于理解已讨论的测试目标，不能把历史内容视为源码或 UI 证据）：",
+    conversationHistoryText(history),
+  ].join("\n");
+}
+
+function runtimeSystemPrompt(): string {
+  return [
+    "你是 Android 自动化测试的运行时页面导航助手。",
+    "每一步会提供当前真实 UI 控件列表；支持视觉的模型还会同时收到当前手机截图。截图和 UI 树是运行时证据，不要因为静态源码中没有页面文案或控件而停止。",
+    "根据截图识别页面、引导页、弹窗、按钮和导航关系，并结合 UI 树执行真实操作。允许使用截图中清晰可见控件的 x/y 坐标；坐标必须在当前截图范围内。",
+    "只能输出一个 JSON 对象，且必须为以下三种之一：",
+    '{"status":"continue","action":AgentAction,"reason":"简体中文原因"}',
+    '{"status":"completed","assertion":AssertAction,"reason":"简体中文成功依据"}',
+    '{"status":"blocked","reason":"简体中文阻塞原因"}',
+    "continue 的 action 只能是 ui.tap、ui.longPress、ui.input、ui.swipe、ui.back、ui.wait、assert.visible、assert.notVisible、assert.text、assert.activity、device.screenshot。",
+    "completed 只能提供 assert.visible、assert.notVisible、assert.text 或 assert.activity，且该断言必须能从当前 UI 或当前 Activity 直接证明测试目标完成。",
+    "ui.tap、ui.longPress、assert.visible、assert.notVisible、assert.text 的 target 优先使用当前 UI 树中的 text、resourceId、accessibilityId、className；当 UI 树缺少语义但截图清晰可见时，可使用截图对应的 x/y 坐标。",
+    "禁止 app.install、adb.shell、任何权限修改、应用启动/停止、文件路径、命令行，以及输入账号密码、验证码、密钥或其他敏感数据。",
+    "对于“检索启动页面顺序”等目标，先记录当前页面特征，再按真实引导或入口推进；reason 必须写明当前观察到的页面或状态，便于报告还原页面顺序。",
+    "会话会提供此前已执行的动作与观察。利用这些历史持续补全页面顺序；完成时在 reason 中给出简洁的页面顺序结论和最终页面依据。",
+    "不要为了凑步骤而操作无关控件。仅在截图和 UI 树都无法识别可继续路径时返回 blocked。",
+  ].join("\n");
+}
+
+function runtimeUserPrompt(project: AndroidProject, request: AiRuntimeStepRequest): string {
+  return [
+    `项目：${project.name}`,
+    `测试应用包名：${request.appId}`,
+    `设备：${request.deviceSerial}`,
+    `测试目标：${request.goal}`,
+    `当前为第 ${request.stepNumber} 个实时决策步骤。`,
+    request.screenshot === undefined
+      ? "当前截图不可用，请依据 UI 树继续。"
+      : `当前截图：${request.screenshot.width} x ${request.screenshot.height}，已作为本请求图片附件提供；使用坐标时以此分辨率为准。`,
+    "当前真实 UI 控件：",
+    request.uiContext,
+    "已执行步骤与观察：",
+    ...(request.runtimeHistory === undefined || request.runtimeHistory.length === 0
+      ? ["- 尚未执行运行时操作。"]
+      : request.runtimeHistory.map((entry) => `- ${entry}`)),
+    "相关源码索引证据：",
+    sourceEvidenceText(project),
   ].join("\n");
 }
 
 function containsRestrictedAction(action: AgentAction): boolean {
-  return action.action === "adb.shell" || action.action === "app.install";
+  return action.action === "adb.shell";
+}
+
+function installsOnlyAtPlanStart(actions: readonly AgentAction[]): boolean {
+  let reachedNonInstallAction = false;
+  for (const action of actions) {
+    if (action.action === "app.install") {
+      if (reachedNonInstallAction) {
+        return false;
+      }
+    } else {
+      reachedNonInstallAction = true;
+    }
+  }
+  return true;
+}
+
+function coordinateIsWithinScreenshot(
+  point: { x: number; y: number },
+  screenshot: AiRuntimeScreenshot,
+): boolean {
+  return point.x < screenshot.width && point.y < screenshot.height;
+}
+
+function runtimeDecisionUsesVisibleCoordinates(
+  decision: AiRuntimeStepDecision,
+  screenshot: AiRuntimeScreenshot | undefined,
+): boolean {
+  if (screenshot === undefined || decision.status !== "continue") {
+    return true;
+  }
+  const { action } = decision;
+  if (action.action === "ui.swipe") {
+    return (
+      coordinateIsWithinScreenshot(action.start, screenshot) &&
+      coordinateIsWithinScreenshot(action.end, screenshot)
+    );
+  }
+  if (
+    (action.action === "ui.tap" || action.action === "ui.longPress") &&
+    action.target.x !== undefined &&
+    action.target.y !== undefined
+  ) {
+    return coordinateIsWithinScreenshot({ x: action.target.x, y: action.target.y }, screenshot);
+  }
+  return true;
+}
+
+function packageNameIsValid(value: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/u.test(value);
+}
+
+function bindActionsToTargetApplication(
+  actions: readonly AgentAction[],
+  appId: string | undefined,
+): AgentAction[] {
+  if (appId === undefined) {
+    return [...actions];
+  }
+
+  return actions.map((action) => {
+    if (
+      action.action === "app.launch" ||
+      action.action === "app.stop" ||
+      action.action === "device.permission"
+    ) {
+      return { ...action, appId };
+    }
+    return action;
+  });
 }
 
 export class LocalAiPlanService implements AiPlanService {
   readonly #projectStore: ProjectStore;
+  readonly #apkArtifactService: ApkArtifactService | undefined;
   readonly #configurationStore: AiConfigurationStore | undefined;
   readonly #secretProtector: AiSecretProtector | undefined;
   readonly #planStore: AiPlanStore | undefined;
+  readonly #conversationStore: AiConversationStore | undefined;
   readonly #usesCustomProvider: boolean;
   #modelProvider: AiPlanModelProvider;
   #activeConfiguration: CompleteOpenAiCompatibleConfiguration | undefined;
@@ -658,10 +986,12 @@ export class LocalAiPlanService implements AiPlanService {
 
   public constructor(options: LocalAiPlanServiceOptions) {
     this.#projectStore = options.projectStore;
+    this.#apkArtifactService = options.apkArtifactService;
     this.#modelProvider = options.modelProvider ?? new OpenAiCompatiblePlanProvider();
     this.#configurationStore = options.configurationStore;
     this.#secretProtector = options.secretProtector;
     this.#planStore = options.planStore;
+    this.#conversationStore = options.conversationStore;
     this.#usesCustomProvider = options.modelProvider !== undefined;
     if (this.#modelProvider instanceof OpenAiCompatiblePlanProvider) {
       this.#activeConfiguration = this.#modelProvider.configuration();
@@ -678,6 +1008,67 @@ export class LocalAiPlanService implements AiPlanService {
 
   public async list(): Promise<AiPlanListResponse> {
     return aiPlanListResponseSchema.parse({ plans: this.#planStore?.list() ?? [] });
+  }
+
+  public async listConversations(projectId: string): Promise<AiConversationListResponse> {
+    const project = this.#projectStore.findById(projectId);
+    if (project === undefined) {
+      throw new AiPlanError("未找到项目。", 404);
+    }
+    return aiConversationListResponseSchema.parse({
+      projectId,
+      conversations: [this.#withCurrentContextStatus(this.#projectConversation(project), project)],
+    });
+  }
+
+  public async createConversation(
+    projectId: string,
+    request: CreateAiConversationRequest,
+  ): Promise<AiConversation> {
+    void request;
+    const project = this.#projectStore.findById(projectId);
+    if (project === undefined) {
+      throw new AiPlanError("未找到项目。", 404);
+    }
+    return this.#withCurrentContextStatus(this.#projectConversation(project), project);
+  }
+
+  public async getConversation(conversationId: string): Promise<AiConversationDetailResponse> {
+    const conversation = this.#conversationStore?.find(conversationId);
+    if (conversation === undefined) {
+      throw new AiPlanError("未找到 AI 会话。", 404);
+    }
+    const project = this.#projectStore.findById(conversation.projectId);
+    if (project === undefined) {
+      throw new AiPlanError("会话关联的项目不存在。", 404);
+    }
+    const messages = (this.#conversationStore?.listMessages(conversationId) ?? []).map(
+      (message) => {
+        const plan =
+          message.planId === undefined ? undefined : this.#planStore?.find(message.planId);
+        return {
+          ...message,
+          ...(plan === undefined
+            ? {}
+            : {
+                plan: {
+                  reply: plan.reply,
+                  plan: plan.plan,
+                  policy: plan.policy,
+                  context: plan.context,
+                  generatedAt: plan.generatedAt,
+                },
+              }),
+        };
+      },
+    );
+    return aiConversationDetailResponseSchema.parse({
+      conversation: this.#withCurrentContextStatus(conversation, project),
+      messages,
+      ...(this.#conversationStore?.latestSnapshot(conversationId) === undefined
+        ? {}
+        : { latestContextSnapshot: this.#conversationStore.latestSnapshot(conversationId) }),
+    });
   }
 
   async #ensureConfigurationRestored(): Promise<void> {
@@ -778,23 +1169,58 @@ export class LocalAiPlanService implements AiPlanService {
     if (!status.configured) {
       throw new AiPlanError(status.reason ?? "模型尚未配置。", 503);
     }
+    if (request.appId !== undefined && !packageNameIsValid(request.appId)) {
+      throw new AiPlanError("测试应用包名无效。", 422);
+    }
+
+    const artifactIds = [...new Set(request.installableArtifactIds ?? [])];
+    if (artifactIds.length > 0 && this.#apkArtifactService === undefined) {
+      throw new AiPlanError("当前 Agent 未启用本地 APK 暂存服务。", 503);
+    }
+    const installableArtifacts = await Promise.all(
+      artifactIds.map(async (artifactId) => {
+        try {
+          return await this.#apkArtifactService!.find(artifactId);
+        } catch (error) {
+          throw new AiPlanError(
+            `可安装 APK 不可用：${error instanceof Error ? error.message : String(error)}`,
+            422,
+          );
+        }
+      }),
+    );
+
+    const conversation = this.#resolveConversation(project, request);
+    const history =
+      conversation === undefined
+        ? []
+        : (this.#conversationStore?.listMessages(conversation.id) ?? []);
 
     const modelPayload = await this.#modelProvider.createPlan({
-      system: systemPrompt(),
-      user: userPrompt(project, request),
+      system: systemPrompt(request.liveUiExecution === true),
+      user: userPrompt(project, request, history, installableArtifacts),
     });
     if (modelPayload.actions.some(containsRestrictedAction)) {
-      throw new AiPlanError("模型计划包含不允许的原始命令或 APK 安装操作。", 422);
+      throw new AiPlanError("模型计划包含不允许的原始 ADB 命令。", 422);
+    }
+    if (!installsOnlyAtPlanStart(modelPayload.actions)) {
+      throw new AiPlanError("APK 安装必须位于测试计划的开头。", 422);
     }
 
     const provisionalPlan = actionPlanSchema.parse({
       id: randomUUID(),
       projectId: project.id,
       ...(request.deviceSerial === undefined ? {} : { deviceSerial: request.deviceSerial }),
-      actions: modelPayload.actions,
+      ...(request.appId === undefined ? {} : { targetAppId: request.appId }),
+      ...(request.liveUiExecution === true
+        ? { liveUiExecution: { goal: request.goal.trim(), maxSteps: 20 } }
+        : {}),
+      actions: bindActionsToTargetApplication(modelPayload.actions, request.appId),
       requiresApproval: true,
     });
-    const policyDecision = evaluateActionPlanPolicy(provisionalPlan, "standard");
+    const policyDecision = evaluateActionPlanPolicy(provisionalPlan, "standard", {
+      stagedArtifactIds: new Set(artifactIds),
+    });
     if (!policyDecision.allowed) {
       throw new AiPlanError(`模型计划被本地策略拒绝：${policyDecision.reason}`, 422);
     }
@@ -814,7 +1240,135 @@ export class LocalAiPlanService implements AiPlanService {
       context: contextFor(project),
       generatedAt: new Date().toISOString(),
     });
-    this.#planStore?.save({ ...response, goal: request.goal.trim() });
+    const generatedAt = response.generatedAt;
+    const contextSnapshotId = randomUUID();
+    if (conversation !== undefined && this.#conversationStore !== undefined) {
+      this.#conversationStore.createSnapshot({
+        id: contextSnapshotId,
+        conversationId: conversation.id,
+        projectId: project.id,
+        sourceRevision: projectContextRevision(project),
+        context: response.context,
+        createdAt: generatedAt,
+      });
+    }
+    this.#planStore?.save({
+      ...response,
+      goal: request.goal.trim(),
+      ...(conversation === undefined ? {} : { conversationId: conversation.id }),
+    });
+    if (conversation !== undefined && this.#conversationStore !== undefined) {
+      this.#conversationStore.appendMessage({
+        id: randomUUID(),
+        conversationId: conversation.id,
+        role: "user",
+        content: request.goal.trim(),
+        contextSnapshotId,
+        createdAt: generatedAt,
+      });
+      this.#conversationStore.appendMessage({
+        id: randomUUID(),
+        conversationId: conversation.id,
+        role: "assistant",
+        content: response.reply,
+        planId: response.plan.id,
+        contextSnapshotId,
+        createdAt: generatedAt,
+      });
+      this.#conversationStore.updateContext(conversation.id, {
+        sourceRevision: projectContextRevision(project),
+        updatedAt: generatedAt,
+      });
+    }
     return response;
+  }
+
+  #resolveConversation(
+    project: AndroidProject,
+    request: GenerateAiPlanRequest,
+  ): AiConversation | undefined {
+    if (this.#conversationStore === undefined) {
+      if (request.conversationId !== undefined) {
+        throw new AiPlanError("当前 Agent 未启用 AI 会话存储。", 503);
+      }
+      return undefined;
+    }
+    const conversation = this.#projectConversation(project);
+    if (request.conversationId !== undefined && request.conversationId !== conversation.id) {
+      const requestedConversation = this.#conversationStore.find(request.conversationId);
+      if (requestedConversation === undefined) {
+        throw new AiPlanError("未找到 AI 会话。", 404);
+      }
+      if (requestedConversation.projectId !== project.id) {
+        throw new AiPlanError("AI 会话不属于当前项目。", 422);
+      }
+      throw new AiPlanError("当前项目仅保留一个 AI 会话。", 422);
+    }
+    return conversation;
+  }
+
+  #projectConversation(project: AndroidProject): AiConversation {
+    if (this.#conversationStore === undefined) {
+      throw new AiPlanError("当前 Agent 未启用 AI 会话存储。", 503);
+    }
+    const existing = this.#conversationStore.listByProject(project.id)[0];
+    if (existing !== undefined) {
+      return existing;
+    }
+    const now = new Date().toISOString();
+    return this.#conversationStore.create({
+      id: randomUUID(),
+      projectId: project.id,
+      title: `${project.name} 测试会话`,
+      sourceRevision: projectContextRevision(project),
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  #withCurrentContextStatus(conversation: AiConversation, project: AndroidProject): AiConversation {
+    const contextStatus =
+      project.sourceIndex === undefined
+        ? "unavailable"
+        : conversation.sourceRevision === projectContextRevision(project)
+          ? "current"
+          : "outdated";
+    return { ...conversation, contextStatus };
+  }
+
+  public async decideRuntimeStep(request: AiRuntimeStepRequest): Promise<AiRuntimeStepDecision> {
+    const project = this.#projectStore.findById(request.projectId);
+    if (project === undefined) {
+      throw new AiPlanError("未找到项目。", 404);
+    }
+    if (!packageNameIsValid(request.appId)) {
+      throw new AiPlanError("测试应用包名无效。", 422);
+    }
+    if (request.goal.trim().length === 0 || request.uiContext.trim().length === 0) {
+      throw new AiPlanError("实时页面上下文不完整。", 422);
+    }
+    const status = await this.status();
+    if (!status.configured) {
+      throw new AiPlanError(status.reason ?? "模型尚未配置。", 503);
+    }
+    if (this.#modelProvider.createRuntimeDecision === undefined) {
+      throw new AiPlanError("当前 AI 模型提供方不支持实时页面执行。", 503);
+    }
+
+    const decision = await this.#modelProvider.createRuntimeDecision({
+      system: runtimeSystemPrompt(),
+      user: runtimeUserPrompt(project, request),
+      ...(request.screenshot === undefined ? {} : { screenshot: request.screenshot }),
+    });
+    if (decision.status === "continue" && !isRuntimeAction(decision.action)) {
+      throw new AiPlanError("模型返回了不允许的实时页面操作。", 422);
+    }
+    if (decision.status === "completed" && !isRuntimeCompletionAssertion(decision.assertion)) {
+      throw new AiPlanError("模型必须使用断言确认测试目标完成。", 422);
+    }
+    if (!runtimeDecisionUsesVisibleCoordinates(decision, request.screenshot)) {
+      throw new AiPlanError("模型返回了当前截图范围外的坐标操作。", 422);
+    }
+    return decision;
   }
 }

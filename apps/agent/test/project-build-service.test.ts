@@ -64,6 +64,8 @@ class InMemoryProjectStore implements ProjectStore {
 
   public create(): void {}
 
+  public delete(): void {}
+
   public updateName(): void {}
 
   public updateSourceIndex(project: AndroidProject): void {

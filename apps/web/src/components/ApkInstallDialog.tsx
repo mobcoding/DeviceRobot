@@ -169,6 +169,7 @@ export function ApkInstallDialog({
                   <input
                     type="checkbox"
                     checked={replaceExisting}
+                    disabled={installMutation.isPending}
                     onChange={(event) => setReplaceExisting(event.target.checked)}
                   />
                   <span>覆盖已安装版本</span>
@@ -177,19 +178,13 @@ export function ApkInstallDialog({
                   <input
                     type="checkbox"
                     checked={allowTestPackage}
+                    disabled={installMutation.isPending}
                     onChange={(event) => setAllowTestPackage(event.target.checked)}
                   />
                   <span>允许测试 APK</span>
                 </label>
               </div>
             </>
-          )}
-
-          {installMutation.isPending && (
-            <div className="apk-progress" role="status">
-              <LoaderCircle aria-hidden="true" size={22} strokeWidth={1.8} />
-              <span>正在安装到 {formatDeviceName(device)}</span>
-            </div>
           )}
 
           {installed && (

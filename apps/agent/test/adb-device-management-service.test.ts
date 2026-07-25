@@ -3,6 +3,9 @@ import type { DeviceListResponse } from "@device-robot/contracts";
 
 import {
   AdbDeviceManagementService,
+  parseApplicationLastUsedAt,
+  parseApplicationPackageMetadata,
+  parseApplicationSizeBytes,
   parseLogcatEntries,
   type DeviceManagementCommandRunner,
 } from "../src/devices/adb-device-management-service.js";
@@ -64,16 +67,33 @@ describe("ADB device management", () => {
     expect(runner.runText).not.toHaveBeenCalled();
   });
 
-  it("lists package metadata from fixed pm commands", async () => {
+  it("lists package metadata, APK size, and the latest usage time", async () => {
     const runner: DeviceManagementCommandRunner = {
-      runText: vi
-        .fn()
-        .mockResolvedValueOnce(
-          "package:/data/app/com.example.app/base.apk=com.example.app versionCode:42\n",
-        )
-        .mockResolvedValueOnce(
-          "package:/system/app/Settings/Settings.apk=com.android.settings versionCode:33\n",
-        ),
+      runText: vi.fn(async (args) => {
+        if (args.includes("dumpsys") && args.includes("usagestats")) {
+          return [
+            'package=com.example.app totalTimeUsed="00:10" lastTimeUsed="2026-07-22 10:30:00"',
+            'package=com.example.app totalTimeUsed="00:01" lastTimeUsed="2026-07-21 10:30:00"',
+          ].join("\n");
+        }
+        if (args.includes("dumpsys") && args.includes("package")) {
+          return [
+            "  Package [com.example.app] (42):",
+            "    versionName=2.5.16",
+            "  Package [com.android.settings] (33):",
+            "    versionName=14",
+          ].join("\n");
+        }
+        if (args.at(-1)?.startsWith("stat -c")) {
+          return [
+            "/data/app/com.example.app/base.apk:92739482",
+            "/system/app/Settings/Settings.apk:12345678",
+          ].join("\n");
+        }
+        return args.at(-1) === "-3"
+          ? "package:/data/app/com.example.app/base.apk=com.example.app versionCode:42\n"
+          : "package:/system/app/Settings/Settings.apk=com.android.settings versionCode:33\n";
+      }),
     };
     const service = new AdbDeviceManagementService({
       deviceService: createDiscoveryService(),
@@ -85,8 +105,21 @@ describe("ADB device management", () => {
     expect(result).toMatchObject({
       filter: "all",
       applications: [
-        { packageName: "com.example.app", source: "user", versionCode: "42" },
-        { packageName: "com.android.settings", source: "system", versionCode: "33" },
+        {
+          packageName: "com.example.app",
+          source: "user",
+          versionName: "2.5.16",
+          versionCode: "42",
+          sizeBytes: 92739482,
+          lastUsedAt: "2026-07-22T02:30:00.000Z",
+        },
+        {
+          packageName: "com.android.settings",
+          source: "system",
+          versionName: "14",
+          versionCode: "33",
+          sizeBytes: 12345678,
+        },
       ],
     });
     expect(runner.runText).toHaveBeenCalledWith([
@@ -111,6 +144,53 @@ describe("ADB device management", () => {
       "--show-versioncode",
       "-s",
     ]);
+    expect(runner.runText).toHaveBeenCalledWith([
+      "-s",
+      "device-1",
+      "shell",
+      "dumpsys",
+      "package",
+      "packages",
+    ]);
+    expect(runner.runText).toHaveBeenCalledWith([
+      "-s",
+      "device-1",
+      "shell",
+      "dumpsys",
+      "usagestats",
+    ]);
+  });
+
+  it("parses optional metadata without accepting malformed values", () => {
+    expect(
+      parseApplicationPackageMetadata(
+        [
+          "  Package [com.example.app] (42):",
+          "    versionName=2.5.16",
+          "  Package [com.example.none] (1):",
+          "    versionName=null",
+        ].join("\n"),
+      ),
+    ).toEqual(
+      new Map([
+        ["com.example.app", { versionName: "2.5.16" }],
+        ["com.example.none", {}],
+      ]),
+    );
+    expect(
+      parseApplicationLastUsedAt(
+        [
+          'package=com.example.app lastTimeUsed="2026-07-20 09:00:00"',
+          'package=com.example.app lastTimeUsed="2026-07-22 10:30:00"',
+          'package=com.example.broken lastTimeUsed="not-a-date"',
+        ].join("\n"),
+      ),
+    ).toEqual(new Map([["com.example.app", "2026-07-22T02:30:00.000Z"]]));
+    expect(
+      parseApplicationSizeBytes(
+        "/data/app/com.example.app/base.apk:92739482\ninvalid\n/path:not-a-size",
+      ),
+    ).toEqual(new Map([["/data/app/com.example.app/base.apk", 92739482]]));
   });
 
   it("reads a bounded Logcat snapshot using fixed ADB arguments", async () => {

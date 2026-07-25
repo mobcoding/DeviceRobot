@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveAgentPaths } from "@device-robot/config";
@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { openDatabase } from "../src/db/database.js";
 import type { DeviceControlService } from "../src/devices/adb-device-control-service.js";
 import type { DeviceDiscoveryService } from "../src/devices/adb-device-service.js";
+import type { DeviceManagementService } from "../src/devices/adb-device-management-service.js";
 import type { ProjectStore } from "../src/projects/project-store.js";
 import {
   LocalTestExecutionService,
@@ -68,6 +69,7 @@ function projectStore(): ProjectStore {
     findById: (id) => (id === value.id ? value : undefined),
     findByRootPath: () => undefined,
     create: () => {},
+    delete: () => {},
     updateName: () => {},
     updateSourceIndex: () => {},
   };
@@ -86,6 +88,14 @@ function transport(handler?: (path: string) => unknown): WebDriverTransport {
       return { value: null };
     },
   };
+}
+
+function pngScreenshot(width: number, height: number): Buffer {
+  const screenshot = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(screenshot);
+  screenshot.writeUInt32BE(width, 16);
+  screenshot.writeUInt32BE(height, 20);
+  return screenshot;
 }
 
 afterEach(() => {
@@ -161,6 +171,27 @@ describe("test execution service", () => {
     const root = createTemporaryRoot();
     const paths = resolveAgentPaths(root);
     const database = openDatabase(paths.database);
+    mkdirSync(paths.logs, { recursive: true });
+    writeFileSync(join(paths.logs, "appium.log"), "[Appium] session failure");
+    const readUiTree = vi.fn(async () => ({
+      serial: "device-1",
+      xml: "<hierarchy/>",
+      capturedAt: new Date().toISOString(),
+    }));
+    const readLogcat = vi.fn(async () => ({
+      serial: "device-1",
+      entries: [
+        {
+          timestamp: "07-23 10:00:01.000",
+          processId: 1,
+          threadId: 2,
+          level: "error" as const,
+          tag: "Example",
+          message: "failure",
+        },
+      ],
+      readAt: new Date().toISOString(),
+    }));
     const service = new LocalTestExecutionService({
       paths,
       store: new SqliteTestExecutionStore(database.sqlite),
@@ -168,16 +199,21 @@ describe("test execution service", () => {
       deviceService: readyDeviceService(),
       deviceControlService: {
         captureScreenshot: async () => Buffer.from([0x89, 0x50, 0x4e, 0x47]),
-        readUiTree: async () => ({
-          serial: "device-1",
-          xml: "<hierarchy/>",
-          capturedAt: new Date().toISOString(),
-        }),
+        readUiTree,
         execute: async () => ({
           startedAt: new Date().toISOString(),
           finishedAt: new Date().toISOString(),
         }),
       } satisfies DeviceControlService,
+      deviceManagementService: {
+        listFiles: async () => {
+          throw new Error("not used");
+        },
+        listApplications: async () => {
+          throw new Error("not used");
+        },
+        readLogcat,
+      } satisfies DeviceManagementService,
       appiumRuntimeService: {
         start: async () => ({ server: { state: "running" } }),
       } as never,
@@ -221,6 +257,192 @@ describe("test execution service", () => {
     expect(finished.status).toBe("failed");
     expect(finished.message).toContain("UiAutomator2 会话不可用");
     expect(finished.steps).toMatchObject([{ status: "failed" }, { status: "cancelled" }]);
+    expect(readUiTree).toHaveBeenCalledWith("device-1");
+    expect(readLogcat).toHaveBeenCalledWith("device-1", 500);
+    const evidenceDirectory = join(paths.reports, started.id, "evidence");
+    expect(existsSync(join(evidenceDirectory, "step-001.xml"))).toBe(true);
+    expect(existsSync(join(evidenceDirectory, "step-001-logcat.log"))).toBe(true);
+    expect(existsSync(join(evidenceDirectory, "appium.log"))).toBe(true);
+    await service.dispose();
+    database.close();
+  });
+
+  it("installs staged APKs before starting Appium and clearing the target application data", async () => {
+    const root = createTemporaryRoot();
+    const paths = resolveAgentPaths(root);
+    const database = openDatabase(paths.database);
+    const order: string[] = [];
+    const install = vi.fn(async () => {
+      order.push("install");
+      return {
+        status: "installed" as const,
+        serial: "device-1",
+        artifactId: "223e4567-e89b-12d3-a456-426614174000",
+        packageName: "com.any.application",
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+      };
+    });
+    const service = new LocalTestExecutionService({
+      paths,
+      store: new SqliteTestExecutionStore(database.sqlite),
+      projectStore: projectStore(),
+      deviceService: readyDeviceService(),
+      deviceControlService: {
+        captureScreenshot: async () => Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+        readUiTree: async () => ({
+          serial: "device-1",
+          xml: "<hierarchy />",
+          capturedAt: new Date().toISOString(),
+        }),
+        execute: async () => ({
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+        }),
+      } satisfies DeviceControlService,
+      apkArtifactService: { install } as never,
+      appiumRuntimeService: {
+        start: async () => {
+          order.push("appium");
+          return { server: { state: "running" } };
+        },
+      } as never,
+      transport: transport(),
+      applicationDataService: {
+        clear: async () => {
+          order.push("clear");
+        },
+        setPermission: async () => {},
+      },
+    });
+
+    const started = await service.start({
+      plan: {
+        id: "plan-install",
+        projectId: project().id,
+        actions: [
+          {
+            action: "app.install",
+            artifactId: "223e4567-e89b-12d3-a456-426614174000",
+            replaceExisting: true,
+            allowTestPackage: true,
+          },
+          { action: "ui.wait", durationMs: 1 },
+        ],
+        requiresApproval: true,
+      },
+      deviceSerial: "device-1",
+      appId: "com.example.app",
+      approved: true,
+    });
+    const finished = await waitForFinished(service, started.id);
+
+    expect(finished.steps).toMatchObject([
+      {
+        action: { action: "app.install" },
+        status: "succeeded",
+        message: "已安装 com.any.application。",
+      },
+      { action: { action: "ui.wait" }, status: "succeeded" },
+    ]);
+    expect(install).toHaveBeenCalledWith("device-1", "223e4567-e89b-12d3-a456-426614174000", {
+      replaceExisting: true,
+      allowTestPackage: true,
+      uninstallExisting: false,
+    });
+    expect(order).toEqual(["install", "appium", "clear"]);
+    await service.dispose();
+    database.close();
+  });
+
+  it("uses the live UI to execute AI-selected steps before asserting the target result", async () => {
+    const root = createTemporaryRoot();
+    const paths = resolveAgentPaths(root);
+    const database = openDatabase(paths.database);
+    const decideRuntimeStep = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: "continue",
+        action: { action: "ui.tap", target: { text: "继续" } },
+        reason: "继续按钮是当前页面唯一可见的导航入口。",
+      })
+      .mockResolvedValueOnce({
+        status: "completed",
+        assertion: { action: "assert.visible", target: { text: "首页" } },
+        reason: "当前页面已出现首页标题。",
+      });
+    const screenshot = pngScreenshot(1_080, 2_160);
+    const service = new LocalTestExecutionService({
+      paths,
+      store: new SqliteTestExecutionStore(database.sqlite),
+      projectStore: projectStore(),
+      deviceService: readyDeviceService(),
+      deviceControlService: {
+        captureScreenshot: async () => screenshot,
+        readUiTree: async () => ({
+          serial: "device-1",
+          xml: '<hierarchy><node text="继续" resource-id="com.example.app:id/continue" class="android.widget.Button" clickable="true" enabled="true" bounds="[20,400][240,480]" /></hierarchy>',
+          capturedAt: new Date().toISOString(),
+        }),
+        execute: async () => ({
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+        }),
+      } satisfies DeviceControlService,
+      aiPlanService: { decideRuntimeStep } as never,
+      appiumRuntimeService: {
+        start: async () => ({ server: { state: "running" } }),
+      } as never,
+      transport: transport((path) => {
+        if (path === "/session") {
+          return { value: { sessionId: "session-1" } };
+        }
+        if (path.endsWith("/element")) {
+          return { value: { "element-6066-11e4-a52e-4f735466cecf": "element-1" } };
+        }
+        if (path.endsWith("/displayed")) {
+          return { value: true };
+        }
+        return undefined;
+      }),
+      applicationDataService: {
+        clear: async () => {},
+        setPermission: async () => {},
+      },
+    });
+
+    const started = await service.start({
+      plan: {
+        id: "plan-live-ui",
+        projectId: project().id,
+        liveUiExecution: { goal: "从启动页进入首页", maxSteps: 2 },
+        actions: [{ action: "app.launch", appId: "com.example.app" }],
+        requiresApproval: true,
+      },
+      deviceSerial: "device-1",
+      appId: "com.example.app",
+      approved: true,
+    });
+    const finished = await waitForFinished(service, started.id);
+
+    expect(finished).toMatchObject({
+      status: "succeeded",
+      steps: [
+        { action: { action: "ui.tap" }, status: "succeeded" },
+        { action: { action: "assert.visible" }, status: "succeeded" },
+      ],
+    });
+    expect(decideRuntimeStep).toHaveBeenCalledTimes(2);
+    expect(decideRuntimeStep.mock.calls[0]?.[0]).toMatchObject({
+      goal: "从启动页进入首页",
+      uiContext: expect.stringContaining('text="继续"'),
+      screenshot: {
+        width: 1_080,
+        height: 2_160,
+        dataUrl: expect.stringMatching(/^data:image\/png;base64,/u),
+      },
+    });
+    expect(finished.steps[0]).toMatchObject({ message: "继续按钮是当前页面唯一可见的导航入口。" });
     await service.dispose();
     database.close();
   });

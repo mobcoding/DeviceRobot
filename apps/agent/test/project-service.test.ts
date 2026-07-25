@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveAgentPaths } from "@device-robot/config";
@@ -78,6 +78,13 @@ class InMemoryProjectStore implements ProjectStore {
 
   public create(project: AndroidProject): void {
     this.projects.push(project);
+  }
+
+  public delete(id: string): void {
+    const index = this.projects.findIndex((project) => project.id === id);
+    if (index >= 0) {
+      this.projects.splice(index, 1);
+    }
   }
 
   public updateName(id: string, name: string): void {
@@ -207,6 +214,27 @@ describe("Android project service", () => {
     expect(runner.run).toHaveBeenCalledTimes(1);
   });
 
+  it("removes only the project registration and retains the local source directory", async () => {
+    const { root, service, store } = createFixture();
+    const projectRoot = join(root, "Example");
+    mkdirSync(projectRoot);
+    createAndroidProject(projectRoot);
+    const project = await service.add({ source: "local", rootPath: projectRoot });
+
+    await expect(service.remove(project.id)).resolves.toBeUndefined();
+
+    expect(store.list()).toHaveLength(0);
+    expect(existsSync(projectRoot)).toBe(true);
+  });
+
+  it("rejects removal of an unknown project", async () => {
+    const { service } = createFixture();
+
+    await expect(service.remove("123e4567-e89b-12d3-a456-426614174000")).rejects.toMatchObject({
+      statusCode: 404,
+    });
+  });
+
   it("recognizes build types and product flavors declared with Kotlin DSL functions", async () => {
     const { root, service } = createFixture();
     const projectRoot = join(root, "KotlinDslExample");
@@ -234,6 +262,78 @@ describe("Android project service", () => {
     expect(project.modules).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ path: "app", variants: ["debug", "free", "paid", "release"] }),
+      ]),
+    );
+  });
+
+  it("resolves an application id declared in the root app-config.gradle file", async () => {
+    const { root, service } = createFixture();
+    const projectRoot = join(root, "ConfiguredApplicationIdExample");
+    mkdirSync(projectRoot);
+    createAndroidProject(projectRoot);
+    writeFileSync(
+      join(projectRoot, "app-config.gradle"),
+      ["ext {", '  APPLICATION_ID = "com.internal.study"', "}"].join("\n"),
+    );
+    writeFileSync(
+      join(projectRoot, "app", "build.gradle.kts"),
+      [
+        'plugins { id("com.android.application") }',
+        'val applicationIdValue = extraString("APPLICATION_ID")',
+        "android {",
+        "  defaultConfig { applicationId = applicationIdValue }",
+        "  buildTypes { debug { } release { } }",
+        "}",
+      ].join("\n"),
+    );
+
+    const project = await service.add({ source: "local", rootPath: projectRoot });
+
+    expect(project.modules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "app",
+          applicationId: "com.internal.study",
+        }),
+      ]),
+    );
+  });
+
+  it("updates legacy project metadata when an app-config.gradle application id is available", async () => {
+    const { root, service, store } = createFixture();
+    const projectRoot = join(root, "LegacyConfiguredApplicationIdExample");
+    mkdirSync(projectRoot);
+    createAndroidProject(projectRoot);
+    writeFileSync(
+      join(projectRoot, "app-config.gradle"),
+      ["ext {", '  APPLICATION_ID = "com.internal.legacy"', "}"].join("\n"),
+    );
+    writeFileSync(
+      join(projectRoot, "app", "build.gradle.kts"),
+      [
+        'plugins { id("com.android.application") }',
+        'val applicationIdValue = extraString("APPLICATION_ID")',
+        "android { defaultConfig { applicationId = applicationIdValue } }",
+      ].join("\n"),
+    );
+    const project = await service.add({ source: "local", rootPath: projectRoot });
+    store.projects[0] = {
+      ...project,
+      modules: project.modules.map((module) => {
+        const legacyModule = { ...module };
+        delete legacyModule.applicationId;
+        return legacyModule;
+      }),
+    };
+
+    const [refreshedProject] = await service.list();
+
+    expect(refreshedProject?.modules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "app",
+          applicationId: "com.internal.legacy",
+        }),
       ]),
     );
   });

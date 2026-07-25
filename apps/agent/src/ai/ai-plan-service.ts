@@ -814,6 +814,44 @@ function projectArtifactKey(buildId: string, artifactIndex: number): string {
   return `${buildId}:${artifactIndex}`;
 }
 
+function requestsCurrentProjectArtifactInstall(goal: string): boolean {
+  const value = goal.trim().toLocaleLowerCase();
+  const requestsInstall = /安装|install/u.test(value);
+  const referencesCurrentProject =
+    /当前(?:项目|工程)|本(?:项目|工程)|该(?:项目|工程)|current\s+project|this\s+project/iu.test(
+      value,
+    );
+  const referencesApk = /apk|安装包|构建(?:产物|包)?|artifact/iu.test(value);
+  return requestsInstall && referencesCurrentProject && referencesApk;
+}
+
+function currentProjectArtifactInstallPlan(
+  request: GenerateAiPlanRequest,
+  projectArtifacts: readonly WorkspaceProjectArtifact[],
+): ModelPlanPayload | undefined {
+  if (request.workspaceExecution !== true || !requestsCurrentProjectArtifactInstall(request.goal)) {
+    return undefined;
+  }
+  const artifact = projectArtifacts[0];
+  if (artifact === undefined) {
+    throw new AiPlanError("当前项目没有可安装的成功构建 APK，请先完成一次构建。", 422);
+  }
+  return {
+    reply: `已选择当前项目最近成功构建的 APK：${artifact.fileName}。`,
+    actions: [
+      {
+        action: "project.installArtifact",
+        buildId: artifact.buildId,
+        artifactIndex: artifact.artifactIndex,
+        replaceExisting: true,
+        allowTestPackage: true,
+        // A signature mismatch is retried after removing only the conflicting package.
+        uninstallExisting: true,
+      },
+    ],
+  };
+}
+
 function systemPrompt(liveUiExecution = false, workspaceExecution = false): string {
   return [
     ...planPromptRules(workspaceExecution),
@@ -1278,10 +1316,12 @@ export class LocalAiPlanService implements AiPlanService {
       request.workspaceExecution === true && this.#projectBuildService !== undefined
         ? workspaceProjectArtifacts((await this.#projectBuildService.listRuns(project.id)).runs)
         : [];
-    const modelPayload = await this.#modelProvider.createPlan({
-      system: systemPrompt(request.liveUiExecution === true, request.workspaceExecution === true),
-      user: userPrompt(project, request, history, installableArtifacts, projectArtifacts),
-    });
+    const modelPayload =
+      currentProjectArtifactInstallPlan(request, projectArtifacts) ??
+      (await this.#modelProvider.createPlan({
+        system: systemPrompt(request.liveUiExecution === true, request.workspaceExecution === true),
+        user: userPrompt(project, request, history, installableArtifacts, projectArtifacts),
+      }));
     if (
       request.workspaceExecution !== true &&
       modelPayload.actions.some(containsRestrictedTestAction)

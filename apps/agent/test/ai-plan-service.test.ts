@@ -281,17 +281,8 @@ describe("AI action plan service", () => {
     const project = createProject();
     const buildId = "223e4567-e89b-12d3-a456-426614174000";
     const provider = new FakeModelProvider({
-      reply: "安装当前项目最近构建的 APK。",
-      actions: [
-        {
-          action: "project.installArtifact",
-          buildId,
-          artifactIndex: 0,
-          replaceExisting: true,
-          allowTestPackage: true,
-          uninstallExisting: false,
-        },
-      ],
+      reply: "不应调用模型。",
+      actions: [{ action: "ui.wait", durationMs: 500 }],
     });
     const listRuns = vi.fn(async () => ({
       projectId: project.id,
@@ -322,18 +313,25 @@ describe("AI action plan service", () => {
         projectId: project.id,
         deviceSerial: "device-1",
         workspaceExecution: true,
-        goal: "安装最近构建的 APK",
+        goal: "安装当前项目最近构建的 APK",
       }),
     ).resolves.toMatchObject({
       plan: {
         workspaceExecution: true,
         requiresApproval: false,
-        actions: [{ action: "project.installArtifact", buildId, artifactIndex: 0 }],
+        actions: [
+          {
+            action: "project.installArtifact",
+            buildId,
+            artifactIndex: 0,
+            uninstallExisting: true,
+          },
+        ],
       },
     });
     expect(listRuns).toHaveBeenCalledWith(project.id);
-    expect(provider.user).toContain(`buildId: ${buildId}`);
-    expect(provider.system).toContain("project.installArtifact");
+    expect(provider.user).toBe("");
+    expect(provider.system).toBe("");
   });
 
   it("allows a plan to install any APK explicitly staged for the current conversation", async () => {

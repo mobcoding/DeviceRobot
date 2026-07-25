@@ -10,7 +10,7 @@ import {
   type WorkspaceExecutionResponse,
 } from "@device-robot/contracts";
 
-import type { ApkArtifactService } from "../apks/apk-artifact-service.js";
+import { ApkArtifactError, type ApkArtifactService } from "../apks/apk-artifact-service.js";
 import type { DeviceControlService } from "../devices/adb-device-control-service.js";
 import type { DeviceDiscoveryService } from "../devices/adb-device-service.js";
 import type { ProjectBuildService } from "../projects/project-build-service.js";
@@ -304,11 +304,33 @@ export class LocalWorkspaceActionService implements WorkspaceActionService {
           createReadStream(artifact.filePath),
         );
         try {
-          const installed = await this.#apkArtifactService.install(serial, staged.id, {
+          const options = {
             replaceExisting: action.replaceExisting,
             allowTestPackage: action.allowTestPackage,
-            uninstallExisting: action.uninstallExisting,
-          });
+            uninstallExisting: false,
+          };
+          let installed;
+          try {
+            installed = await this.#apkArtifactService.install(serial, staged.id, options);
+          } catch (error) {
+            if (
+              !action.uninstallExisting ||
+              !(error instanceof ApkArtifactError) ||
+              error.statusCode !== 409
+            ) {
+              throw error;
+            }
+            const output = commandOutput(
+              await this.#runner.run(
+                ["-s", serial, "uninstall", staged.metadata.packageName],
+                ADB_TIMEOUT_MS,
+              ),
+            );
+            if (!succeededOutput(output)) {
+              throw new WorkspaceActionError(output || "无法卸载签名冲突的已安装应用。", 502);
+            }
+            installed = await this.#apkArtifactService.install(serial, staged.id, options);
+          }
           return `已安装项目构建产物：${installed.packageName}。`;
         } finally {
           await this.#apkArtifactService.discard(staged.id).catch(() => undefined);

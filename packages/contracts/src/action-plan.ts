@@ -31,6 +31,14 @@ const appActionSchema = z.discriminatedUnion("action", [
       allowTestPackage: z.boolean().default(true),
     })
     .strict(),
+  z
+    .object({
+      action: z.literal("app.uninstall"),
+      appId: z.string().min(1),
+      keepData: z.boolean().default(false),
+    })
+    .strict(),
+  z.object({ action: z.literal("app.clearData"), appId: z.string().min(1) }).strict(),
   z.object({ action: z.literal("app.launch"), appId: z.string().min(1) }),
   z.object({ action: z.literal("app.stop"), appId: z.string().min(1) }),
 ]);
@@ -101,12 +109,33 @@ const adbActionSchema = z.object({
   args: z.array(z.string()).default([]),
 });
 
+const projectActionSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      action: z.literal("project.build"),
+      modulePath: z.string().min(1).max(1_024),
+      variant: z.string().regex(/^[A-Za-z][A-Za-z0-9_]*$/u),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("project.installArtifact"),
+      buildId: z.uuid(),
+      artifactIndex: z.number().int().nonnegative(),
+      replaceExisting: z.boolean().default(true),
+      allowTestPackage: z.boolean().default(true),
+      uninstallExisting: z.boolean().default(false),
+    })
+    .strict(),
+]);
+
 export const agentActionSchema = z.union([
   appActionSchema,
   uiActionSchema,
   assertionActionSchema,
   deviceActionSchema,
   adbActionSchema,
+  projectActionSchema,
 ]);
 
 export type AgentAction = z.infer<typeof agentActionSchema>;
@@ -124,6 +153,7 @@ export const actionPlanSchema = z.object({
   deviceSerial: z.string().min(1).optional(),
   targetAppId: z.string().min(1).optional(),
   liveUiExecution: liveUiExecutionSchema.optional(),
+  workspaceExecution: z.boolean().optional(),
   actions: z.array(agentActionSchema).min(1).max(20),
   requiresApproval: z.boolean(),
 });

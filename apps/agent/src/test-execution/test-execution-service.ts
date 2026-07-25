@@ -454,6 +454,8 @@ function ensureActionScope(action: AgentAction, appId: string): void {
   if (
     (action.action === "app.launch" ||
       action.action === "app.stop" ||
+      action.action === "app.uninstall" ||
+      action.action === "app.clearData" ||
       action.action === "device.permission") &&
     action.appId !== appId
   ) {
@@ -1144,8 +1146,15 @@ export class LocalTestExecutionService implements TestExecutionService {
         return;
       case "app.install":
         throw new TestExecutionError("APK 安装仅能作为测试计划的第一个步骤执行。", 422);
+      case "app.uninstall":
+      case "app.clearData":
+      case "project.build":
+      case "project.installArtifact":
       case "adb.shell":
-        throw new TestExecutionError(`暂不支持执行 ${action.action} 操作。`, 422);
+        throw new TestExecutionError(
+          `测试运行不支持执行 ${action.action} 操作，请使用工作区操作计划。`,
+          422,
+        );
     }
   }
 }

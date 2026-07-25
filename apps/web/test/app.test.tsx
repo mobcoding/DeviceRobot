@@ -474,6 +474,8 @@ function mockApis(
   getAiConfigurationTestRequests: () => number;
   getTestExecutionRequests: () => number;
   getLastTestExecutionRequest: () => unknown;
+  getWorkspaceExecutionRequests: () => number;
+  getLastWorkspaceExecutionRequest: () => unknown;
   getTestSuiteImportRequests: () => number;
   getTestSuiteRunRequests: () => number;
   getLastTestSuiteRunRequest: () => unknown;
@@ -498,6 +500,8 @@ function mockApis(
   let aiConfigurationTestRequests = 0;
   let testExecutionRequests = 0;
   let lastTestExecutionRequest: unknown;
+  let workspaceExecutionRequests = 0;
+  let lastWorkspaceExecutionRequest: unknown;
   let testSuiteImportRequests = 0;
   let testSuiteRunRequests = 0;
   let lastTestSuiteRunRequest: unknown;
@@ -631,6 +635,39 @@ function mockApis(
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
+    }
+
+    if (url === "/api/v1/workspace-executions" && method === "POST") {
+      workspaceExecutionRequests += 1;
+      lastWorkspaceExecutionRequest = JSON.parse(String(init?.body ?? "{}"));
+      const request = lastWorkspaceExecutionRequest as {
+        deviceSerial: string;
+        plan: AiPlanResponse["plan"];
+      };
+      const action = request.plan.actions[0];
+      if (action === undefined) {
+        throw new Error("workspace execution requires an action");
+      }
+      return new Response(
+        JSON.stringify({
+          id: "823e4567-e89b-12d3-a456-426614174000",
+          projectId: request.plan.projectId,
+          deviceSerial: request.deviceSerial,
+          status: "succeeded",
+          results: [
+            {
+              index: 0,
+              action,
+              status: "succeeded",
+              startedAt: "2026-07-25T10:00:00.000Z",
+              finishedAt: "2026-07-25T10:00:01.000Z",
+            },
+          ],
+          startedAt: "2026-07-25T10:00:00.000Z",
+          finishedAt: "2026-07-25T10:00:01.000Z",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
     }
 
     const conversationListUrl = `/api/v1/projects/${exampleProject.id}/ai-conversations`;
@@ -955,6 +992,8 @@ function mockApis(
     getAiConfigurationTestRequests: () => aiConfigurationTestRequests,
     getTestExecutionRequests: () => testExecutionRequests,
     getLastTestExecutionRequest: () => lastTestExecutionRequest,
+    getWorkspaceExecutionRequests: () => workspaceExecutionRequests,
+    getLastWorkspaceExecutionRequest: () => lastWorkspaceExecutionRequest,
     getTestSuiteImportRequests: () => testSuiteImportRequests,
     getTestSuiteRunRequests: () => testSuiteRunRequests,
     getLastTestSuiteRunRequest: () => lastTestSuiteRunRequest,
@@ -1067,7 +1106,9 @@ describe("DeviceRobot Web UI", () => {
     await user.click(within(menu).getByRole("menuitem", { name: "删除项目" }));
 
     const dialog = screen.getByRole("dialog", { name: "确认删除项目" });
-    expect(within(dialog).getByText("项目源码、Git 克隆目录和已生成的 APK 文件都会保留。")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("项目源码、Git 克隆目录和已生成的 APK 文件都会保留。"),
+    ).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "删除项目" }));
 
     await vi.waitFor(() => expect(getProjectDeleteRequests()).toBe(1));
@@ -1193,9 +1234,7 @@ describe("DeviceRobot Web UI", () => {
     renderApp();
 
     await user.click(await screen.findByRole("button", { name: "AI" }));
-    expect(await screen.findByRole("combobox", { name: "选择 AI 模型" })).toHaveValue(
-      "test-model",
-    );
+    expect(await screen.findByRole("combobox", { name: "选择 AI 模型" })).toHaveValue("test-model");
     expect(screen.getByText("1", { selector: ".ai-test-project-title span" })).toBeInTheDocument();
     expect(screen.getByText("com.example.app", { selector: "small" })).toBeInTheDocument();
     expect(screen.queryByText("1 个测试应用")).not.toBeInTheDocument();
@@ -1289,6 +1328,51 @@ describe("DeviceRobot Web UI", () => {
     });
   });
 
+  it("executes an authorized workspace plan without rebinding its application package", async () => {
+    const workspacePlan: AiPlanResponse = {
+      ...aiPlanResponse,
+      plan: {
+        ...aiPlanResponse.plan,
+        workspaceExecution: true,
+        requiresApproval: false,
+        actions: [{ action: "app.uninstall", appId: "com.example.other", keepData: false }],
+      },
+      policy: {
+        ...aiPlanResponse.policy,
+        requiresApproval: false,
+        reason: "工作区操作已按当前会话授权执行。",
+      },
+    };
+    const {
+      getAiPlanRequests,
+      getLastAiPlanRequest,
+      getLastWorkspaceExecutionRequest,
+      getWorkspaceExecutionRequests,
+    } = mockApis({ aiPlan: workspacePlan });
+    const user = userEvent.setup();
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal("confirm", confirm);
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "AI" }));
+    await user.click(screen.getByText("方案"));
+    await user.click(screen.getByRole("menuitemradio", { name: /^工作区操作/u }));
+    await user.type(screen.getByRole("textbox", { name: "测试目标" }), "卸载旧应用");
+    await user.click(screen.getByRole("button", { name: "生成操作计划" }));
+
+    await vi.waitFor(() => expect(getAiPlanRequests()).toBe(1));
+    expect(getLastAiPlanRequest()).toMatchObject({ workspaceExecution: true });
+    await user.click(screen.getByRole("button", { name: "执行计划" }));
+
+    await vi.waitFor(() => expect(getWorkspaceExecutionRequests()).toBe(1));
+    expect(getLastWorkspaceExecutionRequest()).toMatchObject({
+      deviceSerial: "8B3Y0THX0",
+      plan: { actions: [{ action: "app.uninstall", appId: "com.example.other" }] },
+    });
+    expect(confirm).not.toHaveBeenCalled();
+    expect(await screen.findByText("工作区操作完成：1 个动作。")).toBeInTheDocument();
+  });
+
   it("shows complete test-run details in the AI workspace", async () => {
     const completedRun = {
       ...testExecutionRunResponse,
@@ -1380,9 +1464,7 @@ describe("DeviceRobot Web UI", () => {
     await user.click(screen.getByRole("button", { name: "测试并应用配置" }));
 
     await vi.waitFor(() => expect(getAiConfigurationTestRequests()).toBe(1));
-    expect(await screen.findByRole("combobox", { name: "选择 AI 模型" })).toHaveValue(
-      "gpt-4.1",
-    );
+    expect(await screen.findByRole("combobox", { name: "选择 AI 模型" })).toHaveValue("gpt-4.1");
     expect(screen.getByRole("heading", { level: 1, name: "实施测试流程" })).toBeInTheDocument();
     expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument();
   });
@@ -1407,9 +1489,7 @@ describe("DeviceRobot Web UI", () => {
 
     await vi.waitFor(() => expect(getAiConfigurationTestRequests()).toBe(1));
     expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument();
-    expect(await screen.findByRole("combobox", { name: "选择 AI 模型" })).toHaveValue(
-      "gpt-4.1",
-    );
+    expect(await screen.findByRole("combobox", { name: "选择 AI 模型" })).toHaveValue("gpt-4.1");
   });
 
   it("selects an existing model from the AI workspace without exposing the provider name", async () => {

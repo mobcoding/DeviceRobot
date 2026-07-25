@@ -277,6 +277,65 @@ describe("AI action plan service", () => {
     });
   });
 
+  it("allows workspace plans to use a current project's successful APK artifact", async () => {
+    const project = createProject();
+    const buildId = "223e4567-e89b-12d3-a456-426614174000";
+    const provider = new FakeModelProvider({
+      reply: "安装当前项目最近构建的 APK。",
+      actions: [
+        {
+          action: "project.installArtifact",
+          buildId,
+          artifactIndex: 0,
+          replaceExisting: true,
+          allowTestPackage: true,
+          uninstallExisting: false,
+        },
+      ],
+    });
+    const listRuns = vi.fn(async () => ({
+      projectId: project.id,
+      runs: [
+        {
+          id: buildId,
+          projectId: project.id,
+          modulePath: "app",
+          variant: "debug",
+          taskName: ":app:assembleDebug",
+          status: "succeeded" as const,
+          logPath: "C:\\logs\\build.log",
+          artifactPaths: ["app/build/outputs/apk/debug/app-debug.apk"],
+          artifactNames: ["Example_20260725_100000_debug.apk"],
+          startedAt: "2026-07-25T10:00:00.000Z",
+          finishedAt: "2026-07-25T10:01:00.000Z",
+        },
+      ],
+    }));
+    const service = new LocalAiPlanService({
+      projectStore: new InMemoryProjectStore(project),
+      modelProvider: provider,
+      projectBuildService: { listRuns } as never,
+    });
+
+    await expect(
+      service.generate({
+        projectId: project.id,
+        deviceSerial: "device-1",
+        workspaceExecution: true,
+        goal: "安装最近构建的 APK",
+      }),
+    ).resolves.toMatchObject({
+      plan: {
+        workspaceExecution: true,
+        requiresApproval: false,
+        actions: [{ action: "project.installArtifact", buildId, artifactIndex: 0 }],
+      },
+    });
+    expect(listRuns).toHaveBeenCalledWith(project.id);
+    expect(provider.user).toContain(`buildId: ${buildId}`);
+    expect(provider.system).toContain("project.installArtifact");
+  });
+
   it("allows a plan to install any APK explicitly staged for the current conversation", async () => {
     const project = createProject();
     const artifactId = "223e4567-e89b-12d3-a456-426614174000";

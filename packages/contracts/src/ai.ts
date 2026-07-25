@@ -41,6 +41,7 @@ export const generateAiPlanRequestSchema = z.object({
   // Local paths are intentionally never accepted by the API contract.
   installableArtifactIds: z.array(z.uuid()).max(20).optional(),
   liveUiExecution: z.boolean().optional(),
+  workspaceExecution: z.boolean().optional(),
   goal: z.string().min(1).max(4_000),
 });
 

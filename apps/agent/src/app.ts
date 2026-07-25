@@ -40,6 +40,8 @@ import {
   testExecutionReportSchema,
   testSuiteListResponseSchema,
   testSuiteRecordSchema,
+  startWorkspaceExecutionRequestSchema,
+  workspaceExecutionResponseSchema,
 } from "@device-robot/contracts";
 import Fastify, {
   type FastifyInstance,
@@ -125,6 +127,10 @@ import {
   LocalTestReportService,
   type TestReportService,
 } from "./test-reports/test-report-service.js";
+import {
+  LocalWorkspaceActionService,
+  type WorkspaceActionService,
+} from "./workspace/workspace-action-service.js";
 
 export const AGENT_VERSION = "0.1.0";
 const WEBSOCKET_OPEN = 1;
@@ -150,6 +156,7 @@ export type CreateAgentAppOptions = {
   testExecutionService?: TestExecutionService;
   testSuiteService?: TestSuiteService;
   testReportService?: TestReportService;
+  workspaceActionService?: WorkspaceActionService;
   maintenanceService?: LocalDataMaintenanceService;
 };
 
@@ -172,6 +179,7 @@ export type AgentApp = {
   testExecutionService: TestExecutionService;
   testSuiteService: TestSuiteService;
   testReportService: TestReportService;
+  workspaceActionService: WorkspaceActionService;
   maintenanceService: LocalDataMaintenanceService;
 };
 
@@ -532,6 +540,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     new LocalAiPlanService({
       projectStore,
       apkArtifactService,
+      projectBuildService,
       configurationStore: new SqliteAiConfigurationStore(database.sqlite),
       secretProtector: new WindowsDpapiSecretProtector(),
       planStore: new DrizzleAiPlanStore(database.db),
@@ -564,6 +573,14 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     });
   const testReportService =
     options.testReportService ?? new LocalTestReportService({ paths, testExecutionService });
+  const workspaceActionService =
+    options.workspaceActionService ??
+    new LocalWorkspaceActionService({
+      deviceService,
+      deviceControlService,
+      apkArtifactService,
+      projectBuildService,
+    });
   const maintenanceService =
     options.maintenanceService ?? new FilesystemLocalDataMaintenanceService(paths);
   const scrcpyStreamService =
@@ -877,6 +894,18 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
       );
     } catch (error) {
       return apiErrorReply(reply, error, "测试报告生成失败。");
+    }
+  });
+
+  app.post("/api/v1/workspace-executions", async (request, reply) => {
+    try {
+      return workspaceExecutionResponseSchema.parse(
+        await workspaceActionService.execute(
+          startWorkspaceExecutionRequestSchema.parse(request.body),
+        ),
+      );
+    } catch (error) {
+      return apiErrorReply(reply, error, "工作区操作执行失败。");
     }
   });
 
@@ -1321,6 +1350,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     testExecutionService,
     testSuiteService,
     testReportService,
+    workspaceActionService,
     maintenanceService,
   };
 }

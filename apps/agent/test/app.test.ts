@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { healthResponseSchema } from "@device-robot/contracts";
+import { healthResponseSchema, type StartWorkspaceExecutionRequest } from "@device-robot/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createAgentApp } from "../src/app.js";
@@ -863,6 +863,65 @@ describe("DeviceRobot Agent", () => {
         allowTestPackage: true,
         uninstallExisting: false,
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("delegates workspace executions through the contract-validated route", async () => {
+    const execute = vi.fn(async (request: StartWorkspaceExecutionRequest) => {
+      const action = request.plan.actions[0];
+      if (action === undefined) {
+        throw new Error("workspace plan requires an action");
+      }
+      return {
+        id: "323e4567-e89b-12d3-a456-426614174000",
+        projectId: request.plan.projectId,
+        deviceSerial: request.deviceSerial,
+        status: "succeeded" as const,
+        results: [
+          {
+            index: 0,
+            action,
+            status: "succeeded" as const,
+            startedAt: "2026-07-25T10:00:00.000Z",
+            finishedAt: "2026-07-25T10:00:01.000Z",
+          },
+        ],
+        startedAt: "2026-07-25T10:00:00.000Z",
+        finishedAt: "2026-07-25T10:00:01.000Z",
+      };
+    });
+    const { app } = await createAgentApp({
+      localAppData: createTemporaryRoot(),
+      workspaceActionService: { execute },
+    });
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/workspace-executions",
+        headers: { host: "127.0.0.1:43110" },
+        payload: {
+          deviceSerial: "device-1",
+          plan: {
+            id: "workspace-plan",
+            projectId: "123e4567-e89b-12d3-a456-426614174000",
+            workspaceExecution: true,
+            actions: [{ action: "adb.shell", command: "getprop", args: [] }],
+            requiresApproval: false,
+          },
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ status: "succeeded", deviceSerial: "device-1" });
+      expect(execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          deviceSerial: "device-1",
+          plan: expect.objectContaining({ workspaceExecution: true }),
+        }),
+      );
     } finally {
       await app.close();
     }

@@ -6,6 +6,16 @@ export {
   type AgentAction,
   type Selector,
 } from "./action-plan.js";
+export {
+  startWorkspaceExecutionRequestSchema,
+  workspaceActionExecutionStatusSchema,
+  workspaceActionResultSchema,
+  workspaceExecutionResponseSchema,
+  type StartWorkspaceExecutionRequest,
+  type WorkspaceActionExecutionStatus,
+  type WorkspaceActionResult,
+  type WorkspaceExecutionResponse,
+} from "./workspace-execution.js";
 export { healthResponseSchema, type HealthResponse } from "./health.js";
 export {
   cleanupLocalDataRequestSchema,

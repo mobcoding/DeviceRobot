@@ -33,6 +33,7 @@ import type {
   AndroidProject,
   TestExecutionRun,
   TestStepExecution,
+  WorkspaceExecutionResponse,
 } from "@device-robot/contracts";
 
 import { useAgentUnavailable } from "../agent-availability";
@@ -52,6 +53,7 @@ import {
   startTestExecution,
   testStepScreenshotUrl,
 } from "../api/test-execution";
+import { startWorkspaceExecution } from "../api/workspace-execution";
 import { formatDateTime } from "../ui/formatters";
 import { TestSuitePanel } from "./TestSuitePanel";
 
@@ -63,7 +65,22 @@ type ConversationMessage = {
 };
 
 function actionLabel(action: AiPlanResponse["plan"]["actions"][number]): string {
-  return action.action === "app.install" ? "安装 APK" : action.action;
+  switch (action.action) {
+    case "app.install":
+      return "安装 APK";
+    case "app.uninstall":
+      return "卸载应用";
+    case "app.clearData":
+      return "清除应用数据";
+    case "adb.shell":
+      return `ADB：${action.command}`;
+    case "project.build":
+      return `构建 ${action.modulePath} ${action.variant}`;
+    case "project.installArtifact":
+      return "安装项目构建 APK";
+    default:
+      return action.action;
+  }
 }
 
 function statusLabel(status: TestExecutionRun["status"] | TestStepExecution["status"]): string {
@@ -354,10 +371,13 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
   const [editingConfiguration, setEditingConfiguration] = useState(false);
   const [externalDataAcknowledged, setExternalDataAcknowledged] = useState(false);
   const [liveUiExecution, setLiveUiExecution] = useState(true);
+  const [workspaceExecution, setWorkspaceExecution] = useState(false);
   const [planMenuOpen, setPlanMenuOpen] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
   const [installableArtifacts, setInstallableArtifacts] = useState<ApkArtifact[]>([]);
+  const [lastWorkspaceExecution, setLastWorkspaceExecution] =
+    useState<WorkspaceExecutionResponse>();
   const apkInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const statusQuery = useQuery({
@@ -495,6 +515,10 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
       await queryClient.invalidateQueries({ queryKey: ["test-runs"] });
     },
   });
+  const workspaceExecutionMutation = useMutation({
+    mutationFn: startWorkspaceExecution,
+    onSuccess: (result) => setLastWorkspaceExecution(result),
+  });
   const cancelMutation = useMutation({
     mutationFn: cancelTestExecution,
     onSuccess: async () => {
@@ -512,7 +536,7 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
     configured &&
     projectId.length > 0 &&
     selectedConversationId.length > 0 &&
-    appId.length > 0 &&
+    (workspaceExecution || appId.length > 0) &&
     goal.trim().length > 0 &&
     !uploadApkMutation.isPending;
   const showConfiguration =
@@ -556,7 +580,9 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
                   ? discardApkMutation.error.message
                   : testExecutionMutation.isError
                     ? testExecutionMutation.error.message
-                    : undefined;
+                    : workspaceExecutionMutation.isError
+                      ? workspaceExecutionMutation.error.message
+                      : undefined;
   const configurationError = agentUnavailable
     ? undefined
     : modelListMutation.isError
@@ -572,14 +598,23 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
   const selectedExecutionPlan =
     selectedPlanResponse === undefined
       ? undefined
-      : bindPlanToApplication(
-          selectedPlanResponse.plan,
-          selectedPlanResponse.plan.targetAppId ?? appId,
-        );
+      : selectedPlanResponse.plan.workspaceExecution === true
+        ? selectedPlanResponse.plan
+        : bindPlanToApplication(
+            selectedPlanResponse.plan,
+            selectedPlanResponse.plan.targetAppId ?? appId,
+          );
   const activeRun = runs.find((run) => run.status === "running");
   const selectedRun = runs.find((run) => run.id === selectedRunId);
 
   const executePlan = (plan: ActionPlan, response: AiPlanResponse): void => {
+    if (plan.workspaceExecution === true) {
+      if (device === undefined) {
+        return;
+      }
+      workspaceExecutionMutation.mutate({ plan, deviceSerial: device.serial });
+      return;
+    }
     const targetAppId = plan.targetAppId ?? appId;
     if (
       device === undefined ||
@@ -984,6 +1019,7 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
                           ),
                         }),
                     liveUiExecution,
+                    workspaceExecution,
                     goal: goal.trim(),
                   });
                 }
@@ -1072,6 +1108,7 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
                         disabled={planMutation.isPending}
                         onClick={() => {
                           setLiveUiExecution(false);
+                          setWorkspaceExecution(false);
                           setPlanMenuOpen(false);
                         }}
                       >
@@ -1086,16 +1123,32 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
                         disabled={planMutation.isPending}
                         onClick={() => {
                           setLiveUiExecution(true);
+                          setWorkspaceExecution(false);
                           setPlanMenuOpen(false);
                         }}
                       >
                         <strong>自主执行</strong>
                         <small>执行时向 AI 提供实时截图与 UI 层级，逐步自主操作。</small>
                       </button>
+                      <button
+                        className={workspaceExecution ? "selected" : ""}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={workspaceExecution}
+                        disabled={planMutation.isPending}
+                        onClick={() => {
+                          setLiveUiExecution(false);
+                          setWorkspaceExecution(true);
+                          setPlanMenuOpen(false);
+                        }}
+                      >
+                        <strong>工作区操作</strong>
+                        <small>直接执行已授权的应用管理、设备控制和 ADB 操作。</small>
+                      </button>
                     </div>
                   </details>
                   <span className="ai-test-plan-mode-label">
-                    {liveUiExecution ? "自主执行" : "静态执行"}
+                    {workspaceExecution ? "工作区操作" : liveUiExecution ? "自主执行" : "静态执行"}
                   </span>
                 </div>
                 <button
@@ -1125,7 +1178,11 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
                     <h2>当前测试执行计划</h2>
                   </div>
                 </div>
-                <em>执行前必须确认</em>
+                <em>
+                  {selectedExecutionPlan?.workspaceExecution === true
+                    ? "已授权执行"
+                    : "执行前必须确认"}
+                </em>
               </header>
               {selectedPlanResponse === undefined || selectedExecutionPlan === undefined ? (
                 <p className="ai-test-inspector-empty">生成计划后，会在此处显示待执行步骤。</p>
@@ -1164,23 +1221,44 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
                       {selectedExecutionPlan.liveUiExecution.maxSteps} 步。
                     </p>
                   )}
+                  {selectedExecutionPlan.workspaceExecution === true && (
+                    <p className="ai-live-ui-summary">
+                      工作区操作会直接作用于当前设备，不会自动清除应用数据或启动 Appium。
+                    </p>
+                  )}
                   <footer className="ai-test-plan-execution">
-                    <code>{selectedExecutionPlan.targetAppId ?? appId}</code>
+                    <code>
+                      {selectedExecutionPlan.workspaceExecution === true
+                        ? (device?.model ?? device?.serial ?? "未选择设备")
+                        : (selectedExecutionPlan.targetAppId ?? appId)}
+                    </code>
                     <button
                       className="primary-command"
                       type="button"
                       disabled={
                         device === undefined ||
-                        (selectedExecutionPlan.targetAppId ?? appId).length === 0 ||
+                        (selectedExecutionPlan.workspaceExecution !== true &&
+                          (selectedExecutionPlan.targetAppId ?? appId).length === 0) ||
                         testExecutionMutation.isPending ||
+                        workspaceExecutionMutation.isPending ||
                         activeRun !== undefined
                       }
                       onClick={() => executePlan(selectedExecutionPlan, selectedPlanResponse)}
                     >
                       <Play aria-hidden="true" size={14} strokeWidth={1.9} />
-                      {testExecutionMutation.isPending ? "正在启动" : "执行计划"}
+                      {testExecutionMutation.isPending || workspaceExecutionMutation.isPending
+                        ? "正在启动"
+                        : "执行计划"}
                     </button>
                   </footer>
+                  {lastWorkspaceExecution !== undefined &&
+                    lastWorkspaceExecution.projectId === selectedExecutionPlan.projectId && (
+                      <p className="ai-test-plan-evidence" role="status">
+                        {lastWorkspaceExecution.status === "succeeded"
+                          ? `工作区操作完成：${lastWorkspaceExecution.results.length} 个动作。`
+                          : `工作区操作失败：${lastWorkspaceExecution.results.at(-1)?.message ?? "未知错误"}`}
+                      </p>
+                    )}
                 </>
               )}
             </section>

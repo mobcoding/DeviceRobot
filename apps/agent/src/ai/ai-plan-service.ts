@@ -24,6 +24,7 @@ import {
   type AndroidProject,
   type CreateAiConversationRequest,
   type GenerateAiPlanRequest,
+  type ProjectBuildRun,
 } from "@device-robot/contracts";
 import { z } from "zod";
 
@@ -33,6 +34,7 @@ import type { AiPlanStore } from "./ai-plan-store.js";
 import type { AiSecretProtector } from "./ai-secret-protector.js";
 import type { ProjectStore } from "../projects/project-store.js";
 import type { ApkArtifactService } from "../apks/apk-artifact-service.js";
+import type { ProjectBuildService } from "../projects/project-build-service.js";
 
 const MODEL_TIMEOUT_MS = 90_000;
 const MODEL_CONFIGURATION_TIMEOUT_MS = 30_000;
@@ -133,6 +135,7 @@ export interface AiPlanService {
 export type LocalAiPlanServiceOptions = {
   projectStore: ProjectStore;
   apkArtifactService?: ApkArtifactService;
+  projectBuildService?: ProjectBuildService;
   modelProvider?: AiPlanModelProvider;
   configurationStore?: AiConfigurationStore;
   secretProtector?: AiSecretProtector;
@@ -522,16 +525,29 @@ function isRuntimeCompletionAssertion(action: AgentAction): boolean {
   );
 }
 
-function planPromptRules(): string[] {
+function planPromptRules(workspaceExecution = false): string[] {
   return [
     "必须只输出 JSON 对象，格式为 {reply:string,actions:AgentAction[]}。reply 使用简体中文。",
-    "actions 至少一项、最多二十项。只能使用 app.install、app.launch、app.stop、ui.tap、ui.longPress、ui.input、ui.swipe、ui.back、ui.wait、assert.visible、assert.notVisible、assert.text、assert.activity、device.permission、device.orientation、device.screenshot。",
+    "actions 至少一项、最多二十项。只能使用 app.install、app.uninstall、app.clearData、app.launch、app.stop、ui.tap、ui.longPress、ui.input、ui.swipe、ui.back、ui.wait、assert.visible、assert.notVisible、assert.text、assert.activity、device.permission、device.orientation、device.screenshot、adb.shell、project.build、project.installArtifact。",
     '严格示例：{"reply":"先记录启动流程的可观察证据。","actions":[{"action":"ui.wait","durationMs":1500},{"action":"device.screenshot","name":"启动页"}]}。',
     "动作字段：app.launch/app.stop 必须有 appId；ui.tap、ui.longPress、assert.visible、assert.notVisible 必须有 target；assert.text 还必须有 expected；ui.input 必须有 value；ui.swipe 必须有 start 和 end，二者均为 {x:number,y:number}；ui.wait 必须有 durationMs:number；assert.activity 必须有 expected；device.screenshot 可选 name。",
     "target 必须是对象，且包含 text、resourceId、accessibilityId、className 之一，或同时包含 x:number 与 y:number；不得写成 selector、element、description、page、route 或字符串。",
-    "严禁输出 adb.shell、文件路径、命令行、未在证据中出现的 resourceId、accessibilityId、页面文案或路由。证据不足时使用 ui.wait、device.screenshot 或在 reply 中说明限制。",
-    "仅当请求明确提供“可安装的本地 APK”时才可输出 app.install。app.install 必须是第一个动作，并且 artifactId 必须逐字使用列表中的 ID；不得猜测、编造或使用文件路径。",
+    ...(workspaceExecution
+      ? [
+          "当前是工作区自主操作计划。可输出 adb.shell，但 action.command 和 args 必须是设备端 ADB shell 的逐项参数，不能包含 adb 前缀、Windows 命令、文件路径、管道、重定向或命令拼接。",
+          "可使用 app.uninstall、app.clearData、app.launch、app.stop 和 device.permission 操作用户明确要求的应用包名。",
+          "仅当请求明确提供“可安装的本地 APK”时才可输出 app.install；artifactId 必须逐字使用列表中的 ID，不得猜测、编造或使用文件路径。",
+        ]
+      : [
+          "严禁输出 adb.shell、文件路径、命令行、未在证据中出现的 resourceId、accessibilityId、页面文案或路由。证据不足时使用 ui.wait、device.screenshot 或在 reply 中说明限制。",
+          "仅当请求明确提供“可安装的本地 APK”时才可输出 app.install。app.install 必须是第一个动作，并且 artifactId 必须逐字使用列表中的 ID；不得猜测、编造或使用文件路径。",
+        ]),
     "每个 ui.tap、ui.longPress、assert.visible、assert.notVisible、assert.text 都必须提供 target；优先使用 text、resourceId、accessibilityId 等语义定位器。",
+    ...(workspaceExecution
+      ? [
+          "project.build 必须使用当前项目模块列表内的 modulePath 和 variant。project.installArtifact 必须逐字使用当前项目成功构建 APK 列表中的 buildId 与 artifactIndex；不得写入文件路径。",
+        ]
+      : ["普通测试计划禁止输出 project.build 和 project.installArtifact。"]),
   ];
 }
 
@@ -774,15 +790,48 @@ function sourceEvidenceText(project: AndroidProject): string {
     .join("\n");
 }
 
-function systemPrompt(liveUiExecution = false): string {
+type WorkspaceProjectArtifact = {
+  buildId: string;
+  artifactIndex: number;
+  fileName: string;
+};
+
+function workspaceProjectArtifacts(runs: readonly ProjectBuildRun[]): WorkspaceProjectArtifact[] {
+  return runs.flatMap((run) => {
+    if (run.status !== "succeeded") {
+      return [];
+    }
+    return run.artifactPaths.map((artifactPath, artifactIndex) => ({
+      buildId: run.id,
+      artifactIndex,
+      fileName:
+        run.artifactNames?.[artifactIndex] ?? artifactPath.split(/[\\/]/u).at(-1) ?? artifactPath,
+    }));
+  });
+}
+
+function projectArtifactKey(buildId: string, artifactIndex: number): string {
+  return `${buildId}:${artifactIndex}`;
+}
+
+function systemPrompt(liveUiExecution = false, workspaceExecution = false): string {
   return [
-    ...planPromptRules(),
-    "你是 Android 自动化测试规划助手。只生成可审阅的测试操作计划，不执行设备操作。",
+    ...planPromptRules(workspaceExecution),
+    workspaceExecution
+      ? "你是 DeviceRobot 工作区 Agent。请根据用户目标生成可直接在当前设备执行的工作区操作计划。"
+      : "你是 Android 自动化测试规划助手。只生成可审阅的测试操作计划，不执行设备操作。",
     "必须只输出 JSON 对象，格式为 {reply:string,actions:AgentAction[]}。reply 使用简体中文。",
-    "actions 至少一项、最多二十项。只能使用 app.install、app.launch、app.stop、ui.tap、ui.longPress、ui.input、ui.swipe、ui.back、ui.wait、assert.visible、assert.notVisible、assert.text、assert.activity、device.permission、device.orientation、device.screenshot。",
-    "严禁输出 adb.shell、文件路径、命令行、未在证据中出现的 resourceId、accessibilityId、页面文案或路由。证据不足时使用 ui.wait、device.screenshot 或解释限制。",
-    "仅当请求明确提供“可安装的本地 APK”时才可输出 app.install。app.install 必须是第一个动作，并且 artifactId 必须逐字使用列表中的 ID；不得猜测、编造或使用文件路径。",
-    "若已提供测试应用包名，app.launch、app.stop 和 device.permission 必须且只能使用该包名；不得从其他源码证据猜测或替换测试应用。",
+    "actions 至少一项、最多二十项。只能使用 app.install、app.uninstall、app.clearData、app.launch、app.stop、ui.tap、ui.longPress、ui.input、ui.swipe、ui.back、ui.wait、assert.visible、assert.notVisible、assert.text、assert.activity、device.permission、device.orientation、device.screenshot、adb.shell、project.build、project.installArtifact。",
+    ...(workspaceExecution
+      ? [
+          "工作区操作已获得用户授权：可执行设备侧 ADB shell 与应用生命周期操作；不得调用 Windows Shell、PowerShell、CMD 或访问任意本机文件路径。",
+          "工作区直接操作的 ui.tap 和 ui.longPress 必须使用 x/y 坐标；语义断言只能通过测试运行执行。",
+        ]
+      : [
+          "严禁输出 adb.shell、文件路径、命令行、未在证据中出现的 resourceId、accessibilityId、页面文案或路由。证据不足时使用 ui.wait、device.screenshot 或解释限制。",
+          "若已提供测试应用包名，app.launch、app.stop 和 device.permission 必须且只能使用该包名；不得从其他源码证据猜测或替换测试应用。",
+        ]),
+    "仅当请求明确提供“可安装的本地 APK”时才可输出 app.install。artifactId 必须逐字使用列表中的 ID；不得猜测、编造或使用文件路径。",
     "每个 ui.tap、ui.longPress、assert.visible、assert.notVisible、assert.text 都必须提供 target；优先 text、resourceId、accessibilityId 等语义定位器。",
     ...(liveUiExecution
       ? [
@@ -826,6 +875,7 @@ function userPrompt(
     fileName: string;
     metadata: { packageName: string };
   }[] = [],
+  projectArtifacts: readonly WorkspaceProjectArtifact[] = [],
 ): string {
   return [
     `项目：${project.name}`,
@@ -833,6 +883,13 @@ function userPrompt(
     `设备：${request.deviceSerial ?? "未指定"}`,
     `测试应用包名：${request.appId ?? "未指定"}`,
     `实时页面执行：${request.liveUiExecution === true ? "已启用" : "未启用"}`,
+    `工作区自主操作：${request.workspaceExecution === true ? "已启用" : "未启用"}`,
+    ...(request.workspaceExecution === true
+      ? [
+          "本计划会直接执行设备应用、坐标操作、截图和 ADB shell；不要使用测试断言动作。",
+          "用户已授予当前项目和当前设备的自主操作权限，无需在 reply 中要求逐步确认。",
+        ]
+      : []),
     ...(request.liveUiExecution === true
       ? [
           "本计划用于启动自主执行。执行后，Agent 会将每一步真实截图和 UI 层级发送给模型，并根据模型的实时决策完成目标。不要因当前缺少静态页面文案或控件而声称无法执行。",
@@ -845,6 +902,17 @@ function userPrompt(
           (artifact) =>
             `- artifactId: ${artifact.id} | 文件: ${artifact.fileName} | 包名: ${artifact.metadata.packageName}`,
         )),
+    ...(request.workspaceExecution !== true
+      ? []
+      : [
+          "当前项目成功构建的 APK 产物：",
+          ...(projectArtifacts.length === 0
+            ? ["- 暂无。禁止输出 project.installArtifact。"]
+            : projectArtifacts.map(
+                (artifact) =>
+                  `- buildId: ${artifact.buildId} | artifactIndex: ${artifact.artifactIndex} | 文件: ${artifact.fileName}`,
+              )),
+        ]),
     "项目模块：",
     ...project.modules.map(
       (module) =>
@@ -897,8 +965,14 @@ function runtimeUserPrompt(project: AndroidProject, request: AiRuntimeStepReques
   ].join("\n");
 }
 
-function containsRestrictedAction(action: AgentAction): boolean {
-  return action.action === "adb.shell";
+function containsRestrictedTestAction(action: AgentAction): boolean {
+  return (
+    action.action === "adb.shell" ||
+    action.action === "app.uninstall" ||
+    action.action === "app.clearData" ||
+    action.action === "project.build" ||
+    action.action === "project.installArtifact"
+  );
 }
 
 function installsOnlyAtPlanStart(actions: readonly AgentAction[]): boolean {
@@ -962,6 +1036,8 @@ function bindActionsToTargetApplication(
     if (
       action.action === "app.launch" ||
       action.action === "app.stop" ||
+      action.action === "app.uninstall" ||
+      action.action === "app.clearData" ||
       action.action === "device.permission"
     ) {
       return { ...action, appId };
@@ -973,6 +1049,7 @@ function bindActionsToTargetApplication(
 export class LocalAiPlanService implements AiPlanService {
   readonly #projectStore: ProjectStore;
   readonly #apkArtifactService: ApkArtifactService | undefined;
+  readonly #projectBuildService: ProjectBuildService | undefined;
   readonly #configurationStore: AiConfigurationStore | undefined;
   readonly #secretProtector: AiSecretProtector | undefined;
   readonly #planStore: AiPlanStore | undefined;
@@ -987,6 +1064,7 @@ export class LocalAiPlanService implements AiPlanService {
   public constructor(options: LocalAiPlanServiceOptions) {
     this.#projectStore = options.projectStore;
     this.#apkArtifactService = options.apkArtifactService;
+    this.#projectBuildService = options.projectBuildService;
     this.#modelProvider = options.modelProvider ?? new OpenAiCompatiblePlanProvider();
     this.#configurationStore = options.configurationStore;
     this.#secretProtector = options.secretProtector;
@@ -1196,15 +1274,37 @@ export class LocalAiPlanService implements AiPlanService {
         ? []
         : (this.#conversationStore?.listMessages(conversation.id) ?? []);
 
+    const projectArtifacts =
+      request.workspaceExecution === true && this.#projectBuildService !== undefined
+        ? workspaceProjectArtifacts((await this.#projectBuildService.listRuns(project.id)).runs)
+        : [];
     const modelPayload = await this.#modelProvider.createPlan({
-      system: systemPrompt(request.liveUiExecution === true),
-      user: userPrompt(project, request, history, installableArtifacts),
+      system: systemPrompt(request.liveUiExecution === true, request.workspaceExecution === true),
+      user: userPrompt(project, request, history, installableArtifacts, projectArtifacts),
     });
-    if (modelPayload.actions.some(containsRestrictedAction)) {
-      throw new AiPlanError("模型计划包含不允许的原始 ADB 命令。", 422);
+    if (
+      request.workspaceExecution !== true &&
+      modelPayload.actions.some(containsRestrictedTestAction)
+    ) {
+      throw new AiPlanError("模型计划包含仅工作区模式支持的操作。", 422);
     }
-    if (!installsOnlyAtPlanStart(modelPayload.actions)) {
+    if (request.workspaceExecution !== true && !installsOnlyAtPlanStart(modelPayload.actions)) {
       throw new AiPlanError("APK 安装必须位于测试计划的开头。", 422);
+    }
+    const projectArtifactKeys = new Set(
+      projectArtifacts.map((artifact) =>
+        projectArtifactKey(artifact.buildId, artifact.artifactIndex),
+      ),
+    );
+    if (
+      request.workspaceExecution === true &&
+      modelPayload.actions.some(
+        (action) =>
+          action.action === "project.installArtifact" &&
+          !projectArtifactKeys.has(projectArtifactKey(action.buildId, action.artifactIndex)),
+      )
+    ) {
+      throw new AiPlanError("模型计划引用了当前项目不可用的构建 APK。", 422);
     }
 
     const provisionalPlan = actionPlanSchema.parse({
@@ -1215,8 +1315,12 @@ export class LocalAiPlanService implements AiPlanService {
       ...(request.liveUiExecution === true
         ? { liveUiExecution: { goal: request.goal.trim(), maxSteps: 20 } }
         : {}),
-      actions: bindActionsToTargetApplication(modelPayload.actions, request.appId),
-      requiresApproval: true,
+      ...(request.workspaceExecution === true ? { workspaceExecution: true } : {}),
+      actions: bindActionsToTargetApplication(
+        modelPayload.actions,
+        request.workspaceExecution === true ? undefined : request.appId,
+      ),
+      requiresApproval: request.workspaceExecution !== true,
     });
     const policyDecision = evaluateActionPlanPolicy(provisionalPlan, "standard", {
       stagedArtifactIds: new Set(artifactIds),
@@ -1227,14 +1331,20 @@ export class LocalAiPlanService implements AiPlanService {
     const warnings = policyDecision.actionDecisions
       .filter((decision) => decision.requiresApproval)
       .map((decision) => decision.reason);
-    const plan = actionPlanSchema.parse({ ...provisionalPlan, requiresApproval: true });
+    const plan = actionPlanSchema.parse({
+      ...provisionalPlan,
+      requiresApproval: request.workspaceExecution !== true,
+    });
     const response = aiPlanResponseSchema.parse({
       reply: modelPayload.reply,
       plan,
       policy: {
         allowed: true,
-        requiresApproval: true,
-        reason: "AI 生成的计划仅供预览，执行前必须获得明确确认。",
+        requiresApproval: plan.requiresApproval,
+        reason:
+          request.workspaceExecution === true
+            ? "工作区操作已按当前会话授权执行。"
+            : "AI 生成的计划仅供预览，执行前必须获得明确确认。",
         warnings,
       },
       context: contextFor(project),

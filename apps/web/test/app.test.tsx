@@ -1362,8 +1362,6 @@ describe("DeviceRobot Web UI", () => {
 
     await vi.waitFor(() => expect(getAiPlanRequests()).toBe(1));
     expect(getLastAiPlanRequest()).toMatchObject({ workspaceExecution: true });
-    await user.click(screen.getByRole("button", { name: "执行计划" }));
-
     await vi.waitFor(() => expect(getWorkspaceExecutionRequests()).toBe(1));
     expect(getLastWorkspaceExecutionRequest()).toMatchObject({
       deviceSerial: "8B3Y0THX0",

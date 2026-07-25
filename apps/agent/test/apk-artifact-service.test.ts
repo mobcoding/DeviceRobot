@@ -127,6 +127,15 @@ describe("APK artifact service", () => {
     expect(auditStore.record).toHaveBeenCalledWith(
       expect.objectContaining({ serial: "device-1", success: true }),
     );
+    await expect(service.find(artifact.id)).resolves.toMatchObject({ id: artifact.id });
+
+    await expect(
+      service.install("device-1", artifact.id, {
+        replaceExisting: true,
+        allowTestPackage: true,
+        uninstallExisting: false,
+      }),
+    ).resolves.toMatchObject({ status: "installed", artifactId: artifact.id });
   });
 
   it("rejects a file without an APK ZIP signature", async () => {

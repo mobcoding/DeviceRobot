@@ -10,6 +10,10 @@ import type { DeviceDiscoveryService } from "./adb-device-service.js";
 
 const execFileAsync = promisify(execFile);
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+// Android can transiently terminate uiautomator while an app has just launched
+// or UiAutomator2 is initialising. Keep the window long enough to recover.
+const UI_TREE_CAPTURE_ATTEMPTS = 10;
+const UI_TREE_CAPTURE_RETRY_DELAY_MS = 500;
 const inputTextSpecialCharacters = new Set([
   "\\",
   "'",
@@ -67,6 +71,12 @@ export type AdbDeviceControlServiceOptions = {
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function sleep(milliseconds: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
 }
 
 function createDefaultRunner(executable: string): AdbCommandRunner {
@@ -235,23 +245,31 @@ export class AdbDeviceControlService implements DeviceControlService {
   public async readUiTree(serial: string): Promise<DeviceUiTreeResponse> {
     await this.#requireReadyDevice(serial);
 
-    try {
-      const output = await this.#runner.runText([
-        "-s",
-        serial,
-        "exec-out",
-        "uiautomator",
-        "dump",
-        "/dev/tty",
-      ]);
-      return {
-        serial,
-        xml: trimUiXml(output),
-        capturedAt: new Date().toISOString(),
-      };
-    } catch (error) {
-      throw this.#asControlError(error, "UI hierarchy capture failed");
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= UI_TREE_CAPTURE_ATTEMPTS; attempt += 1) {
+      try {
+        const output = await this.#runner.runText([
+          "-s",
+          serial,
+          "exec-out",
+          "uiautomator",
+          "dump",
+          "/dev/tty",
+        ]);
+        return {
+          serial,
+          xml: trimUiXml(output),
+          capturedAt: new Date().toISOString(),
+        };
+      } catch (error) {
+        lastError = error;
+        if (attempt < UI_TREE_CAPTURE_ATTEMPTS) {
+          await sleep(UI_TREE_CAPTURE_RETRY_DELAY_MS);
+        }
+      }
     }
+
+    throw this.#asControlError(lastError, "UI hierarchy capture failed");
   }
 
   public async execute(

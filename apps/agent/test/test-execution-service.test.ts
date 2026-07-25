@@ -42,7 +42,7 @@ async function waitForFinished(
   service: LocalTestExecutionService,
   runId: string,
 ): Promise<TestExecutionRun> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
     const run = await service.find(runId);
     if (run.status !== "running") {
       return run;
@@ -134,6 +134,7 @@ describe("test execution service", () => {
       } as never,
       transport: transport(),
       applicationDataService: {
+        uninstall: async () => {},
         clear,
         setPermission: async () => {},
       } satisfies ApplicationDataService,
@@ -233,6 +234,7 @@ describe("test execution service", () => {
         });
       })(),
       applicationDataService: {
+        uninstall: async () => {},
         clear: async () => {},
         setPermission: async () => {},
       },
@@ -309,6 +311,7 @@ describe("test execution service", () => {
       } as never,
       transport: transport(),
       applicationDataService: {
+        uninstall: async () => {},
         clear: async () => {
           order.push("clear");
         },
@@ -355,6 +358,119 @@ describe("test execution service", () => {
     database.close();
   });
 
+  it("runs live UI lifecycle preparation in uninstall-install order", async () => {
+    const root = createTemporaryRoot();
+    const paths = resolveAgentPaths(root);
+    const database = openDatabase(paths.database);
+    const order: string[] = [];
+    const service = new LocalTestExecutionService({
+      paths,
+      store: new SqliteTestExecutionStore(database.sqlite),
+      projectStore: projectStore(),
+      deviceService: readyDeviceService(),
+      deviceControlService: {
+        captureScreenshot: async () => pngScreenshot(1_080, 2_160),
+        readUiTree: async () => ({
+          serial: "device-1",
+          xml: '<hierarchy><node text="主页" bounds="[20,400][240,480]" /></hierarchy>',
+          capturedAt: new Date().toISOString(),
+        }),
+        execute: async (_serial, action) => {
+          if (action.action === "device.unlock") {
+            order.push("unlock");
+          }
+          return {
+            startedAt: new Date().toISOString(),
+            finishedAt: new Date().toISOString(),
+          };
+        },
+      } satisfies DeviceControlService,
+      aiPlanService: {
+        decideRuntimeStep: async () => ({
+          status: "completed" as const,
+          assertion: { action: "assert.visible" as const, target: { text: "主页" } },
+          reason: "当前页面已显示主页面标识。",
+        }),
+      } as never,
+      apkArtifactService: {
+        install: async () => {
+          order.push("install");
+          return {
+            status: "installed" as const,
+            serial: "device-1",
+            artifactId: "223e4567-e89b-12d3-a456-426614174000",
+            packageName: "com.example.app",
+            startedAt: new Date().toISOString(),
+            finishedAt: new Date().toISOString(),
+          };
+        },
+      } as never,
+      appiumRuntimeService: {
+        start: async () => {
+          order.push("appium");
+          return { server: { state: "running" } };
+        },
+      } as never,
+      transport: transport((path) => {
+        if (path === "/session") {
+          return { value: { sessionId: "session-1" } };
+        }
+        if (path.endsWith("/element")) {
+          return { value: { ELEMENT: "element-1" } };
+        }
+        if (path.endsWith("/displayed")) {
+          return { value: true };
+        }
+        return undefined;
+      }),
+      applicationDataService: {
+        uninstall: async () => {
+          order.push("uninstall");
+        },
+        clear: async () => {
+          order.push("clear");
+        },
+        setPermission: async () => {},
+      },
+    });
+
+    const started = await service.start({
+      plan: {
+        id: "plan-live-ui-reinstall",
+        projectId: project().id,
+        liveUiExecution: { goal: "从启动页进入主页面", maxSteps: 1 },
+        actions: [
+          { action: "device.unlock" },
+          { action: "app.uninstall", appId: "com.example.app", keepData: false },
+          {
+            action: "app.install",
+            artifactId: "223e4567-e89b-12d3-a456-426614174000",
+            replaceExisting: true,
+            allowTestPackage: true,
+          },
+        ],
+        requiresApproval: true,
+      },
+      deviceSerial: "device-1",
+      appId: "com.example.app",
+      approved: true,
+    });
+    const finished = await waitForFinished(service, started.id);
+
+    expect(finished).toMatchObject({
+      status: "succeeded",
+      steps: [
+        { action: { action: "device.unlock" }, status: "succeeded" },
+        { action: { action: "app.uninstall" }, status: "succeeded" },
+        { action: { action: "app.install" }, status: "succeeded" },
+        { action: { action: "assert.visible" }, status: "succeeded" },
+      ],
+    });
+    expect(order).toEqual(["unlock", "uninstall", "install", "appium", "clear"]);
+    await service.dispose();
+    database.close();
+  });
+
   it("uses the live UI to execute AI-selected steps before asserting the target result", async () => {
     const root = createTemporaryRoot();
     const paths = resolveAgentPaths(root);
@@ -372,6 +488,11 @@ describe("test execution service", () => {
         reason: "当前页面已出现首页标题。",
       });
     const screenshot = pngScreenshot(1_080, 2_160);
+    const readUiTree = vi.fn(async () => ({
+      serial: "device-1",
+      xml: '<hierarchy><node text="继续" resource-id="com.example.app:id/continue" class="android.widget.Button" clickable="true" enabled="true" bounds="[20,400][240,480]" /></hierarchy>',
+      capturedAt: new Date().toISOString(),
+    }));
     const service = new LocalTestExecutionService({
       paths,
       store: new SqliteTestExecutionStore(database.sqlite),
@@ -379,11 +500,7 @@ describe("test execution service", () => {
       deviceService: readyDeviceService(),
       deviceControlService: {
         captureScreenshot: async () => screenshot,
-        readUiTree: async () => ({
-          serial: "device-1",
-          xml: '<hierarchy><node text="继续" resource-id="com.example.app:id/continue" class="android.widget.Button" clickable="true" enabled="true" bounds="[20,400][240,480]" /></hierarchy>',
-          capturedAt: new Date().toISOString(),
-        }),
+        readUiTree,
         execute: async () => ({
           startedAt: new Date().toISOString(),
           finishedAt: new Date().toISOString(),
@@ -397,6 +514,12 @@ describe("test execution service", () => {
         if (path === "/session") {
           return { value: { sessionId: "session-1" } };
         }
+        if (path.endsWith("/source")) {
+          return {
+            value:
+              '<hierarchy><android.widget.Button text="继续" resource-id="com.example.app:id/continue" clickable="true" enabled="true" bounds="[20,400][240,480]" /></hierarchy>',
+          };
+        }
         if (path.endsWith("/element")) {
           return { value: { "element-6066-11e4-a52e-4f735466cecf": "element-1" } };
         }
@@ -406,6 +529,7 @@ describe("test execution service", () => {
         return undefined;
       }),
       applicationDataService: {
+        uninstall: async () => {},
         clear: async () => {},
         setPermission: async () => {},
       },
@@ -442,7 +566,169 @@ describe("test execution service", () => {
         dataUrl: expect.stringMatching(/^data:image\/png;base64,/u),
       },
     });
+    expect(readUiTree).not.toHaveBeenCalled();
     expect(finished.steps[0]).toMatchObject({ message: "继续按钮是当前页面唯一可见的导航入口。" });
+    await service.dispose();
+    database.close();
+  });
+
+  it("waits once and retries when the AI identifies a transient Splash startup page", async () => {
+    const root = createTemporaryRoot();
+    const paths = resolveAgentPaths(root);
+    const database = openDatabase(paths.database);
+    const decideRuntimeStep = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: "blocked",
+        reason: "当前处于 SplashActivity，尚未出现可交互控件。",
+      })
+      .mockResolvedValueOnce({
+        status: "completed",
+        assertion: { action: "assert.activity", expected: "MainActivity" },
+        reason: "当前页面已显示首页。",
+      });
+    const service = new LocalTestExecutionService({
+      paths,
+      store: new SqliteTestExecutionStore(database.sqlite),
+      projectStore: projectStore(),
+      deviceService: readyDeviceService(),
+      deviceControlService: {
+        captureScreenshot: async () => pngScreenshot(1_080, 2_160),
+        readUiTree: async () => ({
+          serial: "device-1",
+          xml: '<hierarchy><node text="首页" class="android.widget.TextView" bounds="[20,400][240,480]" /></hierarchy>',
+          capturedAt: new Date().toISOString(),
+        }),
+        execute: async () => ({
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+        }),
+      } satisfies DeviceControlService,
+      aiPlanService: { decideRuntimeStep } as never,
+      appiumRuntimeService: {
+        start: async () => ({ server: { state: "running" } }),
+      } as never,
+      transport: transport((path) => {
+        if (path === "/session") {
+          return { value: { sessionId: "session-1" } };
+        }
+        if (path.endsWith("/element")) {
+          return { value: { ELEMENT: "element-1" } };
+        }
+        if (path.endsWith("/appium/device/current_activity")) {
+          return { value: "com.example.MainActivity" };
+        }
+        if (path.endsWith("/displayed")) {
+          return { value: true };
+        }
+        return undefined;
+      }),
+      applicationDataService: {
+        uninstall: async () => {},
+        clear: async () => {},
+        setPermission: async () => {},
+      },
+    });
+
+    const started = await service.start({
+      plan: {
+        id: "plan-live-ui-startup-recovery",
+        projectId: project().id,
+        liveUiExecution: { goal: "验证首次启动进入首页", maxSteps: 3 },
+        actions: [{ action: "app.launch", appId: "com.example.app" }],
+        requiresApproval: true,
+      },
+      deviceSerial: "device-1",
+      appId: "com.example.app",
+      approved: true,
+    });
+    const recovered = await waitForFinished(service, started.id);
+
+    expect(recovered).toMatchObject({
+      status: "succeeded",
+      steps: [
+        { action: { action: "ui.wait", durationMs: 1_200 }, status: "succeeded" },
+        { action: { action: "assert.activity", expected: "MainActivity" }, status: "succeeded" },
+      ],
+    });
+    expect(decideRuntimeStep).toHaveBeenCalledTimes(2);
+    await service.dispose();
+    database.close();
+  });
+
+  it("asks the runtime model to decide again when its locator is absent from the real UI", async () => {
+    const root = createTemporaryRoot();
+    const paths = resolveAgentPaths(root);
+    const database = openDatabase(paths.database);
+    const decideRuntimeStep = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: "continue",
+        action: { action: "ui.tap", target: { resourceId: "com.example.app:id/missing" } },
+        reason: "点击不存在的控件。",
+      })
+      .mockResolvedValueOnce({
+        status: "completed",
+        assertion: { action: "assert.activity", expected: "MainActivity" },
+        reason: "已进入主页面。",
+      });
+    const service = new LocalTestExecutionService({
+      paths,
+      store: new SqliteTestExecutionStore(database.sqlite),
+      projectStore: projectStore(),
+      deviceService: readyDeviceService(),
+      deviceControlService: {
+        captureScreenshot: async () => pngScreenshot(1_080, 2_160),
+        readUiTree: async () => ({
+          serial: "device-1",
+          xml: '<hierarchy><node text="继续" resource-id="com.example.app:id/continue" clickable="true" bounds="[20,400][240,480]" /></hierarchy>',
+          capturedAt: new Date().toISOString(),
+        }),
+        execute: async () => ({
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+        }),
+      } satisfies DeviceControlService,
+      aiPlanService: { decideRuntimeStep } as never,
+      appiumRuntimeService: { start: async () => ({ server: { state: "running" } }) } as never,
+      transport: transport((path) => {
+        if (path === "/session") {
+          return { value: { sessionId: "session-1" } };
+        }
+        if (path.endsWith("/appium/device/current_activity")) {
+          return { value: "com.example.MainActivity" };
+        }
+        return undefined;
+      }),
+      applicationDataService: {
+        uninstall: async () => {},
+        clear: async () => {},
+        setPermission: async () => {},
+      },
+    });
+
+    const started = await service.start({
+      plan: {
+        id: "plan-live-ui-invalid-locator",
+        projectId: project().id,
+        liveUiExecution: { goal: "进入主页面", maxSteps: 3 },
+        actions: [{ action: "app.launch", appId: "com.example.app" }],
+        requiresApproval: true,
+      },
+      deviceSerial: "device-1",
+      appId: "com.example.app",
+      approved: true,
+    });
+    const finished = await waitForFinished(service, started.id);
+
+    expect(finished).toMatchObject({
+      status: "succeeded",
+      steps: [{ action: { action: "assert.activity", expected: "MainActivity" } }],
+    });
+    expect(decideRuntimeStep).toHaveBeenCalledTimes(2);
+    expect(decideRuntimeStep.mock.calls[1]?.[0]?.runtimeHistory).toEqual(
+      expect.arrayContaining([expect.stringMatching(/ui\.tap/u)]),
+    );
     await service.dispose();
     database.close();
   });

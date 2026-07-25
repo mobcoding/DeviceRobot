@@ -405,6 +405,156 @@ describe("AI action plan service", () => {
     expect(provider.user).toContain(`artifactId: ${artifactId}`);
   });
 
+  it("allows live UI plans to uninstall and reinstall the selected test application", async () => {
+    const project = createProject();
+    const artifactId = "223e4567-e89b-12d3-a456-426614174000";
+    const service = new LocalAiPlanService({
+      projectStore: new InMemoryProjectStore(project),
+      modelProvider: new FakeModelProvider({
+        reply: "先卸载旧版本，再安装已暂存 APK，随后由实时页面执行器完成启动流程。",
+        actions: [
+          { action: "app.uninstall", appId: "com.unrelated.application", keepData: false },
+          {
+            action: "app.install",
+            artifactId,
+            replaceExisting: true,
+            allowTestPackage: true,
+          },
+          { action: "ui.wait", durationMs: 500 },
+        ],
+      }),
+      apkArtifactService: {
+        find: async () => ({
+          id: artifactId,
+          fileName: "sample.apk",
+          sizeBytes: 128,
+          sha256: "a".repeat(64),
+          uploadedAt: "2026-07-25T10:00:00.000Z",
+          metadata: { packageName: "com.example.app", versionCode: "1" },
+        }),
+      } as never,
+    });
+
+    await expect(
+      service.generate({
+        projectId: project.id,
+        appId: "com.example.app",
+        installableArtifactIds: [artifactId],
+        liveUiExecution: true,
+        goal: "每轮测试前卸载重装并验证启动流程。",
+      }),
+    ).resolves.toMatchObject({
+      plan: {
+        liveUiExecution: expect.any(Object),
+        actions: expect.arrayContaining([
+          expect.objectContaining({ action: "app.uninstall", appId: "com.example.app" }),
+          expect.objectContaining({ action: "app.install", artifactId }),
+        ]),
+      },
+    });
+  });
+
+  it("keeps a wake, reinstall, and startup-flow request in live UI execution mode", async () => {
+    const project = createProject();
+    const artifactId = "223e4567-e89b-12d3-a456-426614174000";
+    const service = new LocalAiPlanService({
+      projectStore: new InMemoryProjectStore(project),
+      modelProvider: new FakeModelProvider({
+        reply: "准备完成后执行真实启动流程。",
+        actions: [
+          { action: "device.unlock" },
+          { action: "app.uninstall", appId: "com.example.app", keepData: false },
+          {
+            action: "app.install",
+            artifactId,
+            replaceExisting: true,
+            allowTestPackage: true,
+          },
+          { action: "ui.wait", durationMs: 500 },
+        ],
+      }),
+      apkArtifactService: {
+        find: async () => ({
+          id: artifactId,
+          fileName: "sample.apk",
+          sizeBytes: 128,
+          sha256: "a".repeat(64),
+          uploadedAt: "2026-07-25T10:00:00.000Z",
+          metadata: { packageName: "com.example.app", versionCode: "1" },
+        }),
+      } as never,
+    });
+
+    await expect(
+      service.generate({
+        projectId: project.id,
+        appId: "com.example.app",
+        installableArtifactIds: [artifactId],
+        liveUiExecution: true,
+        goal: "唤醒设备后每轮卸载重装，并测试首次启动页面流程到主页面。",
+      }),
+    ).resolves.toMatchObject({
+      plan: {
+        liveUiExecution: expect.any(Object),
+        actions: expect.arrayContaining([
+          expect.objectContaining({ action: "device.unlock" }),
+          expect.objectContaining({ action: "app.uninstall", appId: "com.example.app" }),
+          expect.objectContaining({ action: "app.install", artifactId }),
+        ]),
+      },
+    });
+  });
+
+  it("normalizes live UI preparation actions before the page flow", async () => {
+    const project = createProject();
+    const artifactId = "223e4567-e89b-12d3-a456-426614174000";
+    const service = new LocalAiPlanService({
+      projectStore: new InMemoryProjectStore(project),
+      modelProvider: new FakeModelProvider({
+        reply: "准备测试。",
+        actions: [
+          { action: "ui.wait", durationMs: 500 },
+          {
+            action: "app.install",
+            artifactId,
+            replaceExisting: true,
+            allowTestPackage: true,
+          },
+          { action: "app.uninstall", appId: "com.example.app", keepData: false },
+          { action: "device.unlock" },
+        ],
+      }),
+      apkArtifactService: {
+        find: async () => ({
+          id: artifactId,
+          fileName: "sample.apk",
+          sizeBytes: 128,
+          sha256: "a".repeat(64),
+          uploadedAt: "2026-07-25T10:00:00.000Z",
+          metadata: { packageName: "com.example.app", versionCode: "1" },
+        }),
+      } as never,
+    });
+
+    const response = await service.generate({
+      projectId: project.id,
+      appId: "com.example.app",
+      installableArtifactIds: [artifactId],
+      liveUiExecution: true,
+      goal: "重新安装后验证启动流程。",
+    });
+
+    expect(response.plan.actions.map((action) => action.action)).toEqual([
+      "device.unlock",
+      "app.uninstall",
+      "app.install",
+      "ui.wait",
+    ]);
+    expect(response.policy.warnings).toContain(
+      "已将自主测试的准备动作归位为唤醒、卸载、安装、清数据后再执行页面流程。",
+    );
+  });
+
   it("rejects a plan that places APK installation after another operation", async () => {
     const project = createProject();
     const artifactId = "223e4567-e89b-12d3-a456-426614174000";
@@ -937,6 +1087,65 @@ describe("AI action plan service", () => {
       expect(
         String(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).messages[1].content),
       ).toContain("actions.0");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("repairs a runtime decision whose action was returned as a string", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => {
+      void _url;
+      void _init;
+      if (fetchMock.mock.calls.length === 1) {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    '{"status":"continue","action":"ui.tap","target":{"text":"Next"},"reason":"点击下一步"}',
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content:
+                  '{"status":"continue","action":{"action":"ui.tap","target":{"text":"Next"}},"reason":"当前语言页显示 Next，点击后继续验证主页面。"}',
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new OpenAiCompatiblePlanProvider({
+      baseUrl: "https://model.example/v1",
+      apiKey: "test-key",
+      model: "test-model",
+    });
+
+    try {
+      await expect(
+        provider.createRuntimeDecision({
+          system: "运行时页面决策",
+          user: "当前 UI 树包含 Next 按钮。",
+        }),
+      ).resolves.toMatchObject({
+        status: "continue",
+        action: { action: "ui.tap", target: { text: "Next" } },
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(
+        String(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).messages[0].content),
+      ).toContain("continue.action 必须是完整的动作对象");
     } finally {
       vi.unstubAllGlobals();
     }

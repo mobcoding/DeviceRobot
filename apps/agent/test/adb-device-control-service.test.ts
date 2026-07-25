@@ -165,6 +165,45 @@ describe("ADB device control", () => {
     ]);
   });
 
+  it("retries a transient incomplete UI hierarchy before returning XML", async () => {
+    const runner = createRunner({
+      runText: vi
+        .fn()
+        .mockResolvedValueOnce("UI dump complete")
+        .mockResolvedValueOnce('<hierarchy rotation="0"></hierarchy>'),
+    });
+    const service = new AdbDeviceControlService({
+      deviceService: createDiscoveryService(),
+      runner,
+    });
+
+    await expect(service.readUiTree("device-1")).resolves.toMatchObject({
+      xml: '<hierarchy rotation="0"></hierarchy>',
+    });
+    expect(runner.runText).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps retrying while Android transiently reports that uiautomator was killed", async () => {
+    const runner = createRunner({
+      runText: vi
+        .fn()
+        .mockResolvedValueOnce("Killed")
+        .mockResolvedValueOnce("Killed")
+        .mockResolvedValueOnce("Killed")
+        .mockResolvedValueOnce("Killed")
+        .mockResolvedValueOnce('<hierarchy rotation="0"></hierarchy>'),
+    });
+    const service = new AdbDeviceControlService({
+      deviceService: createDiscoveryService(),
+      runner,
+    });
+
+    await expect(service.readUiTree("device-1")).resolves.toMatchObject({
+      xml: '<hierarchy rotation="0"></hierarchy>',
+    });
+    expect(runner.runText).toHaveBeenCalledTimes(5);
+  });
+
   it("refuses control when the requested device is offline", async () => {
     const runner = createRunner();
     const service = new AdbDeviceControlService({

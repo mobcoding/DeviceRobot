@@ -525,7 +525,7 @@ function isRuntimeCompletionAssertion(action: AgentAction): boolean {
   );
 }
 
-function planPromptRules(workspaceExecution = false): string[] {
+function planPromptRules(workspaceExecution = false, liveUiExecution = false): string[] {
   return [
     "必须只输出 JSON 对象，格式为 {reply:string,actions:AgentAction[]}。reply 使用简体中文。",
     "actions 至少一项、最多二十项。只能使用 app.install、app.uninstall、app.clearData、app.launch、app.stop、ui.tap、ui.longPress、ui.input、ui.swipe、ui.back、ui.wait、assert.visible、assert.notVisible、assert.text、assert.activity、device.permission、device.orientation、device.unlock、device.screenshot、adb.shell、project.build、project.installArtifact。",
@@ -539,10 +539,15 @@ function planPromptRules(workspaceExecution = false): string[] {
           "device.unlock 仅模拟唤醒与滑动解锁手势；安全锁屏需要用户在设备上自行完成凭据验证。",
           "仅当请求明确提供“可安装的本地 APK”时才可输出 app.install；artifactId 必须逐字使用列表中的 ID，不得猜测、编造或使用文件路径。",
         ]
-      : [
-          "严禁输出 adb.shell、文件路径、命令行、未在证据中出现的 resourceId、accessibilityId、页面文案或路由。证据不足时使用 ui.wait、device.screenshot 或在 reply 中说明限制。",
-          "仅当请求明确提供“可安装的本地 APK”时才可输出 app.install。app.install 必须是第一个动作，并且 artifactId 必须逐字使用列表中的 ID；不得猜测、编造或使用文件路径。",
-        ]),
+      : liveUiExecution
+        ? [
+            "严禁输出 adb.shell、文件路径、命令行、未在证据中出现的 resourceId、accessibilityId、页面文案或路由。证据不足时使用 ui.wait、device.screenshot 或在 reply 中说明限制。",
+            "自主页面测试允许在计划开头执行 device.unlock、以及以当前测试应用包名执行 app.uninstall、app.clearData、app.install 作为准备步骤；device.unlock 只会尝试无凭据唤醒和滑动解锁，安全锁屏需要人工认证。如目标要求卸载重装，顺序必须是 app.uninstall 后紧接 app.install。artifactId 必须逐字使用已提供的 ID。",
+          ]
+        : [
+            "严禁输出 adb.shell、文件路径、命令行、未在证据中出现的 resourceId、accessibilityId、页面文案或路由。证据不足时使用 ui.wait、device.screenshot 或在 reply 中说明限制。",
+            "仅当请求明确提供“可安装的本地 APK”时才可输出 app.install。app.install 必须是第一个动作，并且 artifactId 必须逐字使用列表中的 ID；不得猜测、编造或使用文件路径。",
+          ]),
     "每个 ui.tap、ui.longPress、assert.visible、assert.notVisible、assert.text 都必须提供 target；优先使用 text、resourceId、accessibilityId 等语义定位器。",
     ...(workspaceExecution
       ? [
@@ -567,6 +572,34 @@ function repairUserPrompt(
 ): string {
   return [
     "原始任务上下文：",
+    userPromptText,
+    "程序校验反馈：",
+    validationFeedback,
+    "需要修正的模型草稿：",
+    invalidContent.slice(0, 16_000),
+  ].join("\n");
+}
+
+function runtimeRepairPrompt(): string {
+  return [
+    "你是 Android 自动化测试运行时页面决策的 JSON 修复器。",
+    "只输出一个 JSON 对象，不得输出 Markdown、解释或其他文本。",
+    "可用且唯一的结构为以下三种之一：",
+    '{"status":"continue","action":{"action":"ui.tap","target":{"resourceId":"当前 UI 树中真实存在的 ID"}},"reason":"简体中文原因"}',
+    '{"status":"completed","assertion":{"action":"assert.activity","expected":"已观察到的目标 Activity"},"reason":"简体中文成功依据"}',
+    '{"status":"blocked","reason":"简体中文阻塞原因"}',
+    "continue.action 必须是完整的动作对象，不能是字符串；completed.assertion 必须是完整的断言对象。",
+    "只能使用当前 UI 树、截图和原始上下文里真实存在的控件、文案、Activity 或坐标；不得编造页面信息。",
+  ].join("\n");
+}
+
+function runtimeRepairUserPrompt(
+  userPromptText: string,
+  invalidContent: string,
+  validationFeedback: string,
+): string {
+  return [
+    "原始实时页面上下文：",
     userPromptText,
     "程序校验反馈：",
     validationFeedback,
@@ -734,7 +767,30 @@ export class OpenAiCompatiblePlanProvider implements AiPlanModelProvider {
       MODEL_TIMEOUT_MS,
       "请求模型",
     );
-    return parseRuntimeDecision(extractContent(payload));
+    const configuration: CompleteOpenAiCompatibleConfiguration = {
+      baseUrl: this.#configuration.baseUrl,
+      apiKey: this.#configuration.apiKey,
+      model: this.#configuration.model,
+    };
+    let candidateContent = extractContent(payload);
+    for (let repairAttempt = 0; repairAttempt < 3; repairAttempt += 1) {
+      try {
+        return parseRuntimeDecision(candidateContent);
+      } catch (error) {
+        if (!(error instanceof AiPlanError) || error.statusCode !== 422 || repairAttempt === 2) {
+          throw error;
+        }
+        const repairedPayload = await requestStructuredPlan(configuration, [
+          { role: "system", content: runtimeRepairPrompt() },
+          {
+            role: "user",
+            content: runtimeRepairUserPrompt(input.user, candidateContent, error.message),
+          },
+        ]);
+        candidateContent = extractContent(repairedPayload);
+      }
+    }
+    throw new AiPlanError("模型未返回可用的实时页面决策。", 422);
   }
 
   public async testConnection(): Promise<void> {
@@ -832,6 +888,13 @@ function requestsDeviceUnlock(goal: string): boolean {
   );
 }
 
+function requestsLiveUiTestFlow(request: GenerateAiPlanRequest): boolean {
+  return (
+    request.liveUiExecution === true &&
+    /测试|test|页面|流程|启动|运行|轮次|每轮|验证|源码/iu.test(request.goal)
+  );
+}
+
 function deviceUnlockPlan(request: GenerateAiPlanRequest): ModelPlanPayload | undefined {
   if (request.workspaceExecution !== true || !requestsDeviceUnlock(request.goal)) {
     return undefined;
@@ -871,7 +934,7 @@ function currentProjectArtifactInstallPlan(
 
 function systemPrompt(liveUiExecution = false, workspaceExecution = false): string {
   return [
-    ...planPromptRules(workspaceExecution),
+    ...planPromptRules(workspaceExecution, liveUiExecution),
     workspaceExecution
       ? "你是 DeviceRobot 工作区 Agent。请根据用户目标生成可直接在当前设备执行的工作区操作计划。"
       : "你是 Android 自动化测试规划助手。只生成可审阅的测试操作计划，不执行设备操作。",
@@ -995,6 +1058,7 @@ function runtimeSystemPrompt(): string {
     "ui.tap、ui.longPress、assert.visible、assert.notVisible、assert.text 的 target 优先使用当前 UI 树中的 text、resourceId、accessibilityId、className；当 UI 树缺少语义但截图清晰可见时，可使用截图对应的 x/y 坐标。",
     "禁止 app.install、adb.shell、任何权限修改、应用启动/停止、文件路径、命令行，以及输入账号密码、验证码、密钥或其他敏感数据。",
     "对于“检索启动页面顺序”等目标，先记录当前页面特征，再按真实引导或入口推进；reason 必须写明当前观察到的页面或状态，便于报告还原页面顺序。",
+    "若当前是 Splash 或启动加载页，尚未出现可交互控件时，不得返回 blocked；返回 continue，并使用 {\"action\":\"ui.wait\",\"durationMs\":1000} 等待页面自动跳转后重新识别。",
     "会话会提供此前已执行的动作与观察。利用这些历史持续补全页面顺序；完成时在 reason 中给出简洁的页面顺序结论和最终页面依据。",
     "不要为了凑步骤而操作无关控件。仅在截图和 UI 树都无法识别可继续路径时返回 blocked。",
   ].join("\n");
@@ -1021,29 +1085,70 @@ function runtimeUserPrompt(project: AndroidProject, request: AiRuntimeStepReques
   ].join("\n");
 }
 
-function containsRestrictedTestAction(action: AgentAction): boolean {
+function containsRestrictedTestAction(
+  action: AgentAction,
+  allowsLifecyclePreparation = false,
+): boolean {
   return (
     action.action === "adb.shell" ||
-    action.action === "app.uninstall" ||
-    action.action === "app.clearData" ||
-    action.action === "device.unlock" ||
+    (!allowsLifecyclePreparation &&
+      (action.action === "app.uninstall" ||
+        action.action === "app.clearData" ||
+        action.action === "device.unlock")) ||
     action.action === "project.build" ||
     action.action === "project.installArtifact"
   );
 }
 
-function installsOnlyAtPlanStart(actions: readonly AgentAction[]): boolean {
-  let reachedNonInstallAction = false;
+function preparationActionsAreOrdered(
+  actions: readonly AgentAction[],
+  allowsLifecyclePreparation = false,
+): boolean {
+  let reachedNonPreparationAction = false;
+  let installedDuringPreparation = false;
   for (const action of actions) {
-    if (action.action === "app.install") {
-      if (reachedNonInstallAction) {
+    const isPreparationAction =
+      action.action === "device.unlock" ||
+      action.action === "app.install" ||
+      (allowsLifecyclePreparation &&
+        (action.action === "app.uninstall" || action.action === "app.clearData"));
+    if (isPreparationAction) {
+      if (reachedNonPreparationAction) {
         return false;
       }
+      if (action.action === "app.uninstall" && installedDuringPreparation) {
+        return false;
+      }
+      if (action.action === "app.install") {
+        installedDuringPreparation = true;
+      }
     } else {
-      reachedNonInstallAction = true;
+      reachedNonPreparationAction = true;
     }
   }
   return true;
+}
+
+function normalizeLiveUiPreparationActions(actions: readonly AgentAction[]): AgentAction[] {
+  const phase = (action: AgentAction): number | undefined => {
+    switch (action.action) {
+      case "device.unlock":
+        return 0;
+      case "app.uninstall":
+        return 1;
+      case "app.install":
+        return 2;
+      case "app.clearData":
+        return 3;
+      default:
+        return undefined;
+    }
+  };
+  const orderedPreparation = [0, 1, 2, 3].flatMap((targetPhase) =>
+    actions.filter((action) => phase(action) === targetPhase),
+  );
+  const flowActions = actions.filter((action) => phase(action) === undefined);
+  return [...orderedPreparation, ...flowActions];
 }
 
 function coordinateIsWithinScreenshot(
@@ -1310,9 +1415,12 @@ export class LocalAiPlanService implements AiPlanService {
 
     // Direct device operations that do not need model reasoning are always workspace actions.
     // Treat them consistently even when a client submits from the default AI execution mode.
+    const isDirectWorkspaceOperation =
+      requestsCurrentProjectArtifactInstall(request.goal) || requestsDeviceUnlock(request.goal);
     const effectiveRequest =
       request.workspaceExecution === true ||
-      (!requestsCurrentProjectArtifactInstall(request.goal) && !requestsDeviceUnlock(request.goal))
+      !isDirectWorkspaceOperation ||
+      requestsLiveUiTestFlow(request)
         ? request
         : {
             ...request,
@@ -1357,17 +1465,39 @@ export class LocalAiPlanService implements AiPlanService {
         ),
         user: userPrompt(project, effectiveRequest, history, installableArtifacts, projectArtifacts),
       }));
-    if (
-      effectiveRequest.workspaceExecution !== true &&
-      modelPayload.actions.some(containsRestrictedTestAction)
-    ) {
-      throw new AiPlanError("模型计划包含仅工作区模式支持的操作。", 422);
+    const plannedActions =
+      effectiveRequest.workspaceExecution !== true && effectiveRequest.liveUiExecution === true
+        ? normalizeLiveUiPreparationActions(modelPayload.actions)
+        : modelPayload.actions;
+    const preparationActionsWereReordered =
+      plannedActions.some((action, index) => action !== modelPayload.actions[index]);
+    const restrictedTestActions =
+      effectiveRequest.workspaceExecution === true
+        ? []
+        : plannedActions.filter((action) =>
+            containsRestrictedTestAction(action, effectiveRequest.liveUiExecution === true),
+          );
+    if (restrictedTestActions.length > 0) {
+      throw new AiPlanError(
+        `模型计划包含当前自主测试不支持的操作：${[
+          ...new Set(restrictedTestActions.map((action) => action.action)),
+        ].join("、")}。`,
+        422,
+      );
     }
     if (
       effectiveRequest.workspaceExecution !== true &&
-      !installsOnlyAtPlanStart(modelPayload.actions)
+      !preparationActionsAreOrdered(
+        plannedActions,
+        effectiveRequest.liveUiExecution === true,
+      )
     ) {
-      throw new AiPlanError("APK 安装必须位于测试计划的开头。", 422);
+      throw new AiPlanError(
+        effectiveRequest.liveUiExecution === true
+          ? "应用准备动作必须位于测试计划的开头，且卸载必须先于安装。"
+          : "APK 安装必须位于测试计划的开头。",
+        422,
+      );
     }
     const projectArtifactKeys = new Set(
       projectArtifacts.map((artifact) =>
@@ -1397,7 +1527,7 @@ export class LocalAiPlanService implements AiPlanService {
         : {}),
       ...(effectiveRequest.workspaceExecution === true ? { workspaceExecution: true } : {}),
       actions: bindActionsToTargetApplication(
-        modelPayload.actions,
+        plannedActions,
         effectiveRequest.workspaceExecution === true ? undefined : effectiveRequest.appId,
       ),
       requiresApproval: effectiveRequest.workspaceExecution !== true,
@@ -1411,6 +1541,9 @@ export class LocalAiPlanService implements AiPlanService {
     const warnings = policyDecision.actionDecisions
       .filter((decision) => decision.requiresApproval)
       .map((decision) => decision.reason);
+    if (preparationActionsWereReordered) {
+      warnings.push("已将自主测试的准备动作归位为唤醒、卸载、安装、清数据后再执行页面流程。");
+    }
     const plan = actionPlanSchema.parse({
       ...provisionalPlan,
       requiresApproval: effectiveRequest.workspaceExecution !== true,

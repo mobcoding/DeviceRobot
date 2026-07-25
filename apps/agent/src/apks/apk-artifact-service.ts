@@ -393,7 +393,6 @@ export class LocalApkArtifactService implements ApkArtifactService {
         startedAt,
         finishedAt,
       });
-      await this.discard(artifactId);
       return apkInstallResponseSchema.parse({
         status: "installed",
         serial,

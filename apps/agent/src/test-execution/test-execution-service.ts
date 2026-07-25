@@ -26,6 +26,7 @@ const APPIUM_BASE_URL = "http://127.0.0.1:4723";
 const DEFAULT_ACTION_TIMEOUT_MS = 8_000;
 const MAX_ACTION_TIMEOUT_MS = 120_000;
 const MAX_TEST_RUN_STEPS = 20;
+const STARTUP_RECOVERY_WAIT_MS = 1_200;
 const POLL_INTERVAL_MS = 250;
 const WEB_DRIVER_ELEMENT_KEY = "element-6066-11e4-a52e-4f735466cecf";
 const MAX_RUNTIME_SCREENSHOT_BYTES = 12 * 1_024 * 1_024;
@@ -59,6 +60,7 @@ export interface WebDriverTransport {
 }
 
 export interface ApplicationDataService {
+  uninstall(serial: string, appId: string, keepData: boolean): Promise<void>;
   clear(serial: string, appId: string): Promise<void>;
   setPermission(
     serial: string,
@@ -95,6 +97,16 @@ type WebDriverSession = {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function commandFailureOutput(error: unknown): string {
+  if (typeof error !== "object" || error === null) {
+    return errorMessage(error);
+  }
+  const candidate = error as { stdout?: unknown; stderr?: unknown; message?: unknown };
+  return [candidate.stdout, candidate.stderr, candidate.message]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join("\n");
 }
 
 function now(): string {
@@ -177,6 +189,40 @@ function defaultApplicationDataService(): ApplicationDataService {
     }
   };
   return {
+    uninstall: async (serial, appId, keepData) => {
+      validateAppId(appId);
+      let output: string;
+      try {
+        output = await execute([
+          "-s",
+          serial,
+          "uninstall",
+          ...(keepData ? ["-k"] : []),
+          appId,
+        ]);
+      } catch (error) {
+        const failureOutput = commandFailureOutput(error);
+        if (/\b(?:not installed|unknown package)\b/iu.test(failureOutput)) {
+          return;
+        }
+        const packageListing = await execute([
+          "-s",
+          serial,
+          "shell",
+          "pm",
+          "list",
+          "packages",
+          appId,
+        ]).catch(() => undefined);
+        if (packageListing !== undefined && !packageListing.includes(`package:${appId}`)) {
+          return;
+        }
+        throw new TestExecutionError(`无法卸载应用：${failureOutput}`, 502);
+      }
+      if (!/^Success\b/imu.test(output)) {
+        throw new TestExecutionError(`无法卸载应用：${output || "设备未返回 Success。"}`, 502);
+      }
+    },
     clear: async (serial, appId) => {
       validateAppId(appId);
       const output = await execute(["-s", serial, "shell", "pm", "clear", appId]);
@@ -268,6 +314,55 @@ function assertNotCancelled(signal: AbortSignal): void {
   }
 }
 
+function blockedOnTransientStartupPage(reason: string): boolean {
+  return /splash|启动|加载|初始|未发现.*控件|暂无.*控件|no\s+(?:control|element)/iu.test(
+    reason,
+  );
+}
+
+function activityMatches(actual: unknown, expected: string): boolean {
+  if (typeof actual !== "string") {
+    return false;
+  }
+  const normalizedExpected = expected.trim();
+  return (
+    actual === normalizedExpected ||
+    (!normalizedExpected.includes(".") && actual.endsWith(`.${normalizedExpected}`))
+  );
+}
+
+function actionTargetIsPresent(action: AgentAction, uiContext: string): boolean {
+  if (
+    action.action !== "ui.tap" &&
+    action.action !== "ui.longPress" &&
+    action.action !== "ui.input" &&
+    action.action !== "assert.visible" &&
+    action.action !== "assert.notVisible" &&
+    action.action !== "assert.text"
+  ) {
+    return true;
+  }
+  const target = action.target;
+  if (target === undefined || (target.x !== undefined && target.y !== undefined)) {
+    return true;
+  }
+  return uiContext.split("\n").some((candidate) => {
+    return (
+      (target.text === undefined || candidate.includes(`text=${JSON.stringify(target.text)}`)) &&
+      (target.resourceId === undefined ||
+        candidate.includes(`resourceId=${JSON.stringify(target.resourceId)}`)) &&
+      (target.accessibilityId === undefined ||
+        candidate.includes(`accessibilityId=${JSON.stringify(target.accessibilityId)}`)) &&
+      (target.className === undefined ||
+        candidate.includes(`className=${JSON.stringify(target.className)}`))
+    );
+  });
+}
+
+function uiContextHasSafeTarget(uiContext: string): boolean {
+  return /^\d+\. /mu.test(uiContext);
+}
+
 async function createSession(
   transport: WebDriverTransport,
   serial: string,
@@ -318,6 +413,18 @@ async function sessionRequest(
       session.signal,
     ),
   );
+}
+
+function completeUiXml(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const xmlStart = value.indexOf("<");
+  const xml = xmlStart >= 0 ? value.slice(xmlStart).trim() : "";
+  if (xml.includes("</hierarchy>")) {
+    return xml;
+  }
+  return /<hierarchy\b[^>]*\/>/u.test(xml) ? xml : undefined;
 }
 
 async function findElement(
@@ -463,6 +570,62 @@ function ensureActionScope(action: AgentAction, appId: string): void {
   }
 }
 
+function isLiveUiPreparationAction(action: AgentAction): boolean {
+  return (
+    action.action === "device.unlock" ||
+    action.action === "app.uninstall" ||
+    action.action === "app.clearData" ||
+    action.action === "app.install"
+  );
+}
+
+function validatePlanActions(
+  request: StartTestExecutionRequest,
+  hasApkArtifactService: boolean,
+): void {
+  const liveUiExecution = request.plan.liveUiExecution !== undefined;
+  let reachedNonPreparationAction = false;
+  let installedDuringPreparation = false;
+
+  for (const action of request.plan.actions) {
+    ensureActionScope(action, request.appId);
+    if (action.action === "adb.shell") {
+      throw new TestExecutionError("测试执行不接受 adb.shell 操作。", 422);
+    }
+
+    if (!liveUiExecution) {
+      if (action.action === "app.install") {
+        if (reachedNonPreparationAction) {
+          throw new TestExecutionError("APK 安装必须位于测试计划的开头。", 422);
+        }
+        if (!hasApkArtifactService) {
+          throw new TestExecutionError("当前 Agent 未启用本地 APK 暂存服务。", 503);
+        }
+      } else {
+        reachedNonPreparationAction = true;
+      }
+      continue;
+    }
+
+    if (!isLiveUiPreparationAction(action)) {
+      reachedNonPreparationAction = true;
+      continue;
+    }
+    if (reachedNonPreparationAction) {
+      throw new TestExecutionError("自主测试的应用准备动作必须位于计划开头。", 422);
+    }
+    if (action.action === "app.uninstall" && installedDuringPreparation) {
+      throw new TestExecutionError("应用卸载必须位于 APK 安装之前。", 422);
+    }
+    if (action.action === "app.install") {
+      if (!hasApkArtifactService) {
+        throw new TestExecutionError("当前 Agent 未启用本地 APK 暂存服务。", 503);
+      }
+      installedDuringPreparation = true;
+    }
+  }
+}
+
 function xmlAttribute(source: string, name: string): string | undefined {
   const expression = new RegExp(`\\b${name}="([^"]*)"`, "u");
   return expression.exec(source)?.[1]?.trim();
@@ -484,7 +647,9 @@ function boundsCenter(bounds: string | undefined): { x: number; y: number } | un
 function conciseUiContext(xml: string): string {
   const candidates: string[] = [];
   const seen = new Set<string>();
-  for (const match of xml.matchAll(/<node\b[^>]*>/gu)) {
+  // ADB emits <node> elements, while Appium page source uses Android class names
+  // such as <android.widget.TextView>. Both carry the same locator attributes.
+  for (const match of xml.matchAll(/<(?!\/)[A-Za-z_][\w.-]*(?:\s+[^>]*)?\/?\s*>/gu)) {
     const node = match[0];
     const enabled = xmlAttribute(node, "enabled");
     if (enabled === "false") {
@@ -610,23 +775,7 @@ export class LocalTestExecutionService implements TestExecutionService {
     ) {
       throw new TestExecutionError("当前 Agent 未配置支持实时页面执行的 AI 服务。", 503);
     }
-    let reachedNonInstallAction = false;
-    for (const action of request.plan.actions) {
-      ensureActionScope(action, request.appId);
-      if (action.action === "adb.shell") {
-        throw new TestExecutionError("测试执行不接受 adb.shell 操作。", 422);
-      }
-      if (action.action === "app.install") {
-        if (reachedNonInstallAction) {
-          throw new TestExecutionError("APK 安装必须位于测试计划的开头。", 422);
-        }
-        if (this.#apkArtifactService === undefined) {
-          throw new TestExecutionError("当前 Agent 未启用本地 APK 暂存服务。", 503);
-        }
-      } else {
-        reachedNonInstallAction = true;
-      }
-    }
+    validatePlanActions(request, this.#apkArtifactService !== undefined);
     const deviceList = await this.#deviceService.listDevices();
     if (!deviceList.adb.available) {
       throw new TestExecutionError(deviceList.adb.error ?? "ADB 不可用。", 503);
@@ -655,7 +804,7 @@ export class LocalTestExecutionService implements TestExecutionService {
       status: "running",
       steps: (request.plan.liveUiExecution === undefined
         ? request.plan.actions
-        : request.plan.actions.filter((action) => action.action === "app.install")
+        : request.plan.actions.filter(isLiveUiPreparationAction)
       ).map((action, index) => ({
         index,
         action,
@@ -720,18 +869,26 @@ export class LocalTestExecutionService implements TestExecutionService {
   ): Promise<void> {
     let session: WebDriverSession | undefined;
     try {
-      for (const step of run.steps.filter(
-        (candidate) => candidate.action.action === "app.install",
-      )) {
+      for (const step of run.steps) {
         assertNotCancelled(signal);
-        await this.#executeInstallStep(run, step, signal);
+        if (step.action.action === "app.uninstall") {
+          await this.#executeUninstallStep(run, step, signal);
+        } else if (step.action.action === "device.unlock") {
+          await this.#executeUnlockStep(run, step, signal);
+        } else if (step.action.action === "app.clearData") {
+          await this.#executeClearDataStep(run, step, signal);
+        } else if (step.action.action === "app.install") {
+          await this.#executeInstallStep(run, step, signal);
+        }
       }
       const runtime = await this.#appiumRuntimeService.start();
       if (runtime.server.state !== "running") {
         throw new TestExecutionError(runtime.server.error ?? "Appium 服务未能启动。", 503);
       }
       assertNotCancelled(signal);
-      await this.#applicationDataService.clear(run.deviceSerial, run.appId);
+      if (!run.steps.some((step) => step.action.action === "app.clearData")) {
+        await this.#applicationDataService.clear(run.deviceSerial, run.appId);
+      }
       assertNotCancelled(signal);
       session = await createSession(this.#transport, run.deviceSerial, signal);
       // The harness owns the clean launch boundary; reviewed steps then describe the flow under test.
@@ -822,30 +979,57 @@ export class LocalTestExecutionService implements TestExecutionService {
 
     await sleep(800, signal);
     const runtimeHistory: string[] = [];
+    let recoveredInitialStartupBlock = false;
     for (let stepNumber = 1; stepNumber <= maxSteps; stepNumber += 1) {
       assertNotCancelled(signal);
-      const [tree, screenshot] = await Promise.all([
-        this.#deviceControlService.readUiTree(run.deviceSerial),
+      const [uiXml, screenshot] = await Promise.all([
+        this.#readRuntimeUiXml(session, run.deviceSerial),
         this.#deviceControlService.captureScreenshot(run.deviceSerial),
       ]);
       const vision = runtimeScreenshot(screenshot);
+      const uiContext = conciseUiContext(uiXml);
+      if (runtimeHistory.length === 0 && !uiContextHasSafeTarget(uiContext)) {
+        const action: AgentAction = { action: "ui.wait", durationMs: STARTUP_RECOVERY_WAIT_MS };
+        const reason = "启动页尚无可交互控件，等待页面自动跳转后重新识别。";
+        await this.#appendAndExecuteStep(run, action, session, signal, reason);
+        runtimeHistory.push(`${stepNumber}. ${action.action}：${reason}`);
+        continue;
+      }
       const decision = await aiPlanService.decideRuntimeStep({
         projectId: run.projectId,
         appId: run.appId,
         deviceSerial: run.deviceSerial,
         goal,
         stepNumber,
-        uiContext: conciseUiContext(tree.xml),
+        uiContext,
         ...(runtimeHistory.length === 0 ? {} : { runtimeHistory }),
         ...(vision === undefined ? {} : { screenshot: vision }),
       });
       if (decision.status === "blocked") {
+        if (
+          !recoveredInitialStartupBlock &&
+          runtimeHistory.length === 0 &&
+          blockedOnTransientStartupPage(decision.reason)
+        ) {
+          recoveredInitialStartupBlock = true;
+          const action: AgentAction = { action: "ui.wait", durationMs: STARTUP_RECOVERY_WAIT_MS };
+          const reason = "启动页尚无可交互控件，等待页面自动跳转后重新识别。";
+          await this.#appendAndExecuteStep(run, action, session, signal, reason);
+          runtimeHistory.push(`${stepNumber}. ${action.action}：${reason}`);
+          continue;
+        }
         await this.#captureFailureEvidence(run.id, this.#nextStepIndex(run.id), run.deviceSerial);
         throw new TestExecutionError(`AI 无法继续当前页面流程：${decision.reason}`, 422);
       }
       if (decision.status === "completed") {
         await this.#appendAndExecuteStep(run, decision.assertion, session, signal, decision.reason);
         return `自主执行完成：${decision.reason}`;
+      }
+      if (!actionTargetIsPresent(decision.action, uiContext)) {
+        runtimeHistory.push(
+          `${stepNumber}. 未执行 ${decision.action.action}：模型给出的定位器未出现在当前真实 UI 中，请基于现有控件重新决策。`,
+        );
+        continue;
       }
       await this.#appendAndExecuteStep(run, decision.action, session, signal, decision.reason);
       runtimeHistory.push(
@@ -854,6 +1038,18 @@ export class LocalTestExecutionService implements TestExecutionService {
     }
     await this.#captureFailureEvidence(run.id, this.#nextStepIndex(run.id), run.deviceSerial);
     throw new TestExecutionError(`AI 未能在 ${maxSteps} 步内完成测试目标。`, 422);
+  }
+
+  async #readRuntimeUiXml(session: WebDriverSession, serial: string): Promise<string> {
+    try {
+      const source = completeUiXml(await sessionRequest(session, "GET", "/source"));
+      if (source !== undefined) {
+        return source;
+      }
+    } catch {
+      // On a degraded Appium session, preserve the ADB fallback for evidence collection.
+    }
+    return (await this.#deviceControlService.readUiTree(serial)).xml;
   }
 
   async #executeStep(
@@ -940,6 +1136,105 @@ export class LocalTestExecutionService implements TestExecutionService {
       if (!signal.aborted) {
         await this.#captureFailureEvidence(run.id, originalStep.index, run.deviceSerial);
       }
+      this.#store.updateStep(run.id, {
+        ...runningStep,
+        status: signal.aborted ? "cancelled" : "failed",
+        message: signal.aborted ? "测试运行已取消。" : errorMessage(error),
+        finishedAt: now(),
+      });
+      throw error;
+    }
+  }
+
+  async #executeUninstallStep(
+    run: TestExecutionRun,
+    originalStep: TestStepExecution,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (originalStep.action.action !== "app.uninstall") {
+      throw new TestExecutionError("测试准备步骤无效。", 422);
+    }
+    const startedAt = now();
+    const runningStep = { ...originalStep, status: "running" as const, startedAt };
+    this.#store.updateStep(run.id, runningStep);
+    try {
+      assertNotCancelled(signal);
+      await this.#applicationDataService.uninstall(
+        run.deviceSerial,
+        originalStep.action.appId,
+        originalStep.action.keepData,
+      );
+      this.#store.updateStep(run.id, {
+        ...runningStep,
+        status: "succeeded",
+        message: `已卸载 ${originalStep.action.appId}。`,
+        finishedAt: now(),
+      });
+    } catch (error) {
+      this.#store.updateStep(run.id, {
+        ...runningStep,
+        status: signal.aborted ? "cancelled" : "failed",
+        message: signal.aborted ? "测试运行已取消。" : errorMessage(error),
+        finishedAt: now(),
+      });
+      throw error;
+    }
+  }
+
+  async #executeUnlockStep(
+    run: TestExecutionRun,
+    originalStep: TestStepExecution,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (originalStep.action.action !== "device.unlock") {
+      throw new TestExecutionError("测试准备步骤无效。", 422);
+    }
+    const startedAt = now();
+    const runningStep = { ...originalStep, status: "running" as const, startedAt };
+    this.#store.updateStep(run.id, runningStep);
+    try {
+      assertNotCancelled(signal);
+      const execution = await this.#deviceControlService.execute(run.deviceSerial, {
+        action: "device.unlock",
+      });
+      this.#store.updateStep(run.id, {
+        ...runningStep,
+        status: "succeeded",
+        message: execution.message ?? "已唤醒设备并恢复到可交互界面。",
+        finishedAt: now(),
+      });
+    } catch (error) {
+      this.#store.updateStep(run.id, {
+        ...runningStep,
+        status: signal.aborted ? "cancelled" : "failed",
+        message: signal.aborted ? "测试运行已取消。" : errorMessage(error),
+        finishedAt: now(),
+      });
+      throw error;
+    }
+  }
+
+  async #executeClearDataStep(
+    run: TestExecutionRun,
+    originalStep: TestStepExecution,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (originalStep.action.action !== "app.clearData") {
+      throw new TestExecutionError("测试准备步骤无效。", 422);
+    }
+    const startedAt = now();
+    const runningStep = { ...originalStep, status: "running" as const, startedAt };
+    this.#store.updateStep(run.id, runningStep);
+    try {
+      assertNotCancelled(signal);
+      await this.#applicationDataService.clear(run.deviceSerial, originalStep.action.appId);
+      this.#store.updateStep(run.id, {
+        ...runningStep,
+        status: "succeeded",
+        message: `已清除 ${originalStep.action.appId} 的应用数据。`,
+        finishedAt: now(),
+      });
+    } catch (error) {
       this.#store.updateStep(run.id, {
         ...runningStep,
         status: signal.aborted ? "cancelled" : "failed",
@@ -1121,7 +1416,7 @@ export class LocalTestExecutionService implements TestExecutionService {
       }
       case "assert.activity": {
         const activity = await sessionRequest(session, "GET", "/appium/device/current_activity");
-        if (activity !== action.expected) {
+        if (!activityMatches(activity, action.expected)) {
           throw new TestExecutionError(
             `Activity 断言失败，期望“${action.expected}”，实际“${String(activity)}”。`,
             422,

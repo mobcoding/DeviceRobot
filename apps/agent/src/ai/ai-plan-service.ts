@@ -1289,7 +1289,18 @@ export class LocalAiPlanService implements AiPlanService {
       throw new AiPlanError("测试应用包名无效。", 422);
     }
 
-    const artifactIds = [...new Set(request.installableArtifactIds ?? [])];
+    // Installing the selected project's own build artifact is always a workspace action.
+    // Treat it consistently even when a client submits from the default AI execution mode.
+    const effectiveRequest =
+      request.workspaceExecution === true || !requestsCurrentProjectArtifactInstall(request.goal)
+        ? request
+        : {
+            ...request,
+            liveUiExecution: false,
+            workspaceExecution: true,
+          };
+
+    const artifactIds = [...new Set(effectiveRequest.installableArtifactIds ?? [])];
     if (artifactIds.length > 0 && this.#apkArtifactService === undefined) {
       throw new AiPlanError("当前 Agent 未启用本地 APK 暂存服务。", 503);
     }
@@ -1306,29 +1317,35 @@ export class LocalAiPlanService implements AiPlanService {
       }),
     );
 
-    const conversation = this.#resolveConversation(project, request);
+    const conversation = this.#resolveConversation(project, effectiveRequest);
     const history =
       conversation === undefined
         ? []
         : (this.#conversationStore?.listMessages(conversation.id) ?? []);
 
     const projectArtifacts =
-      request.workspaceExecution === true && this.#projectBuildService !== undefined
+      effectiveRequest.workspaceExecution === true && this.#projectBuildService !== undefined
         ? workspaceProjectArtifacts((await this.#projectBuildService.listRuns(project.id)).runs)
         : [];
     const modelPayload =
-      currentProjectArtifactInstallPlan(request, projectArtifacts) ??
+      currentProjectArtifactInstallPlan(effectiveRequest, projectArtifacts) ??
       (await this.#modelProvider.createPlan({
-        system: systemPrompt(request.liveUiExecution === true, request.workspaceExecution === true),
-        user: userPrompt(project, request, history, installableArtifacts, projectArtifacts),
+        system: systemPrompt(
+          effectiveRequest.liveUiExecution === true,
+          effectiveRequest.workspaceExecution === true,
+        ),
+        user: userPrompt(project, effectiveRequest, history, installableArtifacts, projectArtifacts),
       }));
     if (
-      request.workspaceExecution !== true &&
+      effectiveRequest.workspaceExecution !== true &&
       modelPayload.actions.some(containsRestrictedTestAction)
     ) {
       throw new AiPlanError("模型计划包含仅工作区模式支持的操作。", 422);
     }
-    if (request.workspaceExecution !== true && !installsOnlyAtPlanStart(modelPayload.actions)) {
+    if (
+      effectiveRequest.workspaceExecution !== true &&
+      !installsOnlyAtPlanStart(modelPayload.actions)
+    ) {
       throw new AiPlanError("APK 安装必须位于测试计划的开头。", 422);
     }
     const projectArtifactKeys = new Set(
@@ -1337,7 +1354,7 @@ export class LocalAiPlanService implements AiPlanService {
       ),
     );
     if (
-      request.workspaceExecution === true &&
+      effectiveRequest.workspaceExecution === true &&
       modelPayload.actions.some(
         (action) =>
           action.action === "project.installArtifact" &&
@@ -1350,17 +1367,19 @@ export class LocalAiPlanService implements AiPlanService {
     const provisionalPlan = actionPlanSchema.parse({
       id: randomUUID(),
       projectId: project.id,
-      ...(request.deviceSerial === undefined ? {} : { deviceSerial: request.deviceSerial }),
-      ...(request.appId === undefined ? {} : { targetAppId: request.appId }),
-      ...(request.liveUiExecution === true
-        ? { liveUiExecution: { goal: request.goal.trim(), maxSteps: 20 } }
+      ...(effectiveRequest.deviceSerial === undefined
+        ? {}
+        : { deviceSerial: effectiveRequest.deviceSerial }),
+      ...(effectiveRequest.appId === undefined ? {} : { targetAppId: effectiveRequest.appId }),
+      ...(effectiveRequest.liveUiExecution === true
+        ? { liveUiExecution: { goal: effectiveRequest.goal.trim(), maxSteps: 20 } }
         : {}),
-      ...(request.workspaceExecution === true ? { workspaceExecution: true } : {}),
+      ...(effectiveRequest.workspaceExecution === true ? { workspaceExecution: true } : {}),
       actions: bindActionsToTargetApplication(
         modelPayload.actions,
-        request.workspaceExecution === true ? undefined : request.appId,
+        effectiveRequest.workspaceExecution === true ? undefined : effectiveRequest.appId,
       ),
-      requiresApproval: request.workspaceExecution !== true,
+      requiresApproval: effectiveRequest.workspaceExecution !== true,
     });
     const policyDecision = evaluateActionPlanPolicy(provisionalPlan, "standard", {
       stagedArtifactIds: new Set(artifactIds),
@@ -1373,7 +1392,7 @@ export class LocalAiPlanService implements AiPlanService {
       .map((decision) => decision.reason);
     const plan = actionPlanSchema.parse({
       ...provisionalPlan,
-      requiresApproval: request.workspaceExecution !== true,
+      requiresApproval: effectiveRequest.workspaceExecution !== true,
     });
     const response = aiPlanResponseSchema.parse({
       reply: modelPayload.reply,
@@ -1382,7 +1401,7 @@ export class LocalAiPlanService implements AiPlanService {
         allowed: true,
         requiresApproval: plan.requiresApproval,
         reason:
-          request.workspaceExecution === true
+          effectiveRequest.workspaceExecution === true
             ? "工作区操作已按当前会话授权执行。"
             : "AI 生成的计划仅供预览，执行前必须获得明确确认。",
         warnings,

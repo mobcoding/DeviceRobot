@@ -451,7 +451,7 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
           queryKey: ["ai-conversation", request.conversationId],
         });
       }
-      if (request.workspaceExecution === true && device !== undefined) {
+      if (response.plan.workspaceExecution === true && device !== undefined) {
         workspaceExecutionMutation.mutate({ plan: response.plan, deviceSerial: device.serial });
       }
     },

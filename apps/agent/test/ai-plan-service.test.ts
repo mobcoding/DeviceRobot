@@ -277,7 +277,7 @@ describe("AI action plan service", () => {
     });
   });
 
-  it("allows workspace plans to use a current project's successful APK artifact", async () => {
+  it("automatically treats a current project's APK installation as a workspace operation", async () => {
     const project = createProject();
     const buildId = "223e4567-e89b-12d3-a456-426614174000";
     const provider = new FakeModelProvider({
@@ -312,8 +312,8 @@ describe("AI action plan service", () => {
       service.generate({
         projectId: project.id,
         deviceSerial: "device-1",
-        workspaceExecution: true,
-        goal: "安装当前项目最近构建的 APK",
+        liveUiExecution: true,
+        goal: "安装当前项目下的 APK 到当前设备",
       }),
     ).resolves.toMatchObject({
       plan: {

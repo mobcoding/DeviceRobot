@@ -272,6 +272,10 @@ export class LocalWorkspaceActionService implements WorkspaceActionService {
           ? `已切换为${action.orientation === "portrait" ? "竖屏" : "横屏"}。`
           : output;
       }
+      case "device.unlock": {
+        const execution = await this.#deviceControlService.execute(serial, { action: "device.unlock" });
+        return execution.message ?? "已唤醒设备并恢复到可交互界面。";
+      }
       case "device.screenshot": {
         await this.#deviceControlService.captureScreenshot(serial);
         return action.name === undefined ? "已采集设备截图。" : `已采集截图：${action.name}。`;

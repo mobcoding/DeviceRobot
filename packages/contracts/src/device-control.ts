@@ -27,6 +27,7 @@ export const deviceControlActionSchema = z.discriminatedUnion("action", [
     durationMs: durationSchema.optional(),
   }),
   z.object({ action: z.literal("ui.back") }),
+  z.object({ action: z.literal("device.unlock") }),
   z.object({ action: z.literal("app.launch"), appId: androidPackageSchema }),
   z.object({ action: z.literal("app.stop"), appId: androidPackageSchema }),
 ]);

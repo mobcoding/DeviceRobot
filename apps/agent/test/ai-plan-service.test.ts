@@ -334,6 +334,36 @@ describe("AI action plan service", () => {
     expect(provider.system).toBe("");
   });
 
+  it("automatically treats device unlock as a deterministic workspace operation", async () => {
+    const project = createProject();
+    const provider = new FakeModelProvider({
+      reply: "不应调用模型。",
+      actions: [{ action: "ui.wait", durationMs: 500 }],
+    });
+    const service = new LocalAiPlanService({
+      projectStore: new InMemoryProjectStore(project),
+      modelProvider: provider,
+    });
+
+    await expect(
+      service.generate({
+        projectId: project.id,
+        deviceSerial: "device-1",
+        liveUiExecution: true,
+        goal: "解锁当前设备",
+      }),
+    ).resolves.toMatchObject({
+      reply: expect.stringContaining("唤醒设备"),
+      plan: {
+        workspaceExecution: true,
+        requiresApproval: false,
+        actions: [{ action: "device.unlock" }],
+      },
+    });
+    expect(provider.user).toBe("");
+    expect(provider.system).toBe("");
+  });
+
   it("allows a plan to install any APK explicitly staged for the current conversation", async () => {
     const project = createProject();
     const artifactId = "223e4567-e89b-12d3-a456-426614174000";

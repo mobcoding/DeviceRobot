@@ -528,7 +528,7 @@ function isRuntimeCompletionAssertion(action: AgentAction): boolean {
 function planPromptRules(workspaceExecution = false): string[] {
   return [
     "必须只输出 JSON 对象，格式为 {reply:string,actions:AgentAction[]}。reply 使用简体中文。",
-    "actions 至少一项、最多二十项。只能使用 app.install、app.uninstall、app.clearData、app.launch、app.stop、ui.tap、ui.longPress、ui.input、ui.swipe、ui.back、ui.wait、assert.visible、assert.notVisible、assert.text、assert.activity、device.permission、device.orientation、device.screenshot、adb.shell、project.build、project.installArtifact。",
+    "actions 至少一项、最多二十项。只能使用 app.install、app.uninstall、app.clearData、app.launch、app.stop、ui.tap、ui.longPress、ui.input、ui.swipe、ui.back、ui.wait、assert.visible、assert.notVisible、assert.text、assert.activity、device.permission、device.orientation、device.unlock、device.screenshot、adb.shell、project.build、project.installArtifact。",
     '严格示例：{"reply":"先记录启动流程的可观察证据。","actions":[{"action":"ui.wait","durationMs":1500},{"action":"device.screenshot","name":"启动页"}]}。',
     "动作字段：app.launch/app.stop 必须有 appId；ui.tap、ui.longPress、assert.visible、assert.notVisible 必须有 target；assert.text 还必须有 expected；ui.input 必须有 value；ui.swipe 必须有 start 和 end，二者均为 {x:number,y:number}；ui.wait 必须有 durationMs:number；assert.activity 必须有 expected；device.screenshot 可选 name。",
     "target 必须是对象，且包含 text、resourceId、accessibilityId、className 之一，或同时包含 x:number 与 y:number；不得写成 selector、element、description、page、route 或字符串。",
@@ -536,6 +536,7 @@ function planPromptRules(workspaceExecution = false): string[] {
       ? [
           "当前是工作区自主操作计划。可输出 adb.shell，但 action.command 和 args 必须是设备端 ADB shell 的逐项参数，不能包含 adb 前缀、Windows 命令、文件路径、管道、重定向或命令拼接。",
           "可使用 app.uninstall、app.clearData、app.launch、app.stop 和 device.permission 操作用户明确要求的应用包名。",
+          "device.unlock 仅模拟唤醒与滑动解锁手势；安全锁屏需要用户在设备上自行完成凭据验证。",
           "仅当请求明确提供“可安装的本地 APK”时才可输出 app.install；artifactId 必须逐字使用列表中的 ID，不得猜测、编造或使用文件路径。",
         ]
       : [
@@ -825,6 +826,22 @@ function requestsCurrentProjectArtifactInstall(goal: string): boolean {
   return requestsInstall && referencesCurrentProject && referencesApk;
 }
 
+function requestsDeviceUnlock(goal: string): boolean {
+  return /(?:解锁|唤醒)(?:当前)?(?:设备|手机)|(?:unlock|wake)\s+(?:the\s+)?(?:current\s+)?(?:device|phone)/iu.test(
+    goal.trim(),
+  );
+}
+
+function deviceUnlockPlan(request: GenerateAiPlanRequest): ModelPlanPayload | undefined {
+  if (request.workspaceExecution !== true || !requestsDeviceUnlock(request.goal)) {
+    return undefined;
+  }
+  return {
+    reply: "将唤醒设备、尝试无凭据滑动解锁，并收起可能遮挡页面的通知栏。安全锁屏需要你在设备上完成认证。",
+    actions: [{ action: "device.unlock" }],
+  };
+}
+
 function currentProjectArtifactInstallPlan(
   request: GenerateAiPlanRequest,
   projectArtifacts: readonly WorkspaceProjectArtifact[],
@@ -859,11 +876,12 @@ function systemPrompt(liveUiExecution = false, workspaceExecution = false): stri
       ? "你是 DeviceRobot 工作区 Agent。请根据用户目标生成可直接在当前设备执行的工作区操作计划。"
       : "你是 Android 自动化测试规划助手。只生成可审阅的测试操作计划，不执行设备操作。",
     "必须只输出 JSON 对象，格式为 {reply:string,actions:AgentAction[]}。reply 使用简体中文。",
-    "actions 至少一项、最多二十项。只能使用 app.install、app.uninstall、app.clearData、app.launch、app.stop、ui.tap、ui.longPress、ui.input、ui.swipe、ui.back、ui.wait、assert.visible、assert.notVisible、assert.text、assert.activity、device.permission、device.orientation、device.screenshot、adb.shell、project.build、project.installArtifact。",
+    "actions 至少一项、最多二十项。只能使用 app.install、app.uninstall、app.clearData、app.launch、app.stop、ui.tap、ui.longPress、ui.input、ui.swipe、ui.back、ui.wait、assert.visible、assert.notVisible、assert.text、assert.activity、device.permission、device.orientation、device.unlock、device.screenshot、adb.shell、project.build、project.installArtifact。",
     ...(workspaceExecution
       ? [
           "工作区操作已获得用户授权：可执行设备侧 ADB shell 与应用生命周期操作；不得调用 Windows Shell、PowerShell、CMD 或访问任意本机文件路径。",
           "工作区直接操作的 ui.tap 和 ui.longPress 必须使用 x/y 坐标；语义断言只能通过测试运行执行。",
+          "device.unlock 仅模拟唤醒与滑动解锁手势；安全锁屏需要用户在设备上自行完成凭据验证。",
         ]
       : [
           "严禁输出 adb.shell、文件路径、命令行、未在证据中出现的 resourceId、accessibilityId、页面文案或路由。证据不足时使用 ui.wait、device.screenshot 或解释限制。",
@@ -1008,6 +1026,7 @@ function containsRestrictedTestAction(action: AgentAction): boolean {
     action.action === "adb.shell" ||
     action.action === "app.uninstall" ||
     action.action === "app.clearData" ||
+    action.action === "device.unlock" ||
     action.action === "project.build" ||
     action.action === "project.installArtifact"
   );
@@ -1289,10 +1308,11 @@ export class LocalAiPlanService implements AiPlanService {
       throw new AiPlanError("测试应用包名无效。", 422);
     }
 
-    // Installing the selected project's own build artifact is always a workspace action.
-    // Treat it consistently even when a client submits from the default AI execution mode.
+    // Direct device operations that do not need model reasoning are always workspace actions.
+    // Treat them consistently even when a client submits from the default AI execution mode.
     const effectiveRequest =
-      request.workspaceExecution === true || !requestsCurrentProjectArtifactInstall(request.goal)
+      request.workspaceExecution === true ||
+      (!requestsCurrentProjectArtifactInstall(request.goal) && !requestsDeviceUnlock(request.goal))
         ? request
         : {
             ...request,
@@ -1328,6 +1348,7 @@ export class LocalAiPlanService implements AiPlanService {
         ? workspaceProjectArtifacts((await this.#projectBuildService.listRuns(project.id)).runs)
         : [];
     const modelPayload =
+      deviceUnlockPlan(effectiveRequest) ??
       currentProjectArtifactInstallPlan(effectiveRequest, projectArtifacts) ??
       (await this.#modelProvider.createPlan({
         system: systemPrompt(

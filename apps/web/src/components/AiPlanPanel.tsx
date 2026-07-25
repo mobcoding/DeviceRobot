@@ -72,6 +72,8 @@ function actionLabel(action: AiPlanResponse["plan"]["actions"][number]): string 
       return "卸载应用";
     case "app.clearData":
       return "清除应用数据";
+    case "device.unlock":
+      return "唤醒并解锁设备";
     case "adb.shell":
       return `ADB：${action.command}`;
     case "project.build":

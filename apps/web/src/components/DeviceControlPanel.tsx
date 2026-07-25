@@ -38,6 +38,8 @@ function formatAction(action: DeviceControlAction): string {
       return `滑动 ${action.startX}, ${action.startY} 到 ${action.endX}, ${action.endY}`;
     case "ui.back":
       return "返回";
+    case "device.unlock":
+      return "唤醒并解锁设备";
     case "app.launch":
       return `启动 ${action.appId}`;
     case "app.stop":

@@ -69,6 +69,76 @@ describe("ADB device control", () => {
     ]);
   });
 
+  it("wakes, dismisses an unsecured lockscreen, and closes the notification shade", async () => {
+    const runner = createRunner({
+      runText: vi
+        .fn()
+        .mockResolvedValueOnce("")
+        .mockResolvedValueOnce("showing=true\nsecure=false")
+        .mockResolvedValueOnce("Physical size: 1080x2400")
+        .mockResolvedValueOnce("")
+        .mockResolvedValueOnce("showing=false\nmIsShowing=false")
+        .mockResolvedValueOnce("mCurrentFocus=Window{123 u0 NotificationShade}")
+        .mockResolvedValueOnce("")
+        .mockResolvedValueOnce("mCurrentFocus=Window{456 u0 com.example.app/.MainActivity}"),
+    });
+    const service = new AdbDeviceControlService({
+      deviceService: createDiscoveryService(),
+      runner,
+    });
+
+    await expect(service.execute("device-1", { action: "device.unlock" })).resolves.toMatchObject({
+      message: "已唤醒设备并恢复到可交互界面。",
+    });
+    expect(runner.runText).toHaveBeenNthCalledWith(1, [
+      "-s",
+      "device-1",
+      "shell",
+      "input",
+      "keyevent",
+      "KEYCODE_WAKEUP",
+    ]);
+    expect(runner.runText).toHaveBeenNthCalledWith(4, [
+      "-s",
+      "device-1",
+      "shell",
+      "input",
+      "swipe",
+      "540",
+      "1920",
+      "540",
+      "480",
+      "300",
+    ]);
+    expect(runner.runText).toHaveBeenNthCalledWith(7, [
+      "-s",
+      "device-1",
+      "shell",
+      "input",
+      "keyevent",
+      "KEYCODE_BACK",
+    ]);
+  });
+
+  it("refuses to bypass a secure lockscreen", async () => {
+    const runner = createRunner({
+      runText: vi
+        .fn()
+        .mockResolvedValueOnce("")
+        .mockResolvedValueOnce("showing=true\nsecure=true"),
+    });
+    const service = new AdbDeviceControlService({
+      deviceService: createDiscoveryService(),
+      runner,
+    });
+
+    await expect(service.execute("device-1", { action: "device.unlock" })).rejects.toMatchObject({
+      statusCode: 409,
+      message: "设备处于安全锁屏状态，请在设备上完成 PIN、图案、密码或生物识别解锁后重试。",
+    } satisfies Partial<DeviceControlError>);
+    expect(runner.runText).toHaveBeenCalledTimes(2);
+  });
+
   it("reads XML from the device and removes command preamble", async () => {
     const runner = createRunner({
       runText: vi

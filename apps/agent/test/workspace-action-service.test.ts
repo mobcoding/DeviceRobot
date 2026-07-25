@@ -167,6 +167,29 @@ describe("workspace action service", () => {
     );
   });
 
+  it("delegates a workspace device unlock action to the structured device controller", async () => {
+    const execute = vi.fn(async () => ({
+      startedAt: "2026-07-25T10:00:00.000Z",
+      finishedAt: "2026-07-25T10:00:00.001Z",
+      message: "已唤醒设备并恢复到可交互界面。",
+    }));
+    const service = new LocalWorkspaceActionService({
+      deviceService: readyDeviceService(),
+      deviceControlService: { ...deviceControlService(), execute },
+      apkArtifactService: apkArtifactService(),
+      projectBuildService: projectBuildService(),
+      runner: { run: async () => ({ stdout: "", stderr: "" }) },
+    });
+
+    await expect(
+      service.execute({
+        deviceSerial: "device-1",
+        plan: workspacePlan([{ action: "device.unlock" }]),
+      }),
+    ).resolves.toMatchObject({ status: "succeeded" });
+    expect(execute).toHaveBeenCalledWith("device-1", { action: "device.unlock" });
+  });
+
   it("rejects a non-workspace plan and disconnected devices before issuing commands", async () => {
     const runner: WorkspaceAdbRunner = { run: vi.fn() };
     const plan = workspacePlan([{ action: "ui.wait", durationMs: 1 }]);

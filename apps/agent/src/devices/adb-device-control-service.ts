@@ -108,6 +108,34 @@ function encodeInputText(value: string): string {
     .join("");
 }
 
+function displaySize(output: string): { width: number; height: number } {
+  const matches = [...output.matchAll(/(?:Physical|Override) size:\s*(\d+)x(\d+)/gu)];
+  const latest = matches.at(-1);
+  const width = Number(latest?.[1]);
+  const height = Number(latest?.[2]);
+
+  return Number.isInteger(width) && width > 0 && Number.isInteger(height) && height > 0
+    ? { width, height }
+    : { width: 1_080, height: 1_920 };
+}
+
+function keyguardShowing(output: string): boolean {
+  return /(?:\bmIsShowing|\bmKeyguardShowing|\bshowing|\bmShowingLockscreen)=true\b/u.test(
+    output,
+  );
+}
+
+function secureKeyguardShowing(output: string): boolean {
+  return (
+    keyguardShowing(output) &&
+    /(?:\bmKeyguardSecure|\bmIsSecure|\bisSecure|\bsecure)=true\b/u.test(output)
+  );
+}
+
+function notificationShadeFocused(output: string): boolean {
+  return /mCurrentFocus=Window\{[^}]*\bNotificationShade\b/u.test(output);
+}
+
 function actionToAdbArgs(serial: string, action: DeviceControlAction): string[] {
   const prefix = ["-s", serial, "shell"];
 
@@ -140,6 +168,8 @@ function actionToAdbArgs(serial: string, action: DeviceControlAction): string[] 
       ];
     case "ui.back":
       return [...prefix, "input", "keyevent", "KEYCODE_BACK"];
+    case "device.unlock":
+      throw new Error("Device unlock must use the controlled unlock flow");
     case "app.launch":
       return [
         ...prefix,
@@ -231,6 +261,10 @@ export class AdbDeviceControlService implements DeviceControlService {
     await this.#requireReadyDevice(serial);
     const startedAt = new Date().toISOString();
 
+    if (action.action === "device.unlock") {
+      return await this.#unlock(serial, startedAt);
+    }
+
     try {
       const output = await this.#runner.runText(actionToAdbArgs(serial, action));
       const message = output.trim();
@@ -241,6 +275,58 @@ export class AdbDeviceControlService implements DeviceControlService {
       };
     } catch (error) {
       throw this.#asControlError(error, `Device action '${action.action}' failed`);
+    }
+  }
+
+  async #unlock(serial: string, startedAt: string): Promise<DeviceActionExecution> {
+    const shell = async (...args: string[]): Promise<string> =>
+      await this.#runner.runText(["-s", serial, "shell", ...args]);
+
+    try {
+      await shell("input", "keyevent", "KEYCODE_WAKEUP");
+      let policy = await shell("dumpsys", "window", "policy");
+      if (secureKeyguardShowing(policy)) {
+        throw new DeviceControlError(
+          "设备处于安全锁屏状态，请在设备上完成 PIN、图案、密码或生物识别解锁后重试。",
+          409,
+        );
+      }
+      if (keyguardShowing(policy)) {
+        const { width, height } = displaySize(await shell("wm", "size"));
+        await shell(
+          "input",
+          "swipe",
+          String(Math.round(width / 2)),
+          String(Math.round(height * 0.8)),
+          String(Math.round(width / 2)),
+          String(Math.round(height * 0.2)),
+          "300",
+        );
+        policy = await shell("dumpsys", "window", "policy");
+        if (keyguardShowing(policy)) {
+          throw new DeviceControlError(
+            "设备仍处于锁屏状态，请在设备上完成 PIN、图案、密码或生物识别解锁后重试。",
+            409,
+          );
+        }
+      }
+
+      let windows = await shell("dumpsys", "window", "windows");
+      if (notificationShadeFocused(windows)) {
+        await shell("input", "keyevent", "KEYCODE_BACK");
+        windows = await shell("dumpsys", "window", "windows");
+        if (notificationShadeFocused(windows)) {
+          throw new DeviceControlError("通知栏未能收起，请在设备上手动恢复到应用或桌面。", 409);
+        }
+      }
+
+      return {
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        message: "已唤醒设备并恢复到可交互界面。",
+      };
+    } catch (error) {
+      throw this.#asControlError(error, "Device unlock failed");
     }
   }
 

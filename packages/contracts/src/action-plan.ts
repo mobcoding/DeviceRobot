@@ -100,6 +100,7 @@ const deviceActionSchema = z.discriminatedUnion("action", [
     action: z.literal("device.orientation"),
     orientation: z.enum(["portrait", "landscape"]),
   }),
+  z.object({ action: z.literal("device.unlock") }),
   z.object({ action: z.literal("device.screenshot"), name: z.string().min(1).optional() }),
 ]);
 

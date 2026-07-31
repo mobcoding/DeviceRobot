@@ -420,6 +420,7 @@ export function AiPlanPanel({
   const [lastWorkspaceExecution, setLastWorkspaceExecution] =
     useState<WorkspaceExecutionResponse>();
   const apkInputRef = useRef<HTMLInputElement>(null);
+  const workspaceRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const statusQuery = useQuery({
     queryKey: ["ai-model-status"],
@@ -524,6 +525,15 @@ export function AiPlanPanel({
       ...(message.plan === undefined ? {} : { plan: message.plan }),
     }),
   );
+  const latestMessageId = messages.at(-1)?.id ?? "";
+  useEffect(() => {
+    const timeline = workspaceRef.current?.querySelector<HTMLDivElement>(".ai-test-timeline");
+    if (timeline === undefined || timeline === null || selectedConversationId.length === 0) {
+      return;
+    }
+
+    timeline.scrollTop = timeline.scrollHeight;
+  }, [latestMessageId, messages.length, selectedConversationId]);
   useEffect(() => {
     const planIds = messages.flatMap((message) =>
       message.plan === undefined ? [] : [message.plan.plan.id],
@@ -880,7 +890,7 @@ export function AiPlanPanel({
           </footer>
         </form>
       ) : (
-        <div className="ai-test-workspace-grid">
+        <div ref={workspaceRef} className="ai-test-workspace-grid">
           <aside className="ai-test-project-sidebar" aria-label="测试项目">
             <header>
               <FolderGit2 aria-hidden="true" size={18} strokeWidth={1.8} />

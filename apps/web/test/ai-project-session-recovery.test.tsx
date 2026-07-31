@@ -139,6 +139,57 @@ afterEach(() => {
 });
 
 describe("AI project session recovery", () => {
+  it("scrolls to the latest message whenever the AI workspace is shown", async () => {
+    const timelinePrototype = HTMLDivElement.prototype;
+    const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+      timelinePrototype,
+      "scrollHeight",
+    );
+    const scrollTopDescriptor = Object.getOwnPropertyDescriptor(timelinePrototype, "scrollTop");
+    let timelineScrollTop = -1;
+    Object.defineProperty(timelinePrototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        return this.classList.contains("ai-test-timeline") ? 480 : 0;
+      },
+    });
+    Object.defineProperty(timelinePrototype, "scrollTop", {
+      configurable: true,
+      get() {
+        return timelineScrollTop;
+      },
+      set(value: number) {
+        if (this.classList.contains("ai-test-timeline")) {
+          timelineScrollTop = value;
+        }
+      },
+    });
+
+    try {
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      const view = render(workspaceView(queryClient, true));
+      await screen.findByLabelText("测试过程");
+      await waitFor(() => expect(timelineScrollTop).toBe(480));
+
+      view.rerender(workspaceView(queryClient, false));
+      timelineScrollTop = -1;
+      view.rerender(workspaceView(queryClient, true));
+
+      await waitFor(() => expect(timelineScrollTop).toBe(480));
+    } finally {
+      if (scrollHeightDescriptor === undefined) {
+        Reflect.deleteProperty(timelinePrototype, "scrollHeight");
+      } else {
+        Object.defineProperty(timelinePrototype, "scrollHeight", scrollHeightDescriptor);
+      }
+      if (scrollTopDescriptor === undefined) {
+        Reflect.deleteProperty(timelinePrototype, "scrollTop");
+      } else {
+        Object.defineProperty(timelinePrototype, "scrollTop", scrollTopDescriptor);
+      }
+    }
+  });
+
   it("restores the most recent project and conversation after the AI workspace remounts", async () => {
     const user = userEvent.setup();
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

@@ -1250,6 +1250,7 @@ describe("DeviceRobot Web UI", () => {
       conversationId: "723e4567-e89b-12d3-a456-426614174000",
     });
     expect(await screen.findByText("已生成首页可见性检查计划。")).toBeInTheDocument();
+    expect(document.querySelector(".ai-test-message header")).toBeNull();
     expect(screen.getByText("ActionPlan 预览")).toBeInTheDocument();
     expect(screen.getByText("assert.visible")).toBeInTheDocument();
     expect(screen.getByText("执行前必须确认")).toBeInTheDocument();
@@ -1328,7 +1329,7 @@ describe("DeviceRobot Web UI", () => {
     });
   });
 
-  it("executes an authorized workspace plan without rebinding its application package", async () => {
+  it("keeps AI chat in autonomous mode when an authorized workspace plan is returned", async () => {
     const workspacePlan: AiPlanResponse = {
       ...aiPlanResponse,
       plan: {
@@ -1355,13 +1356,16 @@ describe("DeviceRobot Web UI", () => {
     renderApp();
 
     await user.click(await screen.findByRole("button", { name: "AI" }));
-    await user.click(screen.getByText("方案"));
-    await user.click(screen.getByRole("menuitemradio", { name: /^工作区操作/u }));
+    expect(screen.queryByRole("menu", { name: "测试方案" })).not.toBeInTheDocument();
+    expect(screen.queryByText("方案")).not.toBeInTheDocument();
     await user.type(screen.getByRole("textbox", { name: "测试目标" }), "卸载旧应用");
     await user.click(screen.getByRole("button", { name: "生成操作计划" }));
 
     await vi.waitFor(() => expect(getAiPlanRequests()).toBe(1));
-    expect(getLastAiPlanRequest()).toMatchObject({ workspaceExecution: true });
+    expect(getLastAiPlanRequest()).toMatchObject({
+      liveUiExecution: true,
+      workspaceExecution: false,
+    });
     await vi.waitFor(() => expect(getWorkspaceExecutionRequests()).toBe(1));
     expect(getLastWorkspaceExecutionRequest()).toMatchObject({
       deviceSerial: "8B3Y0THX0",

@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   CheckCircle2,
-  ChevronDown,
   CircleX,
   Clock3,
   FileArchive,
@@ -411,9 +410,6 @@ export function AiPlanPanel({
   const [selectedModel, setSelectedModel] = useState("");
   const [editingConfiguration, setEditingConfiguration] = useState(false);
   const [externalDataAcknowledged, setExternalDataAcknowledged] = useState(false);
-  const [liveUiExecution, setLiveUiExecution] = useState(true);
-  const [workspaceExecution, setWorkspaceExecution] = useState(false);
-  const [planMenuOpen, setPlanMenuOpen] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
   const [installableArtifacts, setInstallableArtifacts] = useState<ApkArtifact[]>([]);
@@ -640,7 +636,7 @@ export function AiPlanPanel({
     configured &&
     projectId.length > 0 &&
     selectedConversationId.length > 0 &&
-    (workspaceExecution || appId.length > 0) &&
+    appId.length > 0 &&
     goal.trim().length > 0 &&
     !uploadApkMutation.isPending;
   const showConfiguration =
@@ -1086,18 +1082,16 @@ export function AiPlanPanel({
               ) : (
                 messages.map((message) => (
                   <article key={message.id} className={`ai-test-message ${message.role}`}>
-                    <header>
-                      <span>{message.role === "user" ? "测试目标" : "AI 计划"}</span>
-                      {message.plan !== undefined && (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedPlanId(message.plan?.plan.id ?? "")}
-                        >
-                          查看计划
-                        </button>
-                      )}
-                    </header>
                     <p>{message.content}</p>
+                    {message.plan !== undefined && (
+                      <button
+                        className="ai-test-message-plan-action"
+                        type="button"
+                        onClick={() => setSelectedPlanId(message.plan?.plan.id ?? "")}
+                      >
+                        查看计划
+                      </button>
+                    )}
                   </article>
                 ))
               )}
@@ -1125,8 +1119,8 @@ export function AiPlanPanel({
                             (artifact) => artifact.id,
                           ),
                         }),
-                    liveUiExecution,
-                    workspaceExecution,
+                    liveUiExecution: true,
+                    workspaceExecution: false,
                     goal: goal.trim(),
                   });
                 }
@@ -1197,66 +1191,6 @@ export function AiPlanPanel({
                   >
                     <Paperclip aria-hidden="true" size={15} strokeWidth={1.9} />
                   </button>
-                  <details
-                    className="ai-test-plan-mode"
-                    open={planMenuOpen}
-                    onToggle={(event) => setPlanMenuOpen(event.currentTarget.open)}
-                  >
-                    <summary>
-                      方案
-                      <ChevronDown aria-hidden="true" size={14} strokeWidth={1.9} />
-                    </summary>
-                    <div role="menu" aria-label="测试方案">
-                      <button
-                        className={liveUiExecution ? "" : "selected"}
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={!liveUiExecution}
-                        disabled={planMutation.isPending}
-                        onClick={() => {
-                          setLiveUiExecution(false);
-                          setWorkspaceExecution(false);
-                          setPlanMenuOpen(false);
-                        }}
-                      >
-                        <strong>静态执行</strong>
-                        <small>仅按审核后的固定步骤执行。</small>
-                      </button>
-                      <button
-                        className={liveUiExecution ? "selected" : ""}
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={liveUiExecution}
-                        disabled={planMutation.isPending}
-                        onClick={() => {
-                          setLiveUiExecution(true);
-                          setWorkspaceExecution(false);
-                          setPlanMenuOpen(false);
-                        }}
-                      >
-                        <strong>自主执行</strong>
-                        <small>执行时向 AI 提供实时截图与 UI 层级，逐步自主操作。</small>
-                      </button>
-                      <button
-                        className={workspaceExecution ? "selected" : ""}
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={workspaceExecution}
-                        disabled={planMutation.isPending}
-                        onClick={() => {
-                          setLiveUiExecution(false);
-                          setWorkspaceExecution(true);
-                          setPlanMenuOpen(false);
-                        }}
-                      >
-                        <strong>工作区操作</strong>
-                        <small>直接执行已授权的应用管理、设备控制和 ADB 操作。</small>
-                      </button>
-                    </div>
-                  </details>
-                  <span className="ai-test-plan-mode-label">
-                    {workspaceExecution ? "工作区操作" : liveUiExecution ? "自主执行" : "静态执行"}
-                  </span>
                 </div>
                 <button
                   className="primary-command ai-test-composer-submit"

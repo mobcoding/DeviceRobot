@@ -4571,31 +4571,22 @@ h3 {
   border-left: 3px solid #3f887f;
 }
 
-.ai-test-message header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  color: #9da9ac;
-  font-size: 11px;
-  font-weight: 700;
+.ai-test-message p {
+  margin: 0;
+  color: #c7d0d1;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
 }
 
-.ai-test-message header button {
+.ai-test-message-plan-action {
+  margin-top: 9px;
   padding: 0;
   border: 0;
   color: #94d3c9;
   background: transparent;
   font-size: 11px;
   font-weight: 700;
-}
-
-.ai-test-message p {
-  margin: 7px 0 0;
-  color: #c7d0d1;
-  font-size: 13px;
-  line-height: 1.65;
-  white-space: pre-wrap;
 }
 
 .ai-test-active-run {
@@ -5290,87 +5281,6 @@ h3 {
   min-width: 0;
   align-items: center;
   gap: 8px;
-}
-
-.ai-test-plan-mode {
-  position: relative;
-}
-
-.ai-test-plan-mode summary {
-  display: inline-flex;
-  min-height: 28px;
-  align-items: center;
-  gap: 4px;
-  padding: 0 8px;
-  border: 1px solid #525a5c;
-  border-radius: 4px;
-  color: #d9e1e2;
-  background: #303536;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
-  list-style: none;
-}
-
-.ai-test-plan-mode summary::-webkit-details-marker {
-  display: none;
-}
-
-.ai-test-plan-mode[open] summary {
-  border-color: #69b7ad;
-  color: #dcf4ef;
-}
-
-.ai-test-plan-mode[open] summary svg {
-  transform: rotate(180deg);
-}
-
-.ai-test-plan-mode > div {
-  position: absolute;
-  z-index: 8;
-  right: 0;
-  bottom: 34px;
-  display: grid;
-  width: 250px;
-  padding: 5px;
-  border: 1px solid #485355;
-  border-radius: 5px;
-  background: #202425;
-  box-shadow: 0 12px 26px rgb(0 0 0 / 32%);
-}
-
-.ai-test-plan-mode > div button {
-  display: grid;
-  gap: 2px;
-  padding: 8px 9px;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  color: #bdc9cb;
-  background: transparent;
-  text-align: left;
-}
-
-.ai-test-plan-mode > div button:hover:not(:disabled),
-.ai-test-plan-mode > div button.selected {
-  border-color: #427a73;
-  color: #e4f4f0;
-  background: #20332f;
-}
-
-.ai-test-plan-mode > div button strong {
-  font-size: 12px;
-}
-
-.ai-test-plan-mode > div button small {
-  color: #93a1a4;
-  font-size: 11px;
-  line-height: 1.45;
-}
-
-.ai-test-plan-mode-label {
-  color: #a9b6b8;
-  font-size: 12px;
-  white-space: nowrap;
 }
 
 .ai-test-composer .ai-test-composer-submit {

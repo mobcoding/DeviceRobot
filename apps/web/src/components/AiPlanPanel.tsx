@@ -281,14 +281,25 @@ function TestRunStep({
 
 function ConversationTestRunCard({
   run,
+  plannedActions,
   cancelling,
   onCancel,
 }: {
   run: TestExecutionRun;
+  plannedActions: readonly AgentAction[];
   cancelling: boolean;
   onCancel(runId: string): void;
 }): React.JSX.Element {
   const running = run.status === "running";
+  const displayedSteps: readonly TestStepExecution[] =
+    run.steps.length > 0 || !running
+      ? run.steps
+      : plannedActions.map((action, index) => ({
+          index,
+          action,
+          status: "pending" as const,
+          screenshotAvailable: false,
+        }));
 
   return (
     <section
@@ -321,7 +332,7 @@ function ConversationTestRunCard({
       </header>
       {run.message !== undefined && <p className="ai-test-active-run-message">{run.message}</p>}
       <ol>
-        {run.steps.length === 0 ? (
+        {displayedSteps.length === 0 ? (
           <li className="ai-test-active-run-pending">
             {running ? (
               <>
@@ -333,7 +344,7 @@ function ConversationTestRunCard({
             )}
           </li>
         ) : (
-          run.steps.map((step) => (
+          displayedSteps.map((step) => (
             <li key={`${run.id}:${step.index}`}>
               <span className="test-step-index">{step.index + 1}</span>
               <div>
@@ -1145,11 +1156,22 @@ export function AiPlanPanel({
     conversationTestRun.conversationId === activeConversationId
       ? (runs.find((run) => run.id === conversationTestRun.run.id) ?? conversationTestRun.run)
       : undefined;
+  const currentConversationPlanIds = new Set(
+    messages.flatMap((message) => (message.plan === undefined ? [] : [message.plan.plan.id])),
+  );
+  const activeConversationRun = runs.find(
+    (run) => isTestRunInProgress(run) && currentConversationPlanIds.has(run.planId),
+  );
   const selectedPlanRun =
     selectedExecutionPlan === undefined
       ? undefined
       : runs.find((run) => run.planId === selectedExecutionPlan.id);
-  const timelineTestRun = currentConversationRun ?? selectedPlanRun;
+  const timelineTestRun = currentConversationRun ?? activeConversationRun ?? selectedPlanRun;
+  const timelineTestPlanActions =
+    timelineTestRun === undefined
+      ? []
+      : (messages.find((message) => message.plan?.plan.id === timelineTestRun.planId)?.plan?.plan
+          .actions ?? []);
   const timelineWorkspaceExecution =
     conversationWorkspaceExecution !== undefined &&
     conversationWorkspaceExecution.projectId === projectId &&
@@ -1591,6 +1613,7 @@ export function AiPlanPanel({
                   {timelineTestRun !== undefined && (
                     <ConversationTestRunCard
                       run={timelineTestRun}
+                      plannedActions={timelineTestPlanActions}
                       cancelling={cancelMutation.isPending}
                       onCancel={(runId) => cancelMutation.mutate(runId)}
                     />

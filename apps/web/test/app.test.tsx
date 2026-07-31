@@ -1450,6 +1450,20 @@ describe("DeviceRobot Web UI", () => {
     expect(within(execution).getByText("等待中")).toBeInTheDocument();
   });
 
+  it("shows planned steps while a live AI test is starting", async () => {
+    mockApis({ testRuns: [{ ...testExecutionRunResponse, steps: [] }] });
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "AI" }));
+    await user.type(screen.getByRole("textbox", { name: "测试目标" }), "验证首页可见");
+    await user.click(screen.getByRole("button", { name: "生成操作计划" }));
+
+    const execution = await screen.findByRole("region", { name: "当前测试执行" });
+    expect(within(execution).getByText("assert.visible")).toBeInTheDocument();
+    expect(within(execution).getByText("等待中")).toBeInTheDocument();
+  });
+
   it("saves a completed AI exploration and starts its local DSL regression without a new AI request", async () => {
     const {
       getAiPlanRequests,

@@ -1351,7 +1351,7 @@ describe("DeviceRobot Web UI", () => {
       messageTimes.every((messageTime) => messageTime.dateTime === aiPlanResponse.generatedAt),
     ).toBe(true);
     expect(document.querySelector(".ai-test-message.assistant .ai-test-message-time")).toBeNull();
-    expect(screen.getByText("ActionPlan 预览")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "当前计划" })).toBeInTheDocument();
     expect(screen.getByText("assert.visible")).toBeInTheDocument();
     expect(screen.getByText("执行前必须确认")).toBeInTheDocument();
   });
@@ -1398,7 +1398,7 @@ describe("DeviceRobot Web UI", () => {
     await user.click(await screen.findByRole("button", { name: "AI" }));
     await user.type(screen.getByRole("textbox", { name: "测试目标" }), "验证首页可见");
     await user.click(screen.getByRole("button", { name: "生成操作计划" }));
-    await screen.findByText("ActionPlan 预览");
+    await screen.findByRole("heading", { level: 2, name: "当前计划" });
     await user.click(screen.getByRole("button", { name: "执行计划" }));
 
     await vi.waitFor(() => expect(getTestExecutionRequests()).toBe(1));
@@ -1432,7 +1432,7 @@ describe("DeviceRobot Web UI", () => {
     await user.click(await screen.findByRole("button", { name: "AI" }));
     await user.type(screen.getByRole("textbox", { name: "测试目标" }), "验证启动进入首页");
     await user.click(screen.getByRole("button", { name: "生成操作计划" }));
-    await screen.findByText("ActionPlan 预览");
+    await screen.findByRole("heading", { level: 2, name: "当前计划" });
     await user.click(screen.getByRole("button", { name: "保存为 DSL 用例" }));
 
     await vi.waitFor(() => expect(getExplorationSaveRequests()).toBe(1));
@@ -1465,7 +1465,7 @@ describe("DeviceRobot Web UI", () => {
     await user.click(await screen.findByRole("button", { name: "AI" }));
     await user.type(screen.getByRole("textbox", { name: "测试目标" }), "验证启动流程");
     await user.click(screen.getByRole("button", { name: "生成操作计划" }));
-    await screen.findByText("ActionPlan 预览");
+    await screen.findByRole("heading", { level: 2, name: "当前计划" });
     expect(screen.getByText("com.example.app", { selector: "code" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "执行计划" }));
 

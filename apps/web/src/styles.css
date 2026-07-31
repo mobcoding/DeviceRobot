@@ -4794,10 +4794,10 @@ h3 {
 
 .ai-test-plan-inspector > header,
 .ai-test-run-history > header {
-  min-height: 59px;
+  min-height: 50px;
   justify-content: space-between;
   gap: 10px;
-  padding: 12px 14px;
+  padding: 10px 14px;
 }
 
 .ai-test-plan-inspector > header > div,
@@ -4819,31 +4819,29 @@ h3 {
   font-size: 13px;
 }
 
-.ai-test-plan-inspector > header em {
+.ai-test-plan-approval {
   flex: 0 0 auto;
+  padding: 3px 6px;
+  border-radius: 999px;
   color: #d4b576;
-  font-size: 11px;
-  font-style: normal;
+  background: #2d2820;
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .ai-test-plan-picker {
-  display: grid;
-  gap: 6px;
-  padding: 0 14px 11px;
-}
-
-.ai-test-plan-picker > span {
-  color: #8c999c;
-  font-size: 11px;
-  font-weight: 700;
+  display: block;
+  padding: 2px 14px 0;
 }
 
 .ai-test-plan-actions {
   display: grid;
-  gap: 1px;
-  margin: 0;
-  padding: 7px 14px 4px;
+  max-height: 194px;
+  gap: 4px;
+  margin: 0 14px;
+  padding: 9px 0 2px;
   list-style: none;
+  overflow-y: auto;
 }
 
 .ai-test-plan-actions li {
@@ -4851,8 +4849,9 @@ h3 {
   min-width: 0;
   align-items: center;
   gap: 8px;
-  min-height: 29px;
-  padding: 5px 6px;
+  min-height: 30px;
+  padding: 5px 7px;
+  border-left: 2px solid #32665d;
   background: #1c2021;
 }
 
@@ -4879,9 +4878,26 @@ h3 {
   white-space: nowrap;
 }
 
+.ai-test-plan-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 8px 14px 0;
+}
+
+.ai-test-plan-summary span {
+  padding: 3px 6px;
+  border: 1px solid #30413f;
+  border-radius: 999px;
+  color: #9bc3bb;
+  background: #172322;
+  font-size: 10px;
+  line-height: 1.25;
+}
+
 .ai-test-plan-evidence,
 .ai-test-plan-inspector .ai-live-ui-summary {
-  margin: 6px 14px;
+  margin: 8px 14px 0;
   color: #8c999c;
   font-size: 11px;
   line-height: 1.5;
@@ -4891,7 +4907,7 @@ h3 {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
-  padding: 11px 14px 14px;
+  padding: 10px 14px 14px;
 }
 
 .ai-test-plan-execution code {
@@ -4910,33 +4926,34 @@ h3 {
   font-size: 12px;
 }
 
-.ai-test-run-history > header > span {
-  color: #839094;
-  font-size: 11px;
-}
-
-.ai-test-run-history-actions {
-  display: inline-flex;
+.ai-test-run-history-all,
+.ai-test-run-detail-button {
   flex: 0 0 auto;
-  align-items: center;
-  gap: 7px;
-}
-
-.ai-test-run-history-actions > span {
-  color: #839094;
+  border: 0;
+  color: #92cfc3;
+  background: transparent;
   font-size: 11px;
+  font-weight: 700;
 }
 
-.ai-test-run-history-actions .icon-button {
-  width: 27px;
-  height: 27px;
+.ai-test-run-history-all {
+  padding: 5px 0 5px 7px;
+}
+
+.ai-test-run-history-all:hover:not(:disabled),
+.ai-test-run-detail-button:hover:not(:disabled) {
+  color: #d8faf2;
+}
+
+.ai-test-run-history-all:disabled {
+  color: #667274;
 }
 
 .ai-test-run-history > ol {
   display: grid;
-  gap: 1px;
+  gap: 4px;
   margin: 0;
-  padding: 0 14px 13px;
+  padding: 0 14px 14px;
   list-style: none;
 }
 
@@ -4945,9 +4962,11 @@ h3 {
   min-width: 0;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 7px;
-  min-height: 42px;
-  padding: 6px 7px;
+  gap: 9px;
+  min-height: 45px;
+  padding: 7px 8px;
+  border: 1px solid #293233;
+  border-radius: 4px;
   background: #1a1e1f;
 }
 
@@ -4974,29 +4993,9 @@ h3 {
   font-size: 10px;
 }
 
-.ai-test-run-row-actions {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.ai-test-run-row-actions a,
-.ai-test-run-row-actions button {
-  display: grid;
-  width: 24px;
-  height: 24px;
-  place-items: center;
-  border: 1px solid #465052;
-  border-radius: 3px;
-  color: #bcd1d0;
-  background: transparent;
-}
-
-.ai-test-run-row-actions a:hover,
-.ai-test-run-row-actions button:hover:not(:disabled) {
-  border-color: #73b6ad;
-  color: #e2faf5;
-  background: #223331;
+.ai-test-run-detail-button {
+  min-height: 24px;
+  padding: 4px 0;
 }
 
 .ai-test-run-detail-dialog {
@@ -5088,32 +5087,45 @@ h3 {
 
 .ai-test-inspector .test-suite-panel {
   margin: 0;
-  padding: 13px 14px 16px;
+  gap: 8px;
+  padding: 0 14px 14px;
   background: transparent;
 }
 
 .ai-test-inspector .test-suite-heading {
-  display: block;
+  display: flex;
+  min-height: 50px;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 0;
 }
 
 .ai-test-inspector .test-suite-heading > div {
-  margin-bottom: 10px;
+  min-width: 0;
+  margin: 0;
 }
 
 .ai-test-inspector .test-suite-heading h2 {
   font-size: 13px;
 }
 
+.ai-test-inspector .test-suite-heading p {
+  font-size: 10px;
+}
+
 .ai-test-inspector .test-suite-import {
-  justify-content: stretch;
+  flex: 0 0 auto;
+  justify-content: flex-end;
 }
 
 .ai-test-inspector .test-suite-import-button {
-  width: 100%;
+  min-height: 28px;
+  padding-inline: 8px;
+  font-size: 11px;
 }
 
 .ai-test-inspector .test-suite-item {
-  padding: 9px;
+  padding: 8px;
 }
 
 .ai-test-inspector .test-suite-item header,

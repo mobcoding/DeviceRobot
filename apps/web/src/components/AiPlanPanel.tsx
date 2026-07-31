@@ -11,7 +11,6 @@ import {
   FolderGit2,
   Image,
   KeyRound,
-  List,
   ListRestart,
   LoaderCircle,
   MessageSquareText,
@@ -1277,23 +1276,19 @@ export function AiPlanPanel({
               <header>
                 <div>
                   <Activity aria-hidden="true" size={17} strokeWidth={1.8} />
-                  <div>
-                    <span>ActionPlan 预览</span>
-                    <h2>当前测试执行计划</h2>
-                  </div>
+                  <h2>当前计划</h2>
                 </div>
-                <em>
+                <span className="ai-test-plan-approval">
                   {selectedExecutionPlan?.workspaceExecution === true
                     ? "已授权执行"
                     : "执行前必须确认"}
-                </em>
+                </span>
               </header>
               {selectedPlanResponse === undefined || selectedExecutionPlan === undefined ? (
                 <p className="ai-test-inspector-empty">生成计划后，会在此处显示待执行步骤。</p>
               ) : (
                 <>
                   <label className="ai-test-plan-picker">
-                    <span>计划</span>
                     <select
                       aria-label="当前测试计划"
                       value={selectedPlanResponse.plan.id}
@@ -1308,6 +1303,12 @@ export function AiPlanPanel({
                         ))}
                     </select>
                   </label>
+                  <p className="ai-test-plan-summary">
+                    <span>{selectedExecutionPlan.actions.length} 个步骤</span>
+                    <span>{selectedPlanResponse.context.evidence.length} 条源码证据</span>
+                    {selectedExecutionPlan.liveUiExecution !== undefined && <span>实时 UI</span>}
+                    {selectedExecutionPlan.workspaceExecution === true && <span>工作区操作</span>}
+                  </p>
                   <ol className="ai-test-plan-actions">
                     {selectedExecutionPlan.actions.map((action, index) => (
                       <li key={`${selectedExecutionPlan.id}-${index}`}>
@@ -1316,20 +1317,6 @@ export function AiPlanPanel({
                       </li>
                     ))}
                   </ol>
-                  <p className="ai-test-plan-evidence">
-                    已引用 {selectedPlanResponse.context.evidence.length} 条源码证据。
-                  </p>
-                  {selectedExecutionPlan.liveUiExecution !== undefined && (
-                    <p className="ai-live-ui-summary">
-                      已启用自主执行，运行时会传递实时截图和 UI 层级，最多{" "}
-                      {selectedExecutionPlan.liveUiExecution.maxSteps} 步。
-                    </p>
-                  )}
-                  {selectedExecutionPlan.workspaceExecution === true && (
-                    <p className="ai-live-ui-summary">
-                      工作区操作会直接作用于当前设备，不会自动清除应用数据或启动 Appium。
-                    </p>
-                  )}
                   <footer className="ai-test-plan-execution">
                     <code>
                       {selectedExecutionPlan.workspaceExecution === true
@@ -1431,21 +1418,17 @@ export function AiPlanPanel({
               <header>
                 <div>
                   <Clock3 aria-hidden="true" size={17} strokeWidth={1.8} />
-                  <h2>测试运行</h2>
+                  <h2>最近运行</h2>
                 </div>
-                <div className="ai-test-run-history-actions">
-                  <span>{runs.length} 条</span>
-                  <button
-                    className="icon-button"
-                    type="button"
-                    aria-label="查看全部测试运行"
-                    title="查看全部测试运行"
-                    disabled={runs.length === 0}
-                    onClick={() => setSelectedRunId(runs[0]?.id ?? "")}
-                  >
-                    <List aria-hidden="true" size={15} strokeWidth={1.8} />
-                  </button>
-                </div>
+                <button
+                  className="ai-test-run-history-all"
+                  type="button"
+                  aria-label="查看全部测试运行"
+                  disabled={runs.length === 0}
+                  onClick={() => setSelectedRunId(runs[0]?.id ?? "")}
+                >
+                  全部 {runs.length}
+                </button>
               </header>
               {runs.length === 0 ? (
                 <p>暂无测试运行。</p>
@@ -1461,31 +1444,14 @@ export function AiPlanPanel({
                         {statusIcon(run.status)}
                         {statusLabel(run.status)}
                       </span>
-                      <div className="ai-test-run-row-actions">
-                        <button
-                          type="button"
-                          aria-label={`查看 ${run.name} 的运行详情`}
-                          title="查看运行详情"
-                          onClick={() => setSelectedRunId(run.id)}
-                        >
-                          <FileText aria-hidden="true" size={14} strokeWidth={1.8} />
-                        </button>
-                        {run.status !== "running" && (
-                          <>
-                            <a
-                              href={testReportHtmlUrl(run.id)}
-                              target="_blank"
-                              rel="noreferrer"
-                              title="查看测试报告"
-                            >
-                              <FileText aria-hidden="true" size={14} strokeWidth={1.8} />
-                            </a>
-                            <a href={testReportZipUrl(run.id)} title="导出测试报告 ZIP">
-                              <FileArchive aria-hidden="true" size={14} strokeWidth={1.8} />
-                            </a>
-                          </>
-                        )}
-                      </div>
+                      <button
+                        className="ai-test-run-detail-button"
+                        type="button"
+                        aria-label={`查看 ${run.name} 的运行详情`}
+                        onClick={() => setSelectedRunId(run.id)}
+                      >
+                        详情
+                      </button>
                     </li>
                   ))}
                 </ol>

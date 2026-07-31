@@ -259,6 +259,24 @@ function parseTestRunId(params: unknown): string {
   return runId;
 }
 
+function parseTestRunProjectId(query: unknown): string | undefined {
+  if (typeof query !== "object" || query === null) {
+    return undefined;
+  }
+
+  const projectId = (query as Record<string, unknown>).projectId;
+  if (projectId === undefined) {
+    return undefined;
+  }
+  if (
+    typeof projectId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(projectId)
+  ) {
+    throw new TestExecutionError("测试项目编号无效。", 400);
+  }
+  return projectId;
+}
+
 function parseTestSuiteId(params: unknown): string {
   if (typeof params !== "object" || params === null) {
     throw new TestSuiteError("缺少测试用例集编号。", 400);
@@ -845,9 +863,11 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
 
   registerAiRoutes(app, aiPlanService, aiPlanErrorReply);
 
-  app.get("/api/v1/test-runs", async (_request, reply) => {
+  app.get("/api/v1/test-runs", async (request, reply) => {
     try {
-      return testExecutionRunListResponseSchema.parse(await testExecutionService.list());
+      return testExecutionRunListResponseSchema.parse(
+        await testExecutionService.list(parseTestRunProjectId(request.query)),
+      );
     } catch (error) {
       return testExecutionErrorReply(reply, error);
     }

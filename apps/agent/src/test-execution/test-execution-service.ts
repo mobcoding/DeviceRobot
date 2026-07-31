@@ -42,7 +42,7 @@ export class TestExecutionError extends Error {
 }
 
 export interface TestExecutionService {
-  list(): Promise<TestExecutionRunListResponse>;
+  list(projectId?: string): Promise<TestExecutionRunListResponse>;
   find(runId: string): Promise<TestExecutionRun>;
   start(request: StartTestExecutionRequest): Promise<TestExecutionRun>;
   cancel(runId: string): Promise<TestExecutionRun>;
@@ -766,8 +766,11 @@ export class LocalTestExecutionService implements TestExecutionService {
       options.applicationDataService ?? defaultApplicationDataService();
   }
 
-  public async list(): Promise<TestExecutionRunListResponse> {
-    return { runs: this.#store.list() };
+  public async list(projectId?: string): Promise<TestExecutionRunListResponse> {
+    const runs = this.#store.list();
+    return {
+      runs: projectId === undefined ? runs : runs.filter((run) => run.projectId === projectId),
+    };
   }
 
   public async find(runId: string): Promise<TestExecutionRun> {

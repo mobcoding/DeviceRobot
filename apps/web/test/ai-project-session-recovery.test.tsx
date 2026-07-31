@@ -78,7 +78,7 @@ function mockApis(testRuns: readonly unknown[] = []): void {
     if (url === "/api/v1/projects") {
       return response({ projects: [firstProject, recentProject] });
     }
-    if (url === "/api/v1/test-runs") {
+    if (url === "/api/v1/test-runs" || url.startsWith("/api/v1/test-runs?projectId=")) {
       return response({ runs: testRuns });
     }
 
@@ -175,6 +175,13 @@ describe("AI project session recovery", () => {
 
     expect(await screen.findByText("Recent 项目运行")).toBeInTheDocument();
     expect(screen.queryByText("Example 项目运行")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "查看全部测试运行" }));
+    const dialog = await screen.findByRole("dialog", { name: "测试运行详情" });
+    expect(within(dialog).getByRole("option", { name: /Recent 项目运行/u })).toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole("option", { name: /Example 项目运行/u }),
+    ).not.toBeInTheDocument();
   });
 
   it("scrolls to the latest message whenever the AI workspace is shown", async () => {

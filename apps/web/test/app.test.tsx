@@ -772,7 +772,7 @@ function mockApis(
       );
     }
 
-    if (url === "/api/v1/test-runs") {
+    if (url === "/api/v1/test-runs" || url.startsWith("/api/v1/test-runs?projectId=")) {
       if (method === "POST") {
         testExecutionRequests += 1;
         lastTestExecutionRequest = JSON.parse(String(init?.body ?? "{}"));

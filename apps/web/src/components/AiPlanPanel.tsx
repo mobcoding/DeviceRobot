@@ -458,13 +458,6 @@ export function AiPlanPanel({
     queryFn: ({ signal }) => fetchProjects(signal),
     retry: false,
   });
-  const runsQuery = useQuery({
-    queryKey: ["test-runs"],
-    queryFn: ({ signal }) => fetchTestRuns(signal),
-    retry: 1,
-    refetchInterval: (query) =>
-      query.state.data?.runs.some((run) => run.status === "running") ? 1_000 : 8_000,
-  });
   const availableProjects = projectsQuery.data?.projects ?? [];
   const projectId = availableProjects.some((project) => project.id === selectedProjectId)
     ? selectedProjectId
@@ -484,6 +477,14 @@ export function AiPlanPanel({
   const selectedProject = projects.find((project) => project.id === projectId);
   const appIds = applicationIds(selectedProject);
   const appId = appIds[0] ?? "";
+  const runsQuery = useQuery({
+    queryKey: ["test-runs", projectId],
+    queryFn: ({ signal }) => fetchTestRuns(projectId, signal),
+    enabled: projectId.length > 0,
+    retry: 1,
+    refetchInterval: (query) =>
+      query.state.data?.runs.some((run) => run.status === "running") ? 1_000 : 8_000,
+  });
   const conversationsQuery = useQuery({
     queryKey: ["ai-conversations", projectId],
     queryFn: ({ signal }) => fetchAiConversations(projectId, signal),
@@ -543,24 +544,33 @@ export function AiPlanPanel({
     projectId,
     selectedConversationId,
   ]);
-  const messages: ConversationMessage[] = (conversationDetailQuery.data?.messages ?? []).map(
-    (message) => ({
-      id: message.id,
-      role: message.role,
-      content: message.content,
-      createdAt: message.createdAt,
-      ...(message.plan === undefined ? {} : { plan: message.plan }),
-    }),
+  const activeConversation = conversationsQuery.data?.conversations.find(
+    (conversation) =>
+      conversation.id === selectedConversationId && conversation.projectId === projectId,
   );
+  const conversationMatchesProject =
+    activeConversation !== undefined &&
+    conversationDetailQuery.data?.conversation.id === selectedConversationId &&
+    conversationDetailQuery.data.conversation.projectId === projectId;
+  const activeConversationId = conversationMatchesProject ? selectedConversationId : "";
+  const messages: ConversationMessage[] = conversationMatchesProject
+    ? (conversationDetailQuery.data?.messages ?? []).map((message) => ({
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        createdAt: message.createdAt,
+        ...(message.plan === undefined ? {} : { plan: message.plan }),
+      }))
+    : [];
   const latestMessageId = messages.at(-1)?.id ?? "";
   useEffect(() => {
     const timeline = workspaceRef.current?.querySelector<HTMLDivElement>(".ai-test-timeline");
-    if (timeline === undefined || timeline === null || selectedConversationId.length === 0) {
+    if (timeline === undefined || timeline === null || activeConversationId.length === 0) {
       return;
     }
 
     timeline.scrollTop = timeline.scrollHeight;
-  }, [latestMessageId, messages.length, selectedConversationId]);
+  }, [activeConversationId, latestMessageId, messages.length]);
   useEffect(
     () => () => {
       planRequestAbortControllerRef.current?.abort();
@@ -697,7 +707,7 @@ export function AiPlanPanel({
   const canGenerate =
     configured &&
     projectId.length > 0 &&
-    selectedConversationId.length > 0 &&
+    activeConversationId.length > 0 &&
     appId.length > 0 &&
     goal.trim().length > 0 &&
     !uploadApkMutation.isPending;
@@ -1169,7 +1179,7 @@ export function AiPlanPanel({
                     controller,
                     request: {
                       projectId,
-                      conversationId: selectedConversationId,
+                      conversationId: activeConversationId,
                       ...(device === undefined ? {} : { deviceSerial: device.serial }),
                       appId,
                       ...(installableArtifacts.length === 0

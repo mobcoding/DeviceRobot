@@ -86,6 +86,42 @@ describe("DeviceRobot Agent", () => {
     await app.close();
   });
 
+  it("limits listed test runs to the requested project", async () => {
+    const projectId = "123e4567-e89b-12d3-a456-426614174000";
+    const run = {
+      id: "223e4567-e89b-12d3-a456-426614174000",
+      projectId,
+      planId: "project-plan",
+      name: "项目测试运行",
+      deviceSerial: "device-1",
+      appId: "com.example.app",
+      status: "succeeded" as const,
+      steps: [],
+      startedAt: "2026-07-21T10:00:00.000Z",
+    };
+    const list = vi.fn(async (requestedProjectId?: string) => ({
+      runs: requestedProjectId === projectId ? [run] : [],
+    }));
+    const { app } = await createAgentApp({
+      localAppData: createTemporaryRoot(),
+      testExecutionService: { list, dispose: async () => {} } as never,
+    });
+
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/test-runs?projectId=${projectId}`,
+        headers: { host: "127.0.0.1:43110" },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ runs: [{ id: run.id, projectId }] });
+      expect(list).toHaveBeenCalledWith(projectId);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("serves current production assets while preserving SPA and API fallbacks", async () => {
     const root = createTemporaryRoot();
     const webRoot = join(root, "web");

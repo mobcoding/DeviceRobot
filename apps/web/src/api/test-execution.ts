@@ -9,9 +9,13 @@ import {
 
 import { requestJson } from "./client";
 
-export async function fetchTestRuns(signal?: AbortSignal): Promise<TestExecutionRunListResponse> {
+export async function fetchTestRuns(
+  projectId?: string,
+  signal?: AbortSignal,
+): Promise<TestExecutionRunListResponse> {
+  const query = projectId === undefined ? "" : `?projectId=${encodeURIComponent(projectId)}`;
   return await requestJson(
-    "/api/v1/test-runs",
+    `/api/v1/test-runs${query}`,
     { headers: { Accept: "application/json" }, ...(signal === undefined ? {} : { signal }) },
     testExecutionRunListResponseSchema,
     "测试运行读取失败。",

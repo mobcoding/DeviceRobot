@@ -20,7 +20,9 @@ export async function requestJson<T>(
     if (error instanceof Error && error.name === "AbortError") {
       throw error;
     }
-    throw new Error("无法连接本地 Agent。请确认 Agent 正在运行。");
+    throw new Error("无法连接本地 Agent。请确认 Agent 正在运行。", {
+      cause: error,
+    });
   }
   if (!response.ok) {
     throw await responseError(response, fallback);

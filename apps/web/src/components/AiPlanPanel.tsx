@@ -1156,13 +1156,9 @@ export function AiPlanPanel({
     conversationTestRun.conversationId === activeConversationId
       ? (runs.find((run) => run.id === conversationTestRun.run.id) ?? conversationTestRun.run)
       : undefined;
-  const selectedPlanRun =
-    selectedExecutionPlan === undefined
-      ? undefined
-      : runs.find((run) => run.planId === selectedExecutionPlan.id);
-  // Each project currently has one AI conversation. Prefer its active run even while the
-  // conversation detail is refreshing, so execution steps never disappear from the timeline.
-  const timelineTestRun = currentConversationRun ?? activeRun ?? selectedPlanRun;
+  // Test execution belongs to the selected project. The conversation detail and selected plan
+  // load independently, so neither may be used as a prerequisite for showing its latest run.
+  const timelineTestRun = currentConversationRun ?? activeRun ?? runs[0];
   const timelineTestPlanActions =
     timelineTestRun === undefined
       ? []

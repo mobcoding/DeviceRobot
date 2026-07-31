@@ -235,13 +235,16 @@ describe("AI project session recovery", () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(workspaceView(queryClient, true));
 
-    expect(await screen.findByText("Example 项目运行")).toBeInTheDocument();
-    expect(screen.queryByText("Recent 项目运行")).not.toBeInTheDocument();
+    const runHistory = await screen.findByRole("region", { name: "最近测试运行" });
+    expect(await within(runHistory).findByText("Example 项目运行")).toBeInTheDocument();
+    expect(within(runHistory).queryByText("Recent 项目运行")).not.toBeInTheDocument();
 
     await user.click(await screen.findByRole("button", { name: "Recent AI project" }));
 
-    expect(await screen.findByText("Recent 项目运行")).toBeInTheDocument();
-    expect(screen.queryByText("Example 项目运行")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(runHistory).getByText("Recent 项目运行")).toBeInTheDocument(),
+    );
+    expect(within(runHistory).queryByText("Example 项目运行")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "查看全部测试运行" }));
     const dialog = await screen.findByRole("dialog", { name: "测试运行详情" });

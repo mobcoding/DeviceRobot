@@ -1375,6 +1375,43 @@ describe("DeviceRobot Web UI", () => {
     expect(within(execution).getByText("assert.visible")).toBeInTheDocument();
   });
 
+  it("shows the latest project test steps before the conversation messages load", async () => {
+    mockApis({
+      testRuns: [
+        {
+          ...testExecutionRunResponse,
+          status: "failed",
+          finishedAt: "2026-07-23T10:03:00.000Z",
+          message: "执行到首页检查时失败。",
+          steps: [
+            {
+              index: 0,
+              action: { action: "device.unlock" },
+              status: "succeeded",
+              message: "设备已唤醒。",
+              screenshotAvailable: false,
+            },
+            {
+              index: 1,
+              action: { action: "assert.visible", target: { text: "首页" } },
+              status: "failed",
+              message: "找不到文本：首页",
+              screenshotAvailable: true,
+            },
+          ],
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "AI" }));
+
+    const result = await screen.findByRole("region", { name: "测试执行结果" });
+    expect(within(result).getByText("设备已唤醒。")).toBeInTheDocument();
+    expect(within(result).getByText("找不到文本：首页")).toBeInTheDocument();
+  });
+
   it("sends an AI test goal when Enter is pressed in the composer", async () => {
     const { getAiPlanRequests, getLastAiPlanRequest } = mockApis();
     const user = userEvent.setup();

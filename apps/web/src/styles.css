@@ -4705,6 +4705,8 @@ h3 {
 }
 
 .ai-test-active-run {
+  width: min(100%, 680px);
+  min-height: 52px;
   max-width: 680px;
   overflow: hidden;
   border: 1px solid #326960;

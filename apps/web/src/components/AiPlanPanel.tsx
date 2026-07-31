@@ -300,6 +300,7 @@ function ConversationTestRunCard({
           status: "pending" as const,
           screenshotAvailable: false,
         }));
+  const waitingForFirstStep = running && displayedSteps.length === 0;
 
   return (
     <section
@@ -310,6 +311,12 @@ function ConversationTestRunCard({
         <div>
           <span>{running ? "当前执行" : "执行结果"}</span>
           <strong>{run.name}</strong>
+          {waitingForFirstStep && (
+            <p className="ai-test-active-run-initializing" role="status">
+              <LoaderCircle aria-hidden="true" size={14} className="test-run-spinner" />
+              正在连接设备并读取首个页面
+            </p>
+          )}
         </div>
         <span className={`test-status test-status-${run.status}`}>
           {statusIcon(run.status)}
@@ -331,36 +338,29 @@ function ConversationTestRunCard({
         )}
       </header>
       {run.message !== undefined && <p className="ai-test-active-run-message">{run.message}</p>}
-      <ol>
-        {displayedSteps.length === 0 ? (
-          <li className="ai-test-active-run-pending">
-            {running ? (
-              <>
-                <LoaderCircle aria-hidden="true" size={15} className="test-run-spinner" />
-                正在启动 Appium 会话并读取首个页面。
-              </>
-            ) : (
-              "本次执行未记录测试步骤。"
-            )}
-          </li>
-        ) : (
-          displayedSteps.map((step) => (
-            <li key={`${run.id}:${step.index}`}>
-              <span className="test-step-index">{step.index + 1}</span>
-              <div>
-                <code>{actionLabel(step.action)}</code>
-                {step.message !== undefined && (
-                  <p className="ai-test-active-run-step-message">{step.message}</p>
-                )}
-              </div>
-              <span className={`test-status test-status-${step.status}`}>
-                {statusIcon(step.status)}
-                {statusLabel(step.status)}
-              </span>
-            </li>
-          ))
-        )}
-      </ol>
+      {!waitingForFirstStep && (
+        <ol>
+          {displayedSteps.length === 0 ? (
+            <li className="ai-test-active-run-pending">本次执行未记录测试步骤。</li>
+          ) : (
+            displayedSteps.map((step) => (
+              <li key={`${run.id}:${step.index}`}>
+                <span className="test-step-index">{step.index + 1}</span>
+                <div>
+                  <code>{actionLabel(step.action)}</code>
+                  {step.message !== undefined && (
+                    <p className="ai-test-active-run-step-message">{step.message}</p>
+                  )}
+                </div>
+                <span className={`test-status test-status-${step.status}`}>
+                  {statusIcon(step.status)}
+                  {statusLabel(step.status)}
+                </span>
+              </li>
+            ))
+          )}
+        </ol>
+      )}
     </section>
   );
 }

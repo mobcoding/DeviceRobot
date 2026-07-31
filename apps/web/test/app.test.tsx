@@ -1412,6 +1412,18 @@ describe("DeviceRobot Web UI", () => {
     expect(within(result).getByText("找不到文本：首页")).toBeInTheDocument();
   });
 
+  it("shows connection progress before the first live AI step is available", async () => {
+    mockApis({ testRuns: [{ ...testExecutionRunResponse, steps: [] }] });
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "AI" }));
+
+    const execution = await screen.findByRole("region", { name: "当前测试执行" });
+    expect(within(execution).getByText("正在连接设备并读取首个页面")).toBeInTheDocument();
+    expect(within(execution).queryByText("本次执行未记录测试步骤。")).toBeNull();
+  });
+
   it("sends an AI test goal when Enter is pressed in the composer", async () => {
     const { getAiPlanRequests, getLastAiPlanRequest } = mockApis();
     const user = userEvent.setup();

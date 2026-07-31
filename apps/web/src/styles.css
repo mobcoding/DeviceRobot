@@ -4476,8 +4476,12 @@ h3 {
   background: #0f1112;
 }
 
+.ai-test-flow-notices {
+  min-width: 0;
+}
+
 .ai-test-workspace-error,
-.ai-test-flow > .ai-configuration-success {
+.ai-test-flow-notices > .ai-configuration-success {
   margin: 10px 16px 0;
 }
 
@@ -4650,6 +4654,9 @@ h3 {
 
 .ai-test-composer {
   display: grid;
+  align-self: end;
+  align-content: start;
+  grid-template-rows: minmax(58px, auto) auto;
   gap: 10px;
   padding: 12px 16px 14px;
   border-top: 1px solid #303536;

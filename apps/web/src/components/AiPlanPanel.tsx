@@ -1066,17 +1066,19 @@ export function AiPlanPanel({
           </aside>
 
           <section className="ai-test-flow" aria-label="AI 会话">
-            {error !== undefined && (
-              <p className="management-error ai-test-workspace-error" role="alert">
-                {error}
-              </p>
-            )}
-            {configurationTestMutation.data !== undefined && (
-              <p className="ai-configuration-success" role="status">
-                <CheckCircle2 aria-hidden="true" size={16} strokeWidth={1.8} />
-                {configurationTestMutation.data.message}
-              </p>
-            )}
+            <div className="ai-test-flow-notices">
+              {error !== undefined && (
+                <p className="management-error ai-test-workspace-error" role="alert">
+                  {error}
+                </p>
+              )}
+              {configurationTestMutation.data !== undefined && (
+                <p className="ai-configuration-success" role="status">
+                  <CheckCircle2 aria-hidden="true" size={16} strokeWidth={1.8} />
+                  {configurationTestMutation.data.message}
+                </p>
+              )}
+            </div>
 
             <div className="ai-test-timeline" aria-label="测试过程">
               {activeRun !== undefined && (

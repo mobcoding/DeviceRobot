@@ -756,7 +756,7 @@ export function AiPlanPanel({
       : configurationTestMutation.isError
         ? configurationTestMutation.error.message
         : undefined;
-  const runs = runsQuery.data?.runs ?? [];
+  const runs = (runsQuery.data?.runs ?? []).filter((run) => run.projectId === projectId);
   const latestPlanMessage = [...messages].reverse().find((message) => message.plan !== undefined);
   const selectedPlanResponse =
     messages.find((message) => message.plan?.plan.id === selectedPlanId)?.plan ??
@@ -998,7 +998,9 @@ export function AiPlanPanel({
                         setSelectedProjectId(project.id);
                         setSelectedConversationId("");
                         setSelectedPlanId("");
+                        setSelectedRunId("");
                         setSavedExplorationSuite(undefined);
+                        setLastWorkspaceExecution(undefined);
                       }}
                     >
                       <div className="ai-test-project-title">

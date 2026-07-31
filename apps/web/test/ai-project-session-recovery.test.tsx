@@ -59,7 +59,7 @@ function response(body: unknown): Response {
   });
 }
 
-function mockApis(): void {
+function mockApis(testRuns: readonly unknown[] = []): void {
   vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
     const url =
       typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -79,7 +79,7 @@ function mockApis(): void {
       return response({ projects: [firstProject, recentProject] });
     }
     if (url === "/api/v1/test-runs") {
-      return response({ runs: [] });
+      return response({ runs: testRuns });
     }
 
     const conversationListMatch = url.match(/^\/api\/v1\/projects\/([^/]+)\/ai-conversations$/u);
@@ -139,6 +139,44 @@ afterEach(() => {
 });
 
 describe("AI project session recovery", () => {
+  it("limits the right-side test records to the active conversation project", async () => {
+    const user = userEvent.setup();
+    mockApis([
+      {
+        id: "523e4567-e89b-12d3-a456-426614174000",
+        projectId: firstProject.id,
+        planId: "example-plan",
+        name: "Example 项目运行",
+        deviceSerial: "device-1",
+        appId: "com.example.app",
+        status: "succeeded",
+        steps: [],
+        startedAt: "2026-07-20T10:00:00.000Z",
+      },
+      {
+        id: "623e4567-e89b-12d3-a456-426614174000",
+        projectId: recentProject.id,
+        planId: "recent-plan",
+        name: "Recent 项目运行",
+        deviceSerial: "device-1",
+        appId: "com.example.app",
+        status: "failed",
+        steps: [],
+        startedAt: "2026-07-20T10:01:00.000Z",
+      },
+    ]);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(workspaceView(queryClient, true));
+
+    expect(await screen.findByText("Example 项目运行")).toBeInTheDocument();
+    expect(screen.queryByText("Recent 项目运行")).not.toBeInTheDocument();
+
+    await user.click(await screen.findByRole("button", { name: /Recent AI project/u }));
+
+    expect(await screen.findByText("Recent 项目运行")).toBeInTheDocument();
+    expect(screen.queryByText("Example 项目运行")).not.toBeInTheDocument();
+  });
+
   it("scrolls to the latest message whenever the AI workspace is shown", async () => {
     const timelinePrototype = HTMLDivElement.prototype;
     const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(

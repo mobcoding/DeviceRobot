@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AiPlanPanel } from "../src/components/AiPlanPanel";
@@ -100,12 +101,30 @@ function mockApis(): void {
   });
 }
 
-function renderPanel() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+function AiWorkspaceHarness({ visible }: { visible: boolean }): React.JSX.Element | null {
+  const [conversationId, setConversationId] = useState("");
+  const [projectId, setProjectId] = useState("");
+
+  if (!visible) {
+    return null;
+  }
+
+  return (
+    <AiPlanPanel
+      device={undefined}
+      initialConversationId={conversationId}
+      initialProjectId={projectId}
+      onConversationSelectionChange={setConversationId}
+      onProjectSelectionChange={setProjectId}
+    />
+  );
+}
+
+function workspaceView(queryClient: QueryClient, visible: boolean): React.JSX.Element {
+  return (
     <QueryClientProvider client={queryClient}>
-      <AiPlanPanel device={undefined} />
-    </QueryClientProvider>,
+      <AiWorkspaceHarness visible={visible} />
+    </QueryClientProvider>
   );
 }
 
@@ -122,7 +141,8 @@ afterEach(() => {
 describe("AI project session recovery", () => {
   it("restores the most recent project and conversation after the AI workspace remounts", async () => {
     const user = userEvent.setup();
-    const view = renderPanel();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = render(workspaceView(queryClient, true));
 
     const recentProjectButton = await screen.findByRole("button", { name: /Recent AI project/u });
     await user.click(recentProjectButton);
@@ -140,8 +160,9 @@ describe("AI project session recovery", () => {
       within(projectList).getAllByRole("button", { name: /Example project|Recent AI project/u })[0],
     ).toHaveTextContent("Recent AI project");
 
-    view.unmount();
-    renderPanel();
+    view.rerender(workspaceView(queryClient, false));
+    globalThis.localStorage.clear();
+    view.rerender(workspaceView(queryClient, true));
 
     const restoredProjectButton = await screen.findByRole("button", { name: /Recent AI project/u });
     expect(restoredProjectButton).toHaveAttribute("aria-pressed", "true");

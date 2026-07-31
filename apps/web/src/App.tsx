@@ -394,6 +394,8 @@ export function App(): React.JSX.Element {
   const deviceQuery = useDevicesQuery();
   const [activeView, setActiveView] = useState<ViewId>(readViewFromHash);
   const [selectedSerial, setSelectedSerial] = useState<string>();
+  const [lastAiConversationId, setLastAiConversationId] = useState("");
+  const [lastAiProjectId, setLastAiProjectId] = useState("");
   const [visibleViews, setVisibleViews] = useState<readonly ViewId[]>(defaultVisibleViews);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [mirrorWidth, setMirrorWidth] = useState<number | undefined>(() =>
@@ -760,7 +762,13 @@ export function App(): React.JSX.Element {
             ) : activeView === "projects" ? (
               <ProjectManagerPanel device={selectedDevice} />
             ) : activeView === "conversations" ? (
-              <AiPlanPanel device={selectedDevice} />
+              <AiPlanPanel
+                device={selectedDevice}
+                initialConversationId={lastAiConversationId}
+                initialProjectId={lastAiProjectId}
+                onConversationSelectionChange={setLastAiConversationId}
+                onProjectSelectionChange={setLastAiProjectId}
+              />
             ) : (
               <PlannedView content={plannedViews[activeView as PlannedViewId]} />
             )}

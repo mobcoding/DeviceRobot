@@ -363,6 +363,8 @@ export function ProjectManagerPanel({
     queryKey: ["projects"],
     queryFn: ({ signal }) => fetchProjects(signal),
     retry: false,
+    staleTime: Infinity,
+    refetchOnMount: false,
   });
   const createMutation = useMutation({
     mutationFn: async () =>
@@ -403,6 +405,13 @@ export function ProjectManagerPanel({
       ) =>
         query.state.data?.runs.some((run) => run.status === "queued" || run.status === "running")
           ? 2_000
+          : false,
+      staleTime: Infinity,
+      refetchOnMount: (
+        query: Query<ProjectBuildData, Error, ProjectBuildData, readonly unknown[]>,
+      ) =>
+        query.state.data?.runs.some((run) => run.status === "queued" || run.status === "running")
+          ? "always"
           : false,
     })),
   });

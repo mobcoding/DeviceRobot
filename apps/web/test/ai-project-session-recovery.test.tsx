@@ -163,6 +163,23 @@ afterEach(() => {
 });
 
 describe("AI project session recovery", () => {
+  it("closes the project menu when the user clicks outside it", async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(workspaceView(queryClient, true));
+
+    await user.click(await screen.findByRole("button", { name: "Example project 的更多项目操作" }));
+    expect(await screen.findByRole("menu", { name: "Example project 的项目操作" })).toBeVisible();
+
+    await user.click(screen.getByLabelText("AI 会话"));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("menu", { name: "Example project 的项目操作" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
   it("renames a project and removes only its AI conversation from the project menu", async () => {
     const user = userEvent.setup();
     const api = mockApis();

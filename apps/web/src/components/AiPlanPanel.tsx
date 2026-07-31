@@ -462,6 +462,7 @@ export function AiPlanPanel({
   const [removingProjectConversation, setRemovingProjectConversation] = useState<AndroidProject>();
   const apkInputRef = useRef<HTMLInputElement>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
+  const projectMenuRef = useRef<HTMLDivElement>(null);
   const planRequestAbortControllerRef = useRef<AbortController | undefined>(undefined);
   const queryClient = useQueryClient();
   const statusQuery = useQuery({
@@ -510,6 +511,21 @@ export function AiPlanPanel({
       setSelectedModel((current) => current || statusQuery.data?.model || "");
     }
   }, [statusQuery.data?.baseUrl, statusQuery.data?.model]);
+  useEffect(() => {
+    if (projectMenuId === undefined) {
+      return;
+    }
+
+    const closeProjectMenu = (event: PointerEvent): void => {
+      const target = event.target;
+      if (target instanceof Node && !projectMenuRef.current?.contains(target)) {
+        setProjectMenuId(undefined);
+      }
+    };
+
+    document.addEventListener("pointerdown", closeProjectMenu);
+    return () => document.removeEventListener("pointerdown", closeProjectMenu);
+  }, [projectMenuId]);
   useEffect(() => {
     if (projectId.length === 0) {
       return;
@@ -1049,7 +1065,10 @@ export function AiPlanPanel({
                         <Folder aria-hidden="true" size={16} strokeWidth={1.8} />
                         <strong title={projectLabel(project)}>{projectLabel(project)}</strong>
                       </button>
-                      <div className="ai-test-project-actions">
+                      <div
+                        ref={projectMenuId === project.id ? projectMenuRef : undefined}
+                        className="ai-test-project-actions"
+                      >
                         <button
                           className="icon-button ai-test-project-more"
                           type="button"

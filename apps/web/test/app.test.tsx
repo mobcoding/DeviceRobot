@@ -1354,6 +1354,7 @@ describe("DeviceRobot Web UI", () => {
       messageTimes.every((messageTime) => messageTime.dateTime === aiPlanResponse.generatedAt),
     ).toBe(true);
     expect(document.querySelector(".ai-test-message.assistant .ai-test-message-time")).toBeNull();
+    expect(screen.queryByRole("status", { name: "AI 正在思考" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "当前计划" })).toBeInTheDocument();
     expect(screen.getByText("assert.visible")).toBeInTheDocument();
     expect(screen.getByText("执行前必须确认")).toBeInTheDocument();
@@ -1370,6 +1371,26 @@ describe("DeviceRobot Web UI", () => {
 
     await vi.waitFor(() => expect(getAiPlanRequests()).toBe(1));
     expect(getLastAiPlanRequest()).toMatchObject({ goal: "验证首页可见" });
+  });
+
+  it("shows the submitted message and thinking state before the AI reply arrives", async () => {
+    const { getAiPlanRequests, getAiPlanAbortRequests } = mockApis({ delayAiPlan: true });
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "AI" }));
+    await user.type(screen.getByRole("textbox", { name: "测试目标" }), "验证搜索结果");
+    await user.click(screen.getByRole("button", { name: "生成操作计划" }));
+
+    expect(await screen.findByText("验证搜索结果")).toBeInTheDocument();
+    expect(await screen.findByRole("status", { name: "AI 正在思考" })).toHaveTextContent(
+      "已处理 0s",
+    );
+    expect(getAiPlanRequests()).toBe(1);
+
+    await user.click(screen.getByRole("button", { name: "停止生成" }));
+    await vi.waitFor(() => expect(getAiPlanAbortRequests()).toBe(1));
+    expect(screen.queryByRole("status", { name: "AI 正在思考" })).not.toBeInTheDocument();
   });
 
   it("stops an in-progress AI reply from the circular composer button", async () => {

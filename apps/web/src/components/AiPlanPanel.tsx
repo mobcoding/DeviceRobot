@@ -73,6 +73,16 @@ type ConversationMessage = {
 type PlanGenerationRequest = {
   request: GenerateAiPlanRequest;
   controller: AbortController;
+  exchangeId: string;
+};
+
+type PendingConversationExchange = {
+  id: string;
+  projectId: string;
+  conversationId: string;
+  userMessage: ConversationMessage;
+  startedAt: number;
+  response?: AiPlanResponse;
 };
 
 const LAST_AI_PROJECT_STORAGE_KEY = "device-robot:ai:last-project";
@@ -460,6 +470,9 @@ export function AiPlanPanel({
   const [renamingProject, setRenamingProject] = useState<AndroidProject>();
   const [projectNameDraft, setProjectNameDraft] = useState("");
   const [removingProjectConversation, setRemovingProjectConversation] = useState<AndroidProject>();
+  const [pendingConversationExchange, setPendingConversationExchange] =
+    useState<PendingConversationExchange>();
+  const [thinkingElapsedSeconds, setThinkingElapsedSeconds] = useState(0);
   const apkInputRef = useRef<HTMLInputElement>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const projectMenuRef = useRef<HTMLDivElement>(null);
@@ -583,7 +596,49 @@ export function AiPlanPanel({
         ...(message.plan === undefined ? {} : { plan: message.plan }),
       }))
     : [];
-  const latestMessageId = messages.at(-1)?.id ?? "";
+  const pendingExchangeMatchesConversation =
+    pendingConversationExchange !== undefined &&
+    pendingConversationExchange.projectId === projectId &&
+    pendingConversationExchange.conversationId === activeConversationId;
+  const persistedPendingUserMessage =
+    pendingConversationExchange === undefined
+      ? false
+      : messages.some(
+          (message) =>
+            message.role === "user" &&
+            message.content === pendingConversationExchange.userMessage.content &&
+            Date.parse(message.createdAt) >= pendingConversationExchange.startedAt,
+        );
+  const persistedPendingAssistantMessage =
+    pendingConversationExchange?.response === undefined
+      ? false
+      : messages.some(
+          (message) =>
+            message.role === "assistant" &&
+            message.plan?.plan.id === pendingConversationExchange.response?.plan.id,
+        );
+  const visibleMessages = [
+    ...messages,
+    ...(!pendingExchangeMatchesConversation || persistedPendingUserMessage
+      ? []
+      : [pendingConversationExchange.userMessage]),
+    ...(!pendingExchangeMatchesConversation ||
+    pendingConversationExchange.response === undefined ||
+    persistedPendingAssistantMessage
+      ? []
+      : [
+          {
+            id: `${pendingConversationExchange.id}:assistant`,
+            role: "assistant" as const,
+            content: pendingConversationExchange.response.reply,
+            createdAt: pendingConversationExchange.response.generatedAt,
+            plan: pendingConversationExchange.response,
+          },
+        ]),
+  ];
+  const thinking =
+    pendingExchangeMatchesConversation && pendingConversationExchange.response === undefined;
+  const latestMessageId = visibleMessages.at(-1)?.id ?? "";
   useEffect(() => {
     const timeline = workspaceRef.current?.querySelector<HTMLDivElement>(".ai-test-timeline");
     if (timeline === undefined || timeline === null || activeConversationId.length === 0) {
@@ -591,13 +646,32 @@ export function AiPlanPanel({
     }
 
     timeline.scrollTop = timeline.scrollHeight;
-  }, [activeConversationId, latestMessageId, messages.length]);
+  }, [activeConversationId, latestMessageId, thinking, visibleMessages.length]);
   useEffect(
     () => () => {
       planRequestAbortControllerRef.current?.abort();
     },
     [],
   );
+  useEffect(() => {
+    if (
+      pendingConversationExchange === undefined ||
+      pendingConversationExchange.response !== undefined
+    ) {
+      setThinkingElapsedSeconds(0);
+      return;
+    }
+
+    const updateElapsedSeconds = (): void => {
+      setThinkingElapsedSeconds(
+        Math.max(0, Math.floor((Date.now() - pendingConversationExchange.startedAt) / 1_000)),
+      );
+    };
+
+    updateElapsedSeconds();
+    const interval = globalThis.setInterval(updateElapsedSeconds, 1_000);
+    return () => globalThis.clearInterval(interval);
+  }, [pendingConversationExchange]);
   useEffect(() => {
     const planIds = messages.flatMap((message) =>
       message.plan === undefined ? [] : [message.plan.plan.id],
@@ -609,7 +683,10 @@ export function AiPlanPanel({
   const planMutation = useMutation({
     mutationFn: async ({ request, controller }: PlanGenerationRequest) =>
       await generateAiPlan(request, controller.signal),
-    onSuccess: async (response, { request }) => {
+    onSuccess: async (response, { exchangeId, request }) => {
+      setPendingConversationExchange((current) =>
+        current?.id === exchangeId ? { ...current, response } : current,
+      );
       setSelectedPlanId(response.plan.id);
       setSavedExplorationSuite(undefined);
       setGoal("");
@@ -618,9 +695,18 @@ export function AiPlanPanel({
           queryKey: ["ai-conversation", request.conversationId],
         });
       }
+      setPendingConversationExchange((current) =>
+        current?.id === exchangeId ? undefined : current,
+      );
       if (response.plan.workspaceExecution === true && device !== undefined) {
         workspaceExecutionMutation.mutate({ plan: response.plan, deviceSerial: device.serial });
       }
+    },
+    onError: (_error, { exchangeId, request }) => {
+      setPendingConversationExchange((current) =>
+        current?.id === exchangeId ? undefined : current,
+      );
+      setGoal(request.goal);
     },
     onSettled: (_response, _error, { controller }) => {
       if (planRequestAbortControllerRef.current === controller) {
@@ -1233,7 +1319,7 @@ export function AiPlanPanel({
                 </section>
               )}
 
-              {messages.length === 0 ? (
+              {visibleMessages.length === 0 && !thinking ? (
                 <section className="ai-test-flow-empty" aria-label="暂无 AI 计划">
                   <MessageSquareText aria-hidden="true" size={24} strokeWidth={1.6} />
                   <div>
@@ -1245,16 +1331,29 @@ export function AiPlanPanel({
                   </div>
                 </section>
               ) : (
-                messages.map((message) => (
-                  <article key={message.id} className={`ai-test-message ${message.role}`}>
-                    <p>{message.content}</p>
-                    {message.role === "user" && (
-                      <time className="ai-test-message-time" dateTime={message.createdAt}>
-                        {formatMessageTime(message.createdAt)}
-                      </time>
-                    )}
-                  </article>
-                ))
+                <>
+                  {visibleMessages.map((message) => (
+                    <article key={message.id} className={`ai-test-message ${message.role}`}>
+                      <p>{message.content}</p>
+                      {message.role === "user" && (
+                        <time className="ai-test-message-time" dateTime={message.createdAt}>
+                          {formatMessageTime(message.createdAt)}
+                        </time>
+                      )}
+                    </article>
+                  ))}
+                  {thinking && (
+                    <article
+                      className="ai-test-message assistant ai-test-message-thinking"
+                      role="status"
+                      aria-label="AI 正在思考"
+                    >
+                      <LoaderCircle aria-hidden="true" size={15} className="test-run-spinner" />
+                      <span>思考中</span>
+                      <time>已处理 {thinkingElapsedSeconds}s</time>
+                    </article>
+                  )}
+                </>
               )}
             </div>
 
@@ -1269,9 +1368,26 @@ export function AiPlanPanel({
                 event.preventDefault();
                 if (canGenerate) {
                   const controller = new AbortController();
+                  const exchangeId = crypto.randomUUID();
+                  const submittedGoal = goal.trim();
+                  const submittedAt = Date.now();
                   planRequestAbortControllerRef.current = controller;
+                  setPendingConversationExchange({
+                    id: exchangeId,
+                    projectId,
+                    conversationId: activeConversationId,
+                    userMessage: {
+                      id: `${exchangeId}:user`,
+                      role: "user",
+                      content: submittedGoal,
+                      createdAt: new Date(submittedAt).toISOString(),
+                    },
+                    startedAt: submittedAt,
+                  });
+                  setGoal("");
                   planMutation.mutate({
                     controller,
+                    exchangeId,
                     request: {
                       projectId,
                       conversationId: activeConversationId,
@@ -1286,7 +1402,7 @@ export function AiPlanPanel({
                           }),
                       liveUiExecution: true,
                       workspaceExecution: false,
-                      goal: goal.trim(),
+                      goal: submittedGoal,
                     },
                   });
                 }

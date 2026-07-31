@@ -203,6 +203,10 @@ function statusLabel(status: TestExecutionRun["status"] | TestStepExecution["sta
   }
 }
 
+function isTestRunInProgress(run: TestExecutionRun): boolean {
+  return run.status === "running";
+}
+
 function statusIcon(
   status: TestExecutionRun["status"] | TestStepExecution["status"],
 ): React.JSX.Element {
@@ -659,6 +663,13 @@ export function AiPlanPanel({
   const selectedProject = projects.find((project) => project.id === projectId);
   const appIds = applicationIds(selectedProject);
   const appId = appIds[0] ?? "";
+  const projectTestRunsQuery = useQuery({
+    queryKey: ["ai-project-test-runs"],
+    queryFn: ({ signal }) => fetchTestRuns(undefined, signal),
+    enabled: projects.length > 0,
+    retry: 1,
+    refetchInterval: (query) => (query.state.data?.runs.some(isTestRunInProgress) ? 1_000 : 8_000),
+  });
   const runsQuery = useQuery({
     queryKey: ["test-runs", projectId],
     queryFn: ({ signal }) => fetchTestRuns(projectId, signal),
@@ -1104,6 +1115,15 @@ export function AiPlanPanel({
         ? configurationTestMutation.error.message
         : undefined;
   const runs = (runsQuery.data?.runs ?? []).filter((run) => run.projectId === projectId);
+  const projectsWithActiveTests = new Set(
+    [
+      ...(projectTestRunsQuery.data?.runs ?? []),
+      ...runs,
+      ...(conversationTestRun === undefined ? [] : [conversationTestRun.run]),
+    ]
+      .filter(isTestRunInProgress)
+      .map((run) => run.projectId),
+  );
   const latestPlanMessage = [...messages].reverse().find((message) => message.plan !== undefined);
   const selectedPlanResponse =
     messages.find((message) => message.plan?.plan.id === selectedPlanId)?.plan ??
@@ -1383,6 +1403,7 @@ export function AiPlanPanel({
               ) : (
                 projects.map((project) => {
                   const selected = project.id === projectId;
+                  const testRunning = projectsWithActiveTests.has(project.id);
                   return (
                     <article
                       key={project.id}
@@ -1408,6 +1429,20 @@ export function AiPlanPanel({
                       >
                         <Folder aria-hidden="true" size={16} strokeWidth={1.8} />
                         <strong title={projectLabel(project)}>{projectLabel(project)}</strong>
+                        {testRunning && (
+                          <span
+                            className="ai-test-project-running"
+                            role="status"
+                            aria-label={`${projectLabel(project)} 测试正在执行`}
+                            title="测试正在执行"
+                          >
+                            <LoaderCircle
+                              aria-hidden="true"
+                              size={14}
+                              className="test-run-spinner"
+                            />
+                          </span>
+                        )}
                       </button>
                       <div
                         ref={projectMenuId === project.id ? projectMenuRef : undefined}

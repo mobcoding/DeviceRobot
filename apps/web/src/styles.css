@@ -4386,6 +4386,7 @@ h3 {
 }
 
 .ai-test-project-select strong {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   color: inherit;
@@ -4393,6 +4394,17 @@ h3 {
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ai-test-project-running {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  color: #aeb9b9;
 }
 
 .ai-test-project-actions {

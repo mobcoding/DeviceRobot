@@ -1362,6 +1362,15 @@ describe("DeviceRobot Web UI", () => {
     expect(screen.getByText("执行前必须确认")).toBeInTheDocument();
   });
 
+  it("shows a loading indicator on AI projects with a running test task", async () => {
+    mockApis({ testRuns: [testExecutionRunResponse] });
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "AI" }));
+    expect(await screen.findByRole("status", { name: "Example 测试正在执行" })).toBeInTheDocument();
+  });
+
   it("sends an AI test goal when Enter is pressed in the composer", async () => {
     const { getAiPlanRequests, getLastAiPlanRequest } = mockApis();
     const user = userEvent.setup();

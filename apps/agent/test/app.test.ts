@@ -1,10 +1,15 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { healthResponseSchema, type StartWorkspaceExecutionRequest } from "@device-robot/contracts";
+import {
+  healthResponseSchema,
+  type ScreenRecordingConfiguration,
+  type StartWorkspaceExecutionRequest,
+} from "@device-robot/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createAgentApp } from "../src/app.js";
+import type { ScreenRecordingService } from "../src/devices/adb-screen-recording-service.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -196,6 +201,72 @@ describe("DeviceRobot Agent", () => {
       devices: [{ serial: "device-1", model: "Pixel 3 XL" }],
     });
     await app.close();
+  });
+
+  it("starts, reports, and stops an injected screen recording service", async () => {
+    const configuration: ScreenRecordingConfiguration = {
+      bitRateMbps: 4,
+      resolutionPercent: 100,
+      showTouches: true,
+      outputDirectory: "C:\\Users\\tester\\Desktop",
+    };
+    const status = {
+      serial: "device-1",
+      recording: true,
+      configuration,
+      maxDurationSeconds: 1_800 as const,
+      startedAt: "2026-07-31T10:00:00.000Z",
+    };
+    const screenRecordingService: ScreenRecordingService = {
+      status: vi.fn(async () => ({ ...status, recording: false, startedAt: undefined })),
+      start: vi.fn(async () => status),
+      stop: vi.fn(async () => ({
+        serial: "device-1",
+        savedPath: "C:\\Users\\tester\\Desktop\\DeviceRobot-20260731-100005-device-1.mp4",
+        startedAt: status.startedAt,
+        finishedAt: "2026-07-31T10:00:05.000Z",
+      })),
+      dispose: vi.fn(async () => {}),
+    };
+    const { app } = await createAgentApp({
+      localAppData: createTemporaryRoot(),
+      screenRecordingService,
+    });
+    const headers = { host: "127.0.0.1:43110" };
+
+    try {
+      const current = await app.inject({
+        method: "GET",
+        url: "/api/v1/devices/device-1/recording",
+        headers,
+      });
+      const started = await app.inject({
+        method: "POST",
+        url: "/api/v1/devices/device-1/recording/start",
+        headers,
+        payload: configuration,
+      });
+      const stopped = await app.inject({
+        method: "POST",
+        url: "/api/v1/devices/device-1/recording/stop",
+        headers,
+      });
+
+      expect(current.statusCode).toBe(200);
+      expect(current.json()).toMatchObject({ serial: "device-1", recording: false, configuration });
+      expect(started.statusCode).toBe(200);
+      expect(started.json()).toMatchObject({ serial: "device-1", recording: true, configuration });
+      expect(stopped.statusCode).toBe(200);
+      expect(stopped.json()).toMatchObject({
+        serial: "device-1",
+        savedPath: expect.stringMatching(/\.mp4$/u),
+      });
+      expect(screenRecordingService.status).toHaveBeenCalledWith("device-1");
+      expect(screenRecordingService.start).toHaveBeenCalledWith("device-1", configuration);
+      expect(screenRecordingService.stop).toHaveBeenCalledWith("device-1");
+    } finally {
+      await app.close();
+    }
   });
 
   it("serves a completed test run as offline HTML and ZIP report files", async () => {

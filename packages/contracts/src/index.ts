@@ -182,6 +182,16 @@ export {
   type DeviceUiTreeResponse,
 } from "./device-control.js";
 export {
+  screenRecordingConfigurationSchema,
+  screenRecordingResultSchema,
+  screenRecordingStatusSchema,
+  startScreenRecordingRequestSchema,
+  type ScreenRecordingConfiguration,
+  type ScreenRecordingResult,
+  type ScreenRecordingStatus,
+  type StartScreenRecordingRequest,
+} from "./screen-recording.js";
+export {
   deviceApplicationFilterSchema,
   deviceApplicationListResponseSchema,
   deviceApplicationSchema,

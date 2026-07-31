@@ -6,7 +6,14 @@ import {
   type DeviceActionResult,
   type DeviceControlAction,
   type DeviceUiTreeResponse,
+  screenRecordingResultSchema,
+  screenRecordingStatusSchema,
+  type ScreenRecordingConfiguration,
+  type ScreenRecordingResult,
+  type ScreenRecordingStatus,
 } from "@device-robot/contracts";
+
+import { requestJson } from "./client";
 
 function deviceEndpoint(serial: string, path: string): string {
   return `/api/v1/devices/${encodeURIComponent(serial)}/${path}`;
@@ -48,6 +55,40 @@ export async function captureDeviceScreenshot(serial: string): Promise<Blob> {
   }
 
   return await response.blob();
+}
+
+export async function fetchScreenRecordingStatus(serial: string): Promise<ScreenRecordingStatus> {
+  return await requestJson(
+    deviceEndpoint(serial, "recording"),
+    { headers: { Accept: "application/json" } },
+    screenRecordingStatusSchema,
+    "读取录屏状态失败。",
+  );
+}
+
+export async function startScreenRecording(
+  serial: string,
+  configuration: ScreenRecordingConfiguration,
+): Promise<ScreenRecordingStatus> {
+  return await requestJson(
+    deviceEndpoint(serial, "recording/start"),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(configuration),
+    },
+    screenRecordingStatusSchema,
+    "启动录屏失败。",
+  );
+}
+
+export async function stopScreenRecording(serial: string): Promise<ScreenRecordingResult> {
+  return await requestJson(
+    deviceEndpoint(serial, "recording/stop"),
+    { method: "POST", headers: { Accept: "application/json" } },
+    screenRecordingResultSchema,
+    "停止录屏失败。",
+  );
 }
 
 export async function fetchDeviceUiTree(

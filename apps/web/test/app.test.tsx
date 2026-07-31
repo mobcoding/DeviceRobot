@@ -531,6 +531,9 @@ function mockApis(
   getLastTestSuiteRunRequest: () => unknown;
   getExplorationSaveRequests: () => number;
   getScreenshotRequests: () => number;
+  getScreenRecordingStartRequests: () => number;
+  getScreenRecordingStopRequests: () => number;
+  getLastScreenRecordingStartRequest: () => unknown;
 } {
   let deviceRequests = 0;
   let actionRequests = 0;
@@ -560,6 +563,16 @@ function mockApis(
   let lastTestSuiteRunRequest: unknown;
   let explorationSaveRequests = 0;
   let screenshotRequests = 0;
+  let screenRecordingStartRequests = 0;
+  let screenRecordingStopRequests = 0;
+  let lastScreenRecordingStartRequest: unknown;
+  let recording = false;
+  let recordingConfiguration = {
+    bitRateMbps: 4,
+    resolutionPercent: 100 as const,
+    showTouches: true,
+    outputDirectory: "C:\\Users\\tester\\Desktop",
+  };
   let importedTestSuites: unknown[] = [];
   const aiConversation = {
     id: "723e4567-e89b-12d3-a456-426614174000",
@@ -1024,6 +1037,50 @@ function mockApis(
     if (url.includes("/api/v1/devices")) {
       deviceRequests += 1;
 
+      if (url.includes("/recording")) {
+        if (url.endsWith("/recording/start") && method === "POST") {
+          screenRecordingStartRequests += 1;
+          lastScreenRecordingStartRequest = JSON.parse(String(init?.body ?? "{}"));
+          recordingConfiguration = lastScreenRecordingStartRequest as typeof recordingConfiguration;
+          recording = true;
+          return new Response(
+            JSON.stringify({
+              serial: "8B3Y0THX0",
+              recording: true,
+              configuration: recordingConfiguration,
+              maxDurationSeconds: 1_800,
+              startedAt: "2026-07-31T10:00:00.000Z",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
+        if (url.endsWith("/recording/stop") && method === "POST") {
+          screenRecordingStopRequests += 1;
+          recording = false;
+          return new Response(
+            JSON.stringify({
+              serial: "8B3Y0THX0",
+              savedPath: "C:\\Users\\tester\\Desktop\\DeviceRobot-20260731-100005-8B3Y0THX0.mp4",
+              startedAt: "2026-07-31T10:00:00.000Z",
+              finishedAt: "2026-07-31T10:00:05.000Z",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            serial: "8B3Y0THX0",
+            recording,
+            configuration: recordingConfiguration,
+            maxDurationSeconds: 1_800,
+            ...(recording ? { startedAt: "2026-07-31T10:00:00.000Z" } : {}),
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
       if (url.includes("/screenshot")) {
         screenshotRequests += 1;
         return new Response(
@@ -1104,6 +1161,9 @@ function mockApis(
     getLastTestSuiteRunRequest: () => lastTestSuiteRunRequest,
     getExplorationSaveRequests: () => explorationSaveRequests,
     getScreenshotRequests: () => screenshotRequests,
+    getScreenRecordingStartRequests: () => screenRecordingStartRequests,
+    getScreenRecordingStopRequests: () => screenRecordingStopRequests,
+    getLastScreenRecordingStartRequest: () => lastScreenRecordingStartRequest,
   };
 }
 
@@ -2136,6 +2196,49 @@ describe("DeviceRobot Web UI", () => {
         Object.defineProperty(globalThis.navigator, "clipboard", clipboardDescriptor);
       }
     }
+  });
+
+  it("records the device screen with the configured MP4 settings and reports the saved location", async () => {
+    const {
+      getLastScreenRecordingStartRequest,
+      getScreenRecordingStartRequests,
+      getScreenRecordingStopRequests,
+    } = mockApis();
+    const user = userEvent.setup();
+    renderApp();
+
+    const mirror = await screen.findByRole("region", { name: "屏幕镜像" });
+    const recordButton = await within(mirror).findByRole("button", { name: "配置并开始录制" });
+    await vi.waitFor(() => expect(recordButton).toBeEnabled());
+    await user.click(recordButton);
+
+    const dialog = await screen.findByRole("dialog", { name: "录屏选项" });
+    expect(within(dialog).getByLabelText("录屏码率")).toHaveValue(4);
+    expect(within(dialog).getByLabelText("录屏分辨率")).toHaveValue("100");
+    expect(within(dialog).getByLabelText("录屏保存目录")).toHaveValue("C:\\Users\\tester\\Desktop");
+    expect(within(dialog).getByRole("checkbox", { name: "显示触点" })).toBeChecked();
+
+    await user.click(within(dialog).getByRole("button", { name: "开始录制" }));
+    await vi.waitFor(() => expect(getScreenRecordingStartRequests()).toBe(1));
+    await vi.waitFor(() =>
+      expect(within(mirror).getByRole("button", { name: "停止录制并保存" })).toHaveClass(
+        "recording",
+      ),
+    );
+    expect(getLastScreenRecordingStartRequest()).toEqual({
+      bitRateMbps: 4,
+      resolutionPercent: 100,
+      showTouches: true,
+      outputDirectory: "C:\\Users\\tester\\Desktop",
+    });
+
+    await user.click(within(mirror).getByRole("button", { name: "停止录制并保存" }));
+    await vi.waitFor(() => expect(getScreenRecordingStopRequests()).toBe(1));
+    expect(
+      await within(mirror).findByText(
+        "C:\\Users\\tester\\Desktop\\DeviceRobot-20260731-100005-8B3Y0THX0.mp4",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("resizes the mirror area without exceeding the golden-ratio width", async () => {

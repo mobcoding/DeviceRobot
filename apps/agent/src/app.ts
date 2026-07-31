@@ -18,6 +18,9 @@ import {
   deviceListResponseSchema,
   deviceLogcatResponseSchema,
   deviceUiTreeResponseSchema,
+  screenRecordingResultSchema,
+  screenRecordingStatusSchema,
+  startScreenRecordingRequestSchema,
   healthResponseSchema,
   cleanupLocalDataRequestSchema,
   cleanupLocalDataResponseSchema,
@@ -65,6 +68,10 @@ import {
   DeviceControlError,
   type DeviceControlService,
 } from "./devices/adb-device-control-service.js";
+import {
+  AdbScreenRecordingService,
+  type ScreenRecordingService,
+} from "./devices/adb-screen-recording-service.js";
 import { AdbDeviceService, type DeviceDiscoveryService } from "./devices/adb-device-service.js";
 import {
   AdbDeviceManagementService,
@@ -145,6 +152,7 @@ export type CreateAgentAppOptions = {
   webRoot?: string;
   deviceService?: DeviceDiscoveryService;
   deviceControlService?: DeviceControlService;
+  screenRecordingService?: ScreenRecordingService;
   deviceManagementService?: DeviceManagementService;
   deviceApplicationIconService?: DeviceApplicationIconService;
   deviceFileTransferService?: DeviceFileTransferService;
@@ -168,6 +176,7 @@ export type AgentApp = {
   paths: AgentPaths;
   deviceService: DeviceDiscoveryService;
   deviceControlService: DeviceControlService;
+  screenRecordingService: ScreenRecordingService;
   deviceManagementService: DeviceManagementService;
   deviceApplicationIconService: DeviceApplicationIconService;
   deviceFileTransferService: DeviceFileTransferService;
@@ -534,6 +543,8 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
   const deviceService = options.deviceService ?? new AdbDeviceService();
   const deviceControlService =
     options.deviceControlService ?? new AdbDeviceControlService({ deviceService });
+  const screenRecordingService =
+    options.screenRecordingService ?? new AdbScreenRecordingService({ deviceService });
   const deviceManagementService =
     options.deviceManagementService ?? new AdbDeviceManagementService({ deviceService });
   const deviceApplicationIconService =
@@ -1151,6 +1162,39 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     }
   });
 
+  app.get("/api/v1/devices/:serial/recording", async (request, reply) => {
+    try {
+      return screenRecordingStatusSchema.parse(
+        await screenRecordingService.status(parseSerial(request.params)),
+      );
+    } catch (error) {
+      return controlErrorReply(reply, error);
+    }
+  });
+
+  app.post("/api/v1/devices/:serial/recording/start", async (request, reply) => {
+    try {
+      return screenRecordingStatusSchema.parse(
+        await screenRecordingService.start(
+          parseSerial(request.params),
+          startScreenRecordingRequestSchema.parse(request.body),
+        ),
+      );
+    } catch (error) {
+      return controlErrorReply(reply, error);
+    }
+  });
+
+  app.post("/api/v1/devices/:serial/recording/stop", async (request, reply) => {
+    try {
+      return screenRecordingResultSchema.parse(
+        await screenRecordingService.stop(parseSerial(request.params)),
+      );
+    } catch (error) {
+      return controlErrorReply(reply, error);
+    }
+  });
+
   app.get("/api/v1/devices/:serial/ui-tree", async (request, reply) => {
     try {
       const response = await deviceControlService.readUiTree(parseSerial(request.params));
@@ -1376,6 +1420,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
 
   app.addHook("onClose", async () => {
     await testExecutionService.dispose();
+    await screenRecordingService.dispose();
     await scrcpyStreamService.dispose();
     await appiumRuntimeService.dispose();
     await projectBuildService.dispose();
@@ -1388,6 +1433,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     paths,
     deviceService,
     deviceControlService,
+    screenRecordingService,
     deviceManagementService,
     deviceApplicationIconService,
     deviceFileTransferService,

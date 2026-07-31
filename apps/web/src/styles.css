@@ -4705,6 +4705,8 @@ h3 {
 }
 
 .ai-test-active-run {
+  align-self: start;
+  height: max-content;
   width: min(100%, 680px);
   min-height: 52px;
   max-width: 680px;

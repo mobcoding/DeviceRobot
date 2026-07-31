@@ -12,5 +12,6 @@ if not "%exitCode%"=="0" (
   endlocal & exit /b %exitCode%
 )
 
-start "" "http://127.0.0.1:43110"
+set "launchNonce=%RANDOM%%RANDOM%%RANDOM%"
+start "" "http://127.0.0.1:43110/?reload=%launchNonce%"
 endlocal & exit /b 0

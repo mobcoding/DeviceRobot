@@ -59,10 +59,15 @@ function response(body: unknown): Response {
   });
 }
 
-function mockApis(testRuns: readonly unknown[] = []): void {
-  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+function mockApis(testRuns: readonly unknown[] = []): {
+  getRemovedProjectConversationIds: () => readonly string[];
+} {
+  let projects = [firstProject, recentProject];
+  const removedProjectConversationIds: string[] = [];
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url =
       typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const method = init?.method ?? (input instanceof Request ? input.method : "GET");
 
     if (url === "/api/v1/ai/status") {
       return response({
@@ -76,7 +81,19 @@ function mockApis(testRuns: readonly unknown[] = []): void {
       return response({ provider: "openai-compatible", models: ["test-model"] });
     }
     if (url === "/api/v1/projects") {
-      return response({ projects: [firstProject, recentProject] });
+      return response({ projects });
+    }
+    const projectMatch = url.match(/^\/api\/v1\/projects\/([^/]+)$/u);
+    if (projectMatch !== null && method === "PATCH") {
+      const name = (JSON.parse(String(init?.body ?? "{}")) as { name: string }).name;
+      const projectId = projectMatch[1]!;
+      const renamed = projects.find((project) => project.id === projectId);
+      if (renamed === undefined) {
+        return new Response(JSON.stringify({ error: "项目不存在" }), { status: 404 });
+      }
+      const updated = { ...renamed, name };
+      projects = projects.map((project) => (project.id === projectId ? updated : project));
+      return response(updated);
     }
     if (url === "/api/v1/test-runs" || url.startsWith("/api/v1/test-runs?projectId=")) {
       return response({ runs: testRuns });
@@ -85,9 +102,15 @@ function mockApis(testRuns: readonly unknown[] = []): void {
     const conversationListMatch = url.match(/^\/api\/v1\/projects\/([^/]+)\/ai-conversations$/u);
     if (conversationListMatch !== null) {
       const projectId = conversationListMatch[1]!;
+      if (method === "DELETE") {
+        removedProjectConversationIds.push(projectId);
+        return new Response(null, { status: 204 });
+      }
       return response({
         projectId,
-        conversations: conversations.filter((conversation) => conversation.projectId === projectId),
+        conversations: removedProjectConversationIds.includes(projectId)
+          ? []
+          : conversations.filter((conversation) => conversation.projectId === projectId),
       });
     }
 
@@ -99,6 +122,7 @@ function mockApis(testRuns: readonly unknown[] = []): void {
 
     throw new Error(`Unexpected request: ${url}`);
   });
+  return { getRemovedProjectConversationIds: () => [...removedProjectConversationIds] };
 }
 
 function AiWorkspaceHarness({ visible }: { visible: boolean }): React.JSX.Element | null {
@@ -139,6 +163,32 @@ afterEach(() => {
 });
 
 describe("AI project session recovery", () => {
+  it("renames a project and removes only its AI conversation from the project menu", async () => {
+    const user = userEvent.setup();
+    const api = mockApis();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(workspaceView(queryClient, true));
+
+    await user.click(await screen.findByRole("button", { name: "Example project 的更多项目操作" }));
+    await user.click(await screen.findByRole("menuitem", { name: "编辑项目名称" }));
+    const renameDialog = await screen.findByRole("form", { name: "编辑项目名称" });
+    const nameInput = within(renameDialog).getByRole("textbox", { name: "项目名称" });
+    await user.clear(nameInput);
+    await user.type(nameInput, "Study");
+    await user.click(within(renameDialog).getByRole("button", { name: "保存" }));
+
+    expect(await screen.findByRole("button", { name: "Study" })).toBeInTheDocument();
+
+    await user.click(await screen.findByRole("button", { name: "Study 的更多项目操作" }));
+    await user.click(await screen.findByRole("menuitem", { name: "移除项目会话" }));
+    const removeDialog = await screen.findByRole("dialog", { name: "确认移除项目会话" });
+    expect(removeDialog).toHaveTextContent("不会删除项目");
+    await user.click(within(removeDialog).getByRole("button", { name: "移除会话" }));
+
+    await waitFor(() => expect(api.getRemovedProjectConversationIds()).toEqual([firstProject.id]));
+    expect(screen.getByRole("button", { name: "Study" })).toBeInTheDocument();
+  });
+
   it("limits the right-side test records to the active conversation project", async () => {
     const user = userEvent.setup();
     mockApis([
@@ -171,7 +221,7 @@ describe("AI project session recovery", () => {
     expect(await screen.findByText("Example 项目运行")).toBeInTheDocument();
     expect(screen.queryByText("Recent 项目运行")).not.toBeInTheDocument();
 
-    await user.click(await screen.findByRole("button", { name: /Recent AI project/u }));
+    await user.click(await screen.findByRole("button", { name: "Recent AI project" }));
 
     expect(await screen.findByText("Recent 项目运行")).toBeInTheDocument();
     expect(screen.queryByText("Example 项目运行")).not.toBeInTheDocument();
@@ -240,7 +290,7 @@ describe("AI project session recovery", () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const view = render(workspaceView(queryClient, true));
 
-    const recentProjectButton = await screen.findByRole("button", { name: /Recent AI project/u });
+    const recentProjectButton = await screen.findByRole("button", { name: "Recent AI project" });
     await user.click(recentProjectButton);
 
     await waitFor(() => expect(recentProjectButton).toHaveAttribute("aria-pressed", "true"));
@@ -255,19 +305,19 @@ describe("AI project session recovery", () => {
       ).toBe("423e4567-e89b-12d3-a456-426614174000"),
     );
     const projectList = screen.getByLabelText("测试项目");
-    expect(
-      within(projectList).getAllByRole("button", { name: /Example project|Recent AI project/u })[0],
-    ).toHaveTextContent("Example project");
+    expect(within(projectList).getByRole("button", { name: "Example project" })).toHaveTextContent(
+      "Example project",
+    );
 
     view.rerender(workspaceView(queryClient, false));
     view.rerender(workspaceView(queryClient, true));
 
-    const restoredProjectButton = await screen.findByRole("button", { name: /Recent AI project/u });
+    const restoredProjectButton = await screen.findByRole("button", { name: "Recent AI project" });
     expect(restoredProjectButton).toHaveAttribute("aria-pressed", "true");
     expect(
-      within(screen.getByLabelText("测试项目")).getAllByRole("button", {
-        name: /Example project|Recent AI project/u,
-      })[0],
+      within(screen.getByLabelText("测试项目")).getByRole("button", {
+        name: "Example project",
+      }),
     ).toHaveTextContent("Example project");
   });
 });

@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import {
   aiConversationMessageSchema,
@@ -9,7 +9,12 @@ import {
   type AiContextSnapshot,
 } from "@device-robot/contracts";
 
-import { aiContextSnapshots, aiConversationMessages, aiConversations } from "../db/schema.js";
+import {
+  aiContextSnapshots,
+  aiConversationMessages,
+  aiConversations,
+  aiPlans,
+} from "../db/schema.js";
 import type * as databaseSchema from "../db/schema.js";
 
 export type CreateConversationRecord = Omit<AiConversation, "contextStatus">;
@@ -28,6 +33,7 @@ export interface AiConversationStore {
   appendMessage(message: AppendConversationMessage): void;
   createSnapshot(snapshot: CreateContextSnapshot): void;
   latestSnapshot(conversationId: string): AiContextSnapshot | undefined;
+  deleteByProject(projectId: string): void;
 }
 
 type ConversationContext = { sourceRevision?: string; sourceIndexAvailable: boolean };
@@ -166,6 +172,30 @@ export class DrizzleAiConversationStore implements AiConversationStore {
           context: JSON.parse(row.contextJson) as unknown,
           createdAt: row.createdAt,
         });
+  }
+
+  public deleteByProject(projectId: string): void {
+    this.#db.transaction((transaction) => {
+      const conversationIds = transaction
+        .select({ id: aiConversations.id })
+        .from(aiConversations)
+        .where(eq(aiConversations.projectId, projectId))
+        .all()
+        .map((conversation) => conversation.id);
+
+      if (conversationIds.length > 0) {
+        transaction
+          .delete(aiConversationMessages)
+          .where(inArray(aiConversationMessages.conversationId, conversationIds))
+          .run();
+      }
+      transaction
+        .delete(aiContextSnapshots)
+        .where(eq(aiContextSnapshots.projectId, projectId))
+        .run();
+      transaction.delete(aiPlans).where(eq(aiPlans.projectId, projectId)).run();
+      transaction.delete(aiConversations).where(eq(aiConversations.projectId, projectId)).run();
+    });
   }
 
   #parseConversation(row: typeof aiConversations.$inferSelect): AiConversation {

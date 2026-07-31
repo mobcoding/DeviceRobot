@@ -283,6 +283,7 @@ describe("DeviceRobot Agent", () => {
       updatedAt: "2026-07-21T10:00:00.000Z",
     };
     const add = vi.fn(async () => project);
+    const rename = vi.fn(async (_id: string, name: string) => ({ ...project, name }));
     const remove = vi.fn(async () => undefined);
     const reindex = vi.fn(async () => project);
     const buildRun = {
@@ -336,6 +337,7 @@ describe("DeviceRobot Agent", () => {
       conversations: [aiConversation],
     }));
     const createAiConversation = vi.fn(async () => aiConversation);
+    const removeAiConversation = vi.fn(async () => undefined);
     const getAiConversation = vi.fn(async () => ({ conversation: aiConversation, messages: [] }));
     const listAiModels = vi.fn(async () => ({
       provider: "openai-compatible" as const,
@@ -349,7 +351,7 @@ describe("DeviceRobot Agent", () => {
     }));
     const { app } = await createAgentApp({
       localAppData: createTemporaryRoot(),
-      projectService: { list: async () => [project], add, remove, reindex },
+      projectService: { list: async () => [project], add, rename, remove, reindex },
       projectBuildService: {
         listTargets: async () => ({
           projectId: project.id,
@@ -395,6 +397,7 @@ describe("DeviceRobot Agent", () => {
         list: async () => ({ plans: [] }),
         listConversations: listAiConversations,
         createConversation: createAiConversation,
+        removeConversation: removeAiConversation,
         getConversation: getAiConversation,
         listModels: listAiModels,
         testConfiguration: testAiConfiguration,
@@ -415,6 +418,12 @@ describe("DeviceRobot Agent", () => {
         method: "POST",
         url: `/api/v1/projects/${project.id}/index`,
         headers,
+      });
+      const renamed = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/projects/${project.id}`,
+        headers,
+        payload: { name: "Study" },
       });
       const deleted = await app.inject({
         method: "DELETE",
@@ -488,6 +497,11 @@ describe("DeviceRobot Agent", () => {
         headers,
         payload: { appId: "com.example.app" },
       });
+      const aiConversationRemoved = await app.inject({
+        method: "DELETE",
+        url: `/api/v1/projects/${project.id}/ai-conversations`,
+        headers,
+      });
       const aiConversationDetail = await app.inject({
         method: "GET",
         url: `/api/v1/ai-conversations/${aiConversation.id}`,
@@ -497,6 +511,7 @@ describe("DeviceRobot Agent", () => {
       expect(listed.statusCode).toBe(200);
       expect(listed.json()).toMatchObject({ projects: [{ name: "Example" }] });
       expect(created.statusCode).toBe(200);
+      expect(renamed.statusCode).toBe(200);
       expect(deleted.statusCode).toBe(204);
       expect(indexed.statusCode).toBe(200);
       expect(targets.statusCode).toBe(200);
@@ -515,12 +530,14 @@ describe("DeviceRobot Agent", () => {
       expect(aiGenerated.statusCode).toBe(200);
       expect(aiConversations.statusCode).toBe(200);
       expect(aiConversationCreated.statusCode).toBe(200);
+      expect(aiConversationRemoved.statusCode).toBe(204);
       expect(aiConversationDetail.statusCode).toBe(200);
       expect(aiModels.headers["cache-control"]).toBe("no-store");
       expect(aiConfiguration.headers["cache-control"]).toBe("no-store");
       expect(invalidAiModels.json()).toEqual({ error: "请填写有效的 Base URL 和 API Key。" });
       expect(created.json()).toMatchObject({ modules: [{ packageName: "com.example.app" }] });
       expect(add).toHaveBeenCalledWith({ source: "local", rootPath: "C:\\Github\\Example" });
+      expect(rename).toHaveBeenCalledWith(project.id, "Study");
       expect(remove).toHaveBeenCalledWith(project.id);
       expect(reindex).toHaveBeenCalledWith(project.id);
       expect(startBuild).toHaveBeenCalledWith(project.id, {
@@ -534,6 +551,7 @@ describe("DeviceRobot Agent", () => {
       expect(createAiConversation).toHaveBeenCalledWith(project.id, {
         appId: "com.example.app",
       });
+      expect(removeAiConversation).toHaveBeenCalledWith(project.id);
       expect(getAiConversation).toHaveBeenCalledWith(aiConversation.id);
       expect(listAiModels).toHaveBeenCalledWith({
         baseUrl: "https://model.example/v1",

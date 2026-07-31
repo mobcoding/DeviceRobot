@@ -227,6 +227,22 @@ describe("Android project service", () => {
     expect(existsSync(projectRoot)).toBe(true);
   });
 
+  it("renames a registered project without updating its project metadata timestamp", async () => {
+    const { root, service, store } = createFixture();
+    const projectRoot = join(root, "Example");
+    mkdirSync(projectRoot);
+    createAndroidProject(projectRoot);
+    const project = await service.add({ source: "local", rootPath: projectRoot });
+
+    const renamed = await service.rename(project.id, "Study");
+
+    expect(renamed).toMatchObject({ id: project.id, name: "Study", updatedAt: project.updatedAt });
+    expect(store.findById(project.id)).toMatchObject({
+      name: "Study",
+      updatedAt: project.updatedAt,
+    });
+  });
+
   it("rejects removal of an unknown project", async () => {
     const { service } = createFixture();
 
@@ -556,7 +572,7 @@ describe("Android project service", () => {
     );
   });
 
-  it("normalizes existing Git project names from their remote URL", async () => {
+  it("preserves a Git project's custom name when reading its metadata", async () => {
     const { root, service, store } = createFixture();
     const projectRoot = join(root, "repositories", "android-app-a1b2c3d4");
     mkdirSync(projectRoot, { recursive: true });
@@ -574,9 +590,14 @@ describe("Android project service", () => {
     });
 
     await expect(service.list()).resolves.toEqual([
-      expect.objectContaining({ id: "123e4567-e89b-12d3-a456-426614174000", name: "android-app" }),
+      expect.objectContaining({
+        id: "123e4567-e89b-12d3-a456-426614174000",
+        name: "android-app-a1b2c3d4",
+      }),
     ]);
-    expect(store.findById("123e4567-e89b-12d3-a456-426614174000")?.name).toBe("android-app");
+    expect(store.findById("123e4567-e89b-12d3-a456-426614174000")?.name).toBe(
+      "android-app-a1b2c3d4",
+    );
   });
 
   it("rejects non-HTTPS repository addresses before starting Git", async () => {

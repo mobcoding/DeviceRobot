@@ -21,7 +21,7 @@ import {
   type GenerateAiPlanRequest,
 } from "@device-robot/contracts";
 
-import { requestJson } from "./client";
+import { requestEmpty, requestJson } from "./client";
 
 export async function fetchAiModelStatus(signal?: AbortSignal): Promise<AiModelStatus> {
   return await requestJson(
@@ -75,6 +75,14 @@ export async function createAiConversation(
     },
     aiConversationSchema,
     "创建 AI 会话失败。",
+  );
+}
+
+export async function removeAiProjectConversation(projectId: string): Promise<void> {
+  await requestEmpty(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/ai-conversations`,
+    { method: "DELETE", headers: { Accept: "application/json" } },
+    "移除 AI 会话失败。",
   );
 }
 

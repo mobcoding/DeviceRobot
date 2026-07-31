@@ -102,6 +102,18 @@ export function registerAiRoutes(
     }
   });
 
+  app.delete("/api/v1/projects/:projectId/ai-conversations", async (request, reply) => {
+    try {
+      if (aiPlanService.removeConversation === undefined) {
+        throw new AiPlanError("当前 Agent 未启用 AI 会话存储。", 503);
+      }
+      await aiPlanService.removeConversation(parseProjectId(request.params));
+      return reply.code(204).send();
+    } catch (error) {
+      return replyError(reply, error);
+    }
+  });
+
   app.get("/api/v1/ai-conversations/:conversationId", async (request, reply) => {
     try {
       if (aiPlanService.getConversation === undefined) {

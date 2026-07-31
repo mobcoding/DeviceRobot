@@ -8,17 +8,20 @@ import {
   FileArchive,
   FilePlus2,
   FileText,
-  FolderGit2,
+  Folder,
   Image,
   KeyRound,
   ListRestart,
   LoaderCircle,
   MessageSquareText,
+  MoreHorizontal,
   Paperclip,
+  Pencil,
   Play,
   ShieldCheck,
   Smartphone,
   Square,
+  Trash2,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -43,9 +46,10 @@ import {
   fetchAiConversations,
   fetchAiModels,
   generateAiPlan,
+  removeAiProjectConversation,
   testAiModelConfiguration,
 } from "../api/ai";
-import { fetchProjects } from "../api/projects";
+import { fetchProjects, renameProject } from "../api/projects";
 import { discardApk, uploadApk } from "../api/apk";
 import { saveExplorationAsTestSuite, startTestSuiteCase } from "../api/test-suites";
 import {
@@ -85,6 +89,14 @@ function storedAiWorkspaceId(storageKey: string): string {
 function saveAiWorkspaceId(storageKey: string, value: string): void {
   try {
     globalThis.localStorage.setItem(storageKey, value);
+  } catch {
+    // Private browsing or browser policy can make local storage unavailable.
+  }
+}
+
+function removeAiWorkspaceId(storageKey: string): void {
+  try {
+    globalThis.localStorage.removeItem(storageKey);
   } catch {
     // Private browsing or browser policy can make local storage unavailable.
   }
@@ -444,6 +456,10 @@ export function AiPlanPanel({
   const [installableArtifacts, setInstallableArtifacts] = useState<ApkArtifact[]>([]);
   const [lastWorkspaceExecution, setLastWorkspaceExecution] =
     useState<WorkspaceExecutionResponse>();
+  const [projectMenuId, setProjectMenuId] = useState<string>();
+  const [renamingProject, setRenamingProject] = useState<AndroidProject>();
+  const [projectNameDraft, setProjectNameDraft] = useState("");
+  const [removingProjectConversation, setRemovingProjectConversation] = useState<AndroidProject>();
   const apkInputRef = useRef<HTMLInputElement>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const planRequestAbortControllerRef = useRef<AbortController | undefined>(undefined);
@@ -684,6 +700,34 @@ export function AiPlanPanel({
     mutationFn: cancelTestExecution,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["test-runs"] });
+    },
+  });
+  const renameProjectMutation = useMutation({
+    mutationFn: async (input: { projectId: string; name: string }) =>
+      await renameProject(input.projectId, { name: input.name }),
+    onSuccess: async () => {
+      setProjectMenuId(undefined);
+      setRenamingProject(undefined);
+      setProjectNameDraft("");
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+  const removeConversationMutation = useMutation({
+    mutationFn: removeAiProjectConversation,
+    onSuccess: async (_result, removedProjectId) => {
+      removeAiWorkspaceId(lastAiConversationStorageKey(removedProjectId));
+      if (removedProjectId === projectId) {
+        onConversationSelectionChange?.("");
+        setSelectedConversationId("");
+        setSelectedPlanId("");
+        setSelectedRunId("");
+        setSavedExplorationSuite(undefined);
+        setLastWorkspaceExecution(undefined);
+      }
+      setProjectMenuId(undefined);
+      setRemovingProjectConversation(undefined);
+      queryClient.removeQueries({ queryKey: ["ai-conversations", removedProjectId] });
+      await queryClient.invalidateQueries({ queryKey: ["ai-conversations", removedProjectId] });
     },
   });
   const configured = statusQuery.data?.configured === true;
@@ -969,11 +1013,7 @@ export function AiPlanPanel({
         <div ref={workspaceRef} className="ai-test-workspace-grid">
           <aside className="ai-test-project-sidebar" aria-label="测试项目">
             <header>
-              <FolderGit2 aria-hidden="true" size={18} strokeWidth={1.8} />
-              <div>
-                <span>项目</span>
-                <h2>测试上下文</h2>
-              </div>
+              <h2>项目</h2>
             </header>
             <div className="ai-test-project-list">
               {projectsQuery.isPending ? (
@@ -983,35 +1023,82 @@ export function AiPlanPanel({
               ) : (
                 projects.map((project) => {
                   const selected = project.id === projectId;
-                  const projectApps = applicationIds(project);
                   return (
-                    <button
+                    <article
                       key={project.id}
-                      className={`ai-test-project-item${selected ? " selected" : ""}`}
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() => {
-                        saveAiWorkspaceId(LAST_AI_PROJECT_STORAGE_KEY, project.id);
-                        onProjectSelectionChange?.(project.id);
-                        onConversationSelectionChange?.("");
-                        setSelectedProjectId(project.id);
-                        setSelectedConversationId("");
-                        setSelectedPlanId("");
-                        setSelectedRunId("");
-                        setSavedExplorationSuite(undefined);
-                        setLastWorkspaceExecution(undefined);
-                      }}
+                      className={`ai-test-project-item${selected ? " selected" : ""}${
+                        projectMenuId === project.id ? " menu-open" : ""
+                      }`}
                     >
-                      <div className="ai-test-project-title">
-                        <strong>{projectLabel(project)}</strong>
-                        <span aria-label={`${projectApps.length} 个可测试应用`}>
-                          {projectApps.length}
-                        </span>
+                      <button
+                        className="ai-test-project-select"
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => {
+                          saveAiWorkspaceId(LAST_AI_PROJECT_STORAGE_KEY, project.id);
+                          onProjectSelectionChange?.(project.id);
+                          onConversationSelectionChange?.("");
+                          setSelectedProjectId(project.id);
+                          setSelectedConversationId("");
+                          setSelectedPlanId("");
+                          setSelectedRunId("");
+                          setSavedExplorationSuite(undefined);
+                          setLastWorkspaceExecution(undefined);
+                        }}
+                      >
+                        <Folder aria-hidden="true" size={16} strokeWidth={1.8} />
+                        <strong title={projectLabel(project)}>{projectLabel(project)}</strong>
+                      </button>
+                      <div className="ai-test-project-actions">
+                        <button
+                          className="icon-button ai-test-project-more"
+                          type="button"
+                          aria-label={`${project.name} 的更多项目操作`}
+                          aria-expanded={projectMenuId === project.id}
+                          aria-haspopup="menu"
+                          title="更多项目操作"
+                          onClick={() =>
+                            setProjectMenuId((current) =>
+                              current === project.id ? undefined : project.id,
+                            )
+                          }
+                        >
+                          <MoreHorizontal aria-hidden="true" size={17} strokeWidth={2} />
+                        </button>
+                        {projectMenuId === project.id && (
+                          <div
+                            className="ai-test-project-menu"
+                            role="menu"
+                            aria-label={`${project.name} 的项目操作`}
+                          >
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                setProjectMenuId(undefined);
+                                setProjectNameDraft(project.name);
+                                setRenamingProject(project);
+                              }}
+                            >
+                              <Pencil aria-hidden="true" size={15} strokeWidth={1.9} />
+                              编辑项目名称
+                            </button>
+                            <button
+                              className="ai-test-project-menu-danger"
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                setProjectMenuId(undefined);
+                                setRemovingProjectConversation(project);
+                              }}
+                            >
+                              <Trash2 aria-hidden="true" size={15} strokeWidth={1.9} />
+                              移除项目会话
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      <small title={projectApps.join("、")}>
-                        {projectApps.length === 0 ? "暂无测试应用" : projectApps.join("、")}
-                      </small>
-                    </button>
+                    </article>
                   );
                 })
               )}
@@ -1475,6 +1562,99 @@ export function AiPlanPanel({
           onClose={() => setSelectedRunId("")}
           onSelectRun={setSelectedRunId}
         />
+      )}
+      {renamingProject !== undefined && (
+        <div className="modal-backdrop" role="presentation">
+          <form
+            className="project-build-dialog ai-test-project-dialog"
+            aria-label="编辑项目名称"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const name = projectNameDraft.trim();
+              if (name.length > 0) {
+                renameProjectMutation.mutate({ projectId: renamingProject.id, name });
+              }
+            }}
+          >
+            <h2>编辑项目名称</h2>
+            <label className="ai-test-project-name-field">
+              <span>项目名称</span>
+              <input
+                autoFocus
+                maxLength={256}
+                value={projectNameDraft}
+                disabled={renameProjectMutation.isPending}
+                onChange={(event) => setProjectNameDraft(event.target.value)}
+              />
+            </label>
+            {renameProjectMutation.isError && (
+              <p className="management-error" role="alert">
+                {renameProjectMutation.error.message}
+              </p>
+            )}
+            <footer>
+              <button
+                type="button"
+                disabled={renameProjectMutation.isPending}
+                onClick={() => {
+                  setRenamingProject(undefined);
+                  setProjectNameDraft("");
+                  renameProjectMutation.reset();
+                }}
+              >
+                取消
+              </button>
+              <button
+                className="primary-command"
+                type="submit"
+                disabled={renameProjectMutation.isPending || projectNameDraft.trim().length === 0}
+              >
+                {renameProjectMutation.isPending ? "正在保存" : "保存"}
+              </button>
+            </footer>
+          </form>
+        </div>
+      )}
+      {removingProjectConversation !== undefined && (
+        <div className="modal-backdrop" role="presentation">
+          <section
+            className="project-build-dialog project-delete-dialog ai-test-project-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="确认移除项目会话"
+          >
+            <h2>移除项目会话</h2>
+            <p>
+              确定移除 <strong>{removingProjectConversation.name}</strong> 的 AI 会话吗？
+            </p>
+            <p>这会清除该项目的 AI 对话、计划和上下文，不会删除项目、源码、构建产物或测试记录。</p>
+            {removeConversationMutation.isError && (
+              <p className="management-error" role="alert">
+                {removeConversationMutation.error.message}
+              </p>
+            )}
+            <footer>
+              <button
+                type="button"
+                disabled={removeConversationMutation.isPending}
+                onClick={() => {
+                  setRemovingProjectConversation(undefined);
+                  removeConversationMutation.reset();
+                }}
+              >
+                取消
+              </button>
+              <button
+                className="project-delete-command"
+                type="button"
+                disabled={removeConversationMutation.isPending}
+                onClick={() => removeConversationMutation.mutate(removingProjectConversation.id)}
+              >
+                {removeConversationMutation.isPending ? "正在移除" : "移除会话"}
+              </button>
+            </footer>
+          </section>
+        </div>
       )}
     </section>
   );

@@ -1328,9 +1328,12 @@ describe("DeviceRobot Web UI", () => {
 
     await user.click(await screen.findByRole("button", { name: "AI" }));
     expect(await screen.findByRole("combobox", { name: "选择 AI 模型" })).toHaveValue("test-model");
-    expect(screen.getByText("1", { selector: ".ai-test-project-title span" })).toBeInTheDocument();
-    expect(screen.getByText("com.example.app", { selector: "small" })).toBeInTheDocument();
-    expect(screen.queryByText("1 个测试应用")).not.toBeInTheDocument();
+    const projectButton = screen.getByRole("button", { name: "Example" });
+    expect(projectButton.querySelector(".lucide-folder")).not.toBeNull();
+    expect(document.querySelector(".ai-test-project-title")).toBeNull();
+    expect(
+      screen.queryByText("com.example.app", { selector: ".ai-test-project-list small" }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "测试应用包名" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "当前测试设备" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "项目 AI 会话" })).not.toBeInTheDocument();

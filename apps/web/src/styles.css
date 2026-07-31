@@ -4292,25 +4292,17 @@ h3 {
 }
 
 .ai-test-project-sidebar > header {
-  gap: 9px;
-  min-height: 62px;
-  padding: 14px 15px;
+  min-height: 48px;
+  padding: 0 12px;
   border-bottom: 1px solid #2b3031;
 }
 
-.ai-test-project-sidebar > header > svg {
-  flex: 0 0 auto;
-  color: #88cfc5;
-}
-
-.ai-test-project-sidebar > header > div,
 .ai-test-model-context > div {
   display: grid;
   min-width: 0;
   gap: 2px;
 }
 
-.ai-test-project-sidebar > header span,
 .ai-test-model-context span,
 .ai-test-plan-inspector header span,
 .ai-test-active-run header span:first-child {
@@ -4349,61 +4341,160 @@ h3 {
 }
 
 .ai-test-project-item {
-  display: grid;
+  position: relative;
+  display: flex;
   width: 100%;
   min-width: 0;
   align-self: start;
-  gap: 3px;
-  padding: 9px 10px;
+  min-height: 36px;
+  align-items: center;
+  padding: 2px;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #bfc9cb;
+  background: transparent;
+}
+
+.ai-test-project-item:hover {
+  background: #202728;
+}
+
+.ai-test-project-item.selected {
+  border-color: #384345;
+  color: #eff4f3;
+  background: #293334;
+}
+
+.ai-test-project-select {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  color: inherit;
   background: transparent;
   text-align: left;
 }
 
-.ai-test-project-item:hover {
-  background: #202627;
+.ai-test-project-select > svg {
+  flex: 0 0 auto;
+  color: #bdc7c8;
 }
 
-.ai-test-project-item.selected {
-  border-color: #3d746d;
-  color: #e2f3ef;
-  background: #1c302e;
-}
-
-.ai-test-project-title {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-  gap: 6px;
-}
-
-.ai-test-project-item strong,
-.ai-test-project-item span,
-.ai-test-project-item small,
-.ai-test-model-context select {
+.ai-test-project-select strong {
   min-width: 0;
   overflow: hidden;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ai-test-project-item strong {
-  flex: 1 1 auto;
-  font-size: 13px;
-}
-
-.ai-test-project-title span {
+.ai-test-project-actions {
+  position: relative;
   flex: 0 0 auto;
 }
 
-.ai-test-project-item span,
-.ai-test-project-item small,
-.ai-test-model-context small,
-.ai-test-model-context span {
-  color: #879397;
-  font-size: 11px;
+.ai-test-project-more {
+  width: 30px;
+  height: 30px;
+  margin-right: 1px;
+  border: 0;
+  color: #c6d0d1;
+  background: transparent;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ai-test-project-item:hover .ai-test-project-more,
+.ai-test-project-item:focus-within .ai-test-project-more,
+.ai-test-project-item.menu-open .ai-test-project-more {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ai-test-project-more:hover {
+  color: #f0f5f5;
+  background: #3a4546;
+}
+
+.ai-test-project-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 164px;
+  padding: 4px;
+  border: 1px solid #40494e;
+  border-radius: 6px;
+  background: #1a1f22;
+  box-shadow: 0 12px 28px rgb(0 0 0 / 40%);
+}
+
+.ai-test-project-menu button {
+  display: flex;
+  width: 100%;
+  min-height: 32px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 4px;
+  color: #dce4e6;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.ai-test-project-menu button:hover {
+  background: #2b3437;
+}
+
+.ai-test-project-menu-danger {
+  color: #f1a7b0 !important;
+}
+
+.ai-test-project-menu-danger:hover {
+  color: #ffd1d7 !important;
+  background: #3a2026 !important;
+}
+
+.ai-test-project-dialog {
+  width: min(420px, calc(100vw - 32px));
+}
+
+.ai-test-project-name-field {
+  display: grid;
+  gap: 7px;
+  margin-top: 16px;
+}
+
+.ai-test-project-name-field > span {
+  color: #aeb8bc;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ai-test-project-name-field > input {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #465154;
+  border-radius: 4px;
+  color: #e4ecec;
+  background: #121516;
+  font: inherit;
+}
+
+.ai-test-project-name-field > input:focus {
+  border-color: #77bcb1;
+  outline: 2px solid rgb(119 188 177 / 18%);
 }
 
 .ai-test-plan-picker select {

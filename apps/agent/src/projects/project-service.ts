@@ -57,6 +57,7 @@ export interface ProjectCommandRunner {
 export interface ProjectService {
   list(): Promise<AndroidProject[]>;
   add(request: CreateProjectRequest): Promise<AndroidProject>;
+  rename(id: string, name: string): Promise<AndroidProject>;
   remove(id: string): Promise<void>;
   reindex(id: string): Promise<AndroidProject>;
 }
@@ -467,16 +468,7 @@ export class LocalProjectService implements ProjectService {
     const projects: AndroidProject[] = [];
     for (const storedProject of this.#store.list()) {
       let project = storedProject;
-      if (project.source !== "git" || project.remoteUrl === undefined) {
-        project = await this.#refreshMissingApplicationIds(project);
-      } else {
-        const name = repositoryName(project.remoteUrl);
-        if (project.name !== name) {
-          this.#store.updateName(project.id, name);
-          project = { ...project, name };
-        }
-        project = await this.#refreshMissingApplicationIds(project);
-      }
+      project = await this.#refreshMissingApplicationIds(project);
       projects.push(project);
     }
     return projects;
@@ -516,6 +508,21 @@ export class LocalProjectService implements ProjectService {
 
     // Removing a project only unregisters it from DeviceRobot. Source files stay untouched.
     this.#store.delete(id);
+  }
+
+  public async rename(id: string, value: string): Promise<AndroidProject> {
+    const project = this.#store.findById(id);
+    if (project === undefined) {
+      throw new ProjectError("未找到要编辑的项目。", 404);
+    }
+
+    const name = value.trim();
+    if (name.length === 0 || name.length > 256) {
+      throw new ProjectError("项目名称无效。", 400);
+    }
+
+    this.#store.updateName(id, name);
+    return androidProjectSchema.parse({ ...project, name });
   }
 
   public async reindex(id: string): Promise<AndroidProject> {

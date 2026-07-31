@@ -19,6 +19,7 @@ import {
   type ProjectBuildRunListResponse,
   type StartProjectBuildRequest,
   type ProjectListResponse,
+  type RenameProjectRequest,
 } from "@device-robot/contracts";
 
 import { requestEmpty, requestJson } from "./client";
@@ -53,6 +54,22 @@ export async function deleteProject(projectId: string): Promise<void> {
     `/api/v1/projects/${encodeURIComponent(projectId)}`,
     { method: "DELETE", headers: { Accept: "application/json" } },
     "删除项目失败。",
+  );
+}
+
+export async function renameProject(
+  projectId: string,
+  request: RenameProjectRequest,
+): Promise<AndroidProject> {
+  return await requestJson(
+    `/api/v1/projects/${encodeURIComponent(projectId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(request),
+    },
+    androidProjectSchema,
+    "项目名称更新失败。",
   );
 }
 

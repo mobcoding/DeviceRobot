@@ -108,6 +108,17 @@ class InMemoryAiConversationStore implements AiConversationStore {
   public latestSnapshot(conversationId: string): AiContextSnapshot | undefined {
     return this.#snapshots.get(conversationId)?.at(-1);
   }
+
+  public deleteByProject(projectId: string): void {
+    const conversationIds = [...this.#conversations.values()]
+      .filter((conversation) => conversation.projectId === projectId)
+      .map((conversation) => conversation.id);
+    for (const conversationId of conversationIds) {
+      this.#conversations.delete(conversationId);
+      this.#messages.delete(conversationId);
+      this.#snapshots.delete(conversationId);
+    }
+  }
 }
 
 class InMemoryAiConfigurationStore {
@@ -651,6 +662,38 @@ describe("AI action plan service", () => {
     expect(second.appId).toBeUndefined();
     expect(list.conversations).toHaveLength(1);
     expect(list.conversations[0]?.id).toBe(first.id);
+  });
+
+  it("removes a project's AI conversation without removing the project", async () => {
+    const project = createProject();
+    const projectStore = new InMemoryProjectStore(project);
+    const conversationStore = new InMemoryAiConversationStore();
+    const service = new LocalAiPlanService({
+      projectStore,
+      modelProvider: new FakeModelProvider({
+        reply: "不应生成计划。",
+        actions: [{ action: "ui.wait", durationMs: 500 }],
+      }),
+      conversationStore,
+    });
+    const original = await service.createConversation(project.id, { appId: "com.example.app" });
+    conversationStore.appendMessage({
+      id: "323e4567-e89b-12d3-a456-426614174000",
+      conversationId: original.id,
+      role: "user",
+      content: "验证首页可见",
+      createdAt: "2026-07-21T10:01:00.000Z",
+    });
+
+    await service.removeConversation(project.id);
+
+    expect(projectStore.findById(project.id)).toEqual(project);
+    await expect(service.getConversation(original.id)).rejects.toMatchObject({ statusCode: 404 });
+    const replacement = await service.listConversations(project.id);
+    expect(replacement.conversations[0]?.id).not.toBe(original.id);
+    await expect(service.getConversation(replacement.conversations[0]!.id)).resolves.toMatchObject({
+      messages: [],
+    });
   });
 
   it("only supplies the selected project's conversation history to the model", async () => {

@@ -151,6 +151,10 @@ export const createProjectRequestSchema = z.discriminatedUnion("source", [
   z.object({ source: z.literal("git"), remoteUrl: z.string().url().max(2_048) }),
 ]);
 
+export const renameProjectRequestSchema = z.object({
+  name: z.string().trim().min(1).max(256),
+});
+
 export type ProjectSource = z.infer<typeof projectSourceSchema>;
 export type AndroidProjectModuleType = z.infer<typeof androidProjectModuleTypeSchema>;
 export type AndroidProjectModule = z.infer<typeof androidProjectModuleSchema>;
@@ -171,3 +175,4 @@ export type StartProjectBuildRequest = z.infer<typeof startProjectBuildRequestSc
 export type AndroidProject = z.infer<typeof androidProjectSchema>;
 export type ProjectListResponse = z.infer<typeof projectListResponseSchema>;
 export type CreateProjectRequest = z.infer<typeof createProjectRequestSchema>;
+export type RenameProjectRequest = z.infer<typeof renameProjectRequestSchema>;

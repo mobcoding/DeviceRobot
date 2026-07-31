@@ -27,6 +27,7 @@ import {
   androidBuildTargetListResponseSchema,
   androidProjectSchema,
   createProjectRequestSchema,
+  renameProjectRequestSchema,
   projectListResponseSchema,
   projectBuildLogResponseSchema,
   projectBuildRunListResponseSchema,
@@ -479,6 +480,9 @@ function fileTransferErrorReply(reply: FastifyReply, error: unknown): FastifyRep
 }
 
 function projectErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
+  if (error instanceof z.ZodError) {
+    return reply.code(400).send({ error: "项目请求参数无效。" });
+  }
   if (error instanceof ProjectError) {
     return reply.code(error.statusCode).send({ error: error.message });
   }
@@ -670,6 +674,19 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     try {
       return androidProjectSchema.parse(
         await projectService.add(createProjectRequestSchema.parse(request.body)),
+      );
+    } catch (error) {
+      return projectErrorReply(reply, error);
+    }
+  });
+
+  app.patch("/api/v1/projects/:projectId", async (request, reply) => {
+    try {
+      return androidProjectSchema.parse(
+        await projectService.rename(
+          parseProjectId(request.params),
+          renameProjectRequestSchema.parse(request.body).name,
+        ),
       );
     } catch (error) {
       return projectErrorReply(reply, error);

@@ -128,6 +128,7 @@ export interface AiPlanService {
     projectId: string,
     request: CreateAiConversationRequest,
   ): Promise<AiConversation>;
+  removeConversation?(projectId: string): Promise<void>;
   getConversation?(conversationId: string): Promise<AiConversationDetailResponse>;
   decideRuntimeStep?(request: AiRuntimeStepRequest): Promise<AiRuntimeStepDecision>;
 }
@@ -1278,6 +1279,17 @@ export class LocalAiPlanService implements AiPlanService {
       throw new AiPlanError("未找到项目。", 404);
     }
     return this.#withCurrentContextStatus(this.#projectConversation(project), project);
+  }
+
+  public async removeConversation(projectId: string): Promise<void> {
+    if (this.#projectStore.findById(projectId) === undefined) {
+      throw new AiPlanError("未找到项目。", 404);
+    }
+    if (this.#conversationStore === undefined) {
+      throw new AiPlanError("当前 Agent 未启用 AI 会话存储。", 503);
+    }
+
+    this.#conversationStore.deleteByProject(projectId);
   }
 
   public async getConversation(conversationId: string): Promise<AiConversationDetailResponse> {

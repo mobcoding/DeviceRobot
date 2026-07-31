@@ -301,6 +301,10 @@ function ConversationTestRunCard({
           screenshotAvailable: false,
         }));
   const waitingForFirstStep = running && displayedSteps.length === 0;
+  const allStepsSucceeded =
+    run.status === "succeeded" &&
+    run.steps.length > 0 &&
+    run.steps.every((step) => step.status === "succeeded");
 
   return (
     <section
@@ -360,6 +364,19 @@ function ConversationTestRunCard({
             ))
           )}
         </ol>
+      )}
+      {allStepsSucceeded && (
+        <div className="ai-test-active-run-report-action">
+          <a
+            href={testReportHtmlUrl(run.id)}
+            target="_blank"
+            rel="noreferrer"
+            title="在新页面打开测试报告详情"
+          >
+            <FileText aria-hidden="true" size={15} strokeWidth={1.8} />
+            查看报告
+          </a>
+        </div>
       )}
     </section>
   );

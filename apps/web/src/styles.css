@@ -4818,6 +4818,41 @@ h3 {
   color: inherit;
 }
 
+.ai-test-active-run .test-status-succeeded {
+  color: #7fd1a4;
+}
+
+.ai-test-active-run .test-status-failed {
+  color: #ef9c95;
+}
+
+.ai-test-active-run-report-action {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 11px;
+  border-top: 1px solid #343839;
+}
+
+.ai-test-active-run-report-action a {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid #4a5456;
+  border-radius: 4px;
+  color: #dce5e5;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.ai-test-active-run-report-action a:hover {
+  border-color: #79b8ae;
+  background: #20302f;
+  color: #e4faf5;
+}
+
 .ai-test-composer {
   display: grid;
   align-self: end;

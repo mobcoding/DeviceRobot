@@ -1410,6 +1410,34 @@ describe("DeviceRobot Web UI", () => {
     const result = await screen.findByRole("region", { name: "测试执行结果" });
     expect(within(result).getByText("设备已唤醒。")).toBeInTheDocument();
     expect(within(result).getByText("找不到文本：首页")).toBeInTheDocument();
+    expect(within(result).queryByRole("link", { name: "查看报告" })).toBeNull();
+  });
+
+  it("shows the report link only when every conversation test step succeeds", async () => {
+    const completedRun = {
+      ...testExecutionRunResponse,
+      status: "succeeded" as const,
+      finishedAt: "2026-07-23T10:03:00.000Z",
+      steps: [
+        {
+          index: 0,
+          action: { action: "device.unlock" as const },
+          status: "succeeded" as const,
+          message: "设备已唤醒。",
+          screenshotAvailable: false,
+        },
+      ],
+    };
+    mockApis({ testRuns: [completedRun] });
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "AI" }));
+
+    const result = await screen.findByRole("region", { name: "测试执行结果" });
+    const reportLink = within(result).getByRole("link", { name: "查看报告" });
+    expect(reportLink).toHaveAttribute("href", `/api/v1/test-runs/${completedRun.id}/report/html`);
+    expect(reportLink).toHaveAttribute("target", "_blank");
   });
 
   it("shows connection progress before the first live AI step is available", async () => {

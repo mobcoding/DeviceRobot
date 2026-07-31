@@ -244,6 +244,9 @@ describe("AI project session recovery", () => {
     await user.click(recentProjectButton);
 
     await waitFor(() => expect(recentProjectButton).toHaveAttribute("aria-pressed", "true"));
+    expect(globalThis.localStorage.getItem("device-robot:ai:last-project")).toBe(
+      "223e4567-e89b-12d3-a456-426614174000",
+    );
     await waitFor(() =>
       expect(
         globalThis.localStorage.getItem(
@@ -254,10 +257,9 @@ describe("AI project session recovery", () => {
     const projectList = screen.getByLabelText("测试项目");
     expect(
       within(projectList).getAllByRole("button", { name: /Example project|Recent AI project/u })[0],
-    ).toHaveTextContent("Recent AI project");
+    ).toHaveTextContent("Example project");
 
     view.rerender(workspaceView(queryClient, false));
-    globalThis.localStorage.clear();
     view.rerender(workspaceView(queryClient, true));
 
     const restoredProjectButton = await screen.findByRole("button", { name: /Recent AI project/u });
@@ -266,6 +268,6 @@ describe("AI project session recovery", () => {
       within(screen.getByLabelText("测试项目")).getAllByRole("button", {
         name: /Example project|Recent AI project/u,
       })[0],
-    ).toHaveTextContent("Recent AI project");
+    ).toHaveTextContent("Example project");
   });
 });

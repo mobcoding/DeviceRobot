@@ -462,18 +462,7 @@ export function AiPlanPanel({
   const projectId = availableProjects.some((project) => project.id === selectedProjectId)
     ? selectedProjectId
     : (availableProjects[0]?.id ?? "");
-  const projects =
-    projectId.length === 0
-      ? availableProjects
-      : [...availableProjects].sort((left, right) => {
-          if (left.id === projectId) {
-            return -1;
-          }
-          if (right.id === projectId) {
-            return 1;
-          }
-          return 0;
-        });
+  const projects = availableProjects;
   const selectedProject = projects.find((project) => project.id === projectId);
   const appIds = applicationIds(selectedProject);
   const appId = appIds[0] ?? "";

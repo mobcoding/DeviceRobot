@@ -4711,20 +4711,10 @@ h3 {
   min-height: 52px;
   max-width: 680px;
   overflow: hidden;
-  border: 1px solid #326960;
+  border: 1px solid #343839;
   border-radius: 5px;
-  background: #152321;
-}
-
-.ai-test-active-run.succeeded {
-  border-color: #356a54;
-  background: #14241c;
-}
-
-.ai-test-active-run.failed,
-.ai-test-active-run.cancelled {
-  border-color: #70413d;
-  background: #291b1a;
+  color: #e5ecec;
+  background: #222526;
 }
 
 .ai-test-active-run > header {
@@ -4734,7 +4724,7 @@ h3 {
   align-items: center;
   gap: 10px;
   padding: 9px 11px;
-  border-bottom: 1px solid #28564f;
+  border-bottom: 1px solid #343839;
 }
 
 .ai-test-active-run header > div {
@@ -4745,7 +4735,7 @@ h3 {
 
 .ai-test-active-run header strong {
   overflow: hidden;
-  color: #d8eeea;
+  color: inherit;
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4756,7 +4746,7 @@ h3 {
   align-items: center;
   gap: 6px;
   margin: 1px 0 0;
-  color: #94c9c2;
+  color: inherit;
   font-size: 11px;
   font-weight: 500;
   line-height: 1.4;
@@ -4782,7 +4772,7 @@ h3 {
   gap: 8px;
   min-height: 36px;
   padding: 6px 11px;
-  border-bottom: 1px solid #244b45;
+  border-bottom: 1px solid #343839;
 }
 
 .ai-test-active-run li:last-child {
@@ -4791,7 +4781,7 @@ h3 {
 
 .ai-test-active-run li code {
   overflow: hidden;
-  color: #b8deda;
+  color: inherit;
   font-family: "Cascadia Code", Consolas, monospace;
   font-size: 12px;
   text-overflow: ellipsis;
@@ -4807,28 +4797,25 @@ h3 {
 .ai-test-active-run-message,
 .ai-test-active-run-step-message {
   margin: 0;
-  color: #b7c8c5;
+  color: inherit;
   font-size: 11px;
   line-height: 1.5;
 }
 
 .ai-test-active-run-message {
   padding: 8px 11px;
-  border-bottom: 1px solid #244b45;
-}
-
-.ai-test-active-run.failed .ai-test-active-run-message,
-.ai-test-active-run.cancelled .ai-test-active-run-message,
-.ai-test-active-run.failed .ai-test-active-run-step-message,
-.ai-test-active-run.cancelled .ai-test-active-run-step-message {
-  color: #efb7b2;
+  border-bottom: 1px solid #343839;
 }
 
 .ai-test-active-run .ai-test-active-run-pending {
   display: flex;
   gap: 8px;
-  color: #b3c7c5;
+  color: inherit;
   font-size: 12px;
+}
+
+.ai-test-active-run .test-status {
+  color: inherit;
 }
 
 .ai-test-composer {

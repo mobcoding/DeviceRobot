@@ -1408,9 +1408,7 @@ describe("DeviceRobot Web UI", () => {
       approved: true,
       plan: { id: aiPlanResponse.plan.id },
     });
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "实施测试流程" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "AI 会话" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "最近测试运行" })).toBeInTheDocument();
   });
 
@@ -1616,7 +1614,7 @@ describe("DeviceRobot Web UI", () => {
 
     await vi.waitFor(() => expect(getAiConfigurationTestRequests()).toBe(1));
     expect(await screen.findByRole("combobox", { name: "选择 AI 模型" })).toHaveValue("gpt-4.1");
-    expect(screen.getByRole("heading", { level: 1, name: "实施测试流程" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "AI 会话" })).toBeInTheDocument();
     expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument();
   });
 

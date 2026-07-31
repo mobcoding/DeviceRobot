@@ -17,7 +17,6 @@ import {
   MessageSquareText,
   Paperclip,
   Play,
-  RefreshCw,
   ShieldCheck,
   Smartphone,
   Square,
@@ -1065,33 +1064,7 @@ export function AiPlanPanel({
             )}
           </aside>
 
-          <section className="ai-test-flow" aria-label="实施测试流程">
-            <header className="ai-test-flow-heading">
-              <div>
-                <span className="eyebrow">AI 测试</span>
-                <h1>实施测试流程</h1>
-                <p>{appId.length === 0 ? "请选择含测试应用的项目后开始。" : appId}</p>
-              </div>
-              <button
-                className="icon-button"
-                type="button"
-                aria-label="刷新测试流程"
-                title="刷新测试流程"
-                disabled={
-                  conversationsQuery.isFetching ||
-                  conversationDetailQuery.isFetching ||
-                  runsQuery.isFetching
-                }
-                onClick={() => {
-                  void conversationsQuery.refetch();
-                  void conversationDetailQuery.refetch();
-                  void runsQuery.refetch();
-                }}
-              >
-                <RefreshCw aria-hidden="true" size={16} strokeWidth={1.8} />
-              </button>
-            </header>
-
+          <section className="ai-test-flow" aria-label="AI 会话">
             {error !== undefined && (
               <p className="management-error ai-test-workspace-error" role="alert">
                 {error}

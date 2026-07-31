@@ -4284,7 +4284,6 @@ h3 {
 }
 
 .ai-test-project-sidebar > header,
-.ai-test-flow-heading,
 .ai-test-plan-inspector > header,
 .ai-test-run-history > header {
   display: flex;
@@ -4475,38 +4474,6 @@ h3 {
   min-height: 0;
   grid-template-rows: auto minmax(0, 1fr) auto;
   background: #0f1112;
-}
-
-.ai-test-flow-heading {
-  min-height: 70px;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 18px;
-  border-bottom: 1px solid #2b3031;
-}
-
-.ai-test-flow-heading > div {
-  min-width: 0;
-}
-
-.ai-test-flow-heading .eyebrow {
-  margin: 0 0 3px;
-  color: #83c5bc;
-  font-size: 11px;
-}
-
-.ai-test-flow-heading h1 {
-  font-size: 17px;
-}
-
-.ai-test-flow-heading p {
-  margin: 4px 0 0;
-  overflow: hidden;
-  color: #849195;
-  font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .ai-test-workspace-error,

@@ -33,6 +33,7 @@ import type {
   AndroidDevice,
   AndroidProject,
   GenerateAiPlanRequest,
+  StartTestExecutionRequest,
   TestExecutionRun,
   TestStepExecution,
   TestSuiteRecord,
@@ -83,6 +84,18 @@ type PendingConversationExchange = {
   userMessage: ConversationMessage;
   startedAt: number;
   response?: AiPlanResponse;
+};
+
+type ConversationTestExecutionRequest = {
+  request: StartTestExecutionRequest;
+  projectId: string;
+  conversationId: string;
+};
+
+type ConversationTestRun = {
+  projectId: string;
+  conversationId: string;
+  run: TestExecutionRun;
 };
 
 const LAST_AI_PROJECT_STORAGE_KEY = "device-robot:ai:last-project";
@@ -241,6 +254,81 @@ function TestRunStep({
         />
       )}
     </li>
+  );
+}
+
+function ConversationTestRunCard({
+  run,
+  cancelling,
+  onCancel,
+}: {
+  run: TestExecutionRun;
+  cancelling: boolean;
+  onCancel(runId: string): void;
+}): React.JSX.Element {
+  const running = run.status === "running";
+
+  return (
+    <section
+      className={`ai-test-active-run ${run.status}`}
+      aria-label={running ? "当前测试执行" : "测试执行结果"}
+    >
+      <header>
+        <div>
+          <span>{running ? "当前执行" : "执行结果"}</span>
+          <strong>{run.name}</strong>
+        </div>
+        <span className={`test-status test-status-${run.status}`}>
+          {statusIcon(run.status)}
+          {statusLabel(run.status)}
+        </span>
+        {running ? (
+          <button
+            className="icon-button danger-icon-button"
+            type="button"
+            aria-label="取消当前测试"
+            title="取消当前测试"
+            disabled={cancelling}
+            onClick={() => onCancel(run.id)}
+          >
+            <Square aria-hidden="true" size={13} fill="currentColor" strokeWidth={1.8} />
+          </button>
+        ) : (
+          <span aria-hidden="true" />
+        )}
+      </header>
+      {run.message !== undefined && <p className="ai-test-active-run-message">{run.message}</p>}
+      <ol>
+        {run.steps.length === 0 ? (
+          <li className="ai-test-active-run-pending">
+            {running ? (
+              <>
+                <LoaderCircle aria-hidden="true" size={15} className="test-run-spinner" />
+                正在启动 Appium 会话并读取首个页面。
+              </>
+            ) : (
+              "本次执行未记录测试步骤。"
+            )}
+          </li>
+        ) : (
+          run.steps.map((step) => (
+            <li key={`${run.id}:${step.index}`}>
+              <span className="test-step-index">{step.index + 1}</span>
+              <div>
+                <code>{actionLabel(step.action)}</code>
+                {step.message !== undefined && (
+                  <p className="ai-test-active-run-step-message">{step.message}</p>
+                )}
+              </div>
+              <span className={`test-status test-status-${step.status}`}>
+                {statusIcon(step.status)}
+                {statusLabel(step.status)}
+              </span>
+            </li>
+          ))
+        )}
+      </ol>
+    </section>
   );
 }
 
@@ -466,6 +554,7 @@ export function AiPlanPanel({
   const [installableArtifacts, setInstallableArtifacts] = useState<ApkArtifact[]>([]);
   const [lastWorkspaceExecution, setLastWorkspaceExecution] =
     useState<WorkspaceExecutionResponse>();
+  const [conversationTestRun, setConversationTestRun] = useState<ConversationTestRun>();
   const [projectMenuId, setProjectMenuId] = useState<string>();
   const [renamingProject, setRenamingProject] = useState<AndroidProject>();
   const [projectNameDraft, setProjectNameDraft] = useState("");
@@ -761,8 +850,10 @@ export function AiPlanPanel({
     },
   });
   const testExecutionMutation = useMutation({
-    mutationFn: startTestExecution,
-    onSuccess: async (_run, request) => {
+    mutationFn: async ({ request }: ConversationTestExecutionRequest) =>
+      await startTestExecution(request),
+    onSuccess: async (run, { conversationId, projectId, request }) => {
+      setConversationTestRun({ projectId, conversationId, run });
       const consumedArtifactIds = new Set(
         request.plan.actions.flatMap((action) =>
           action.action === "app.install" ? [action.artifactId] : [],
@@ -800,7 +891,10 @@ export function AiPlanPanel({
   });
   const cancelMutation = useMutation({
     mutationFn: cancelTestExecution,
-    onSuccess: async () => {
+    onSuccess: async (run) => {
+      setConversationTestRun((current) =>
+        current?.run.id === run.id ? { ...current, run } : current,
+      );
       await queryClient.invalidateQueries({ queryKey: ["test-runs"] });
     },
   });
@@ -917,6 +1011,32 @@ export function AiPlanPanel({
           );
   const activeRun = runs.find((run) => run.status === "running");
   const selectedRun = runs.find((run) => run.id === selectedRunId);
+  const currentConversationRun =
+    conversationTestRun !== undefined &&
+    conversationTestRun.projectId === projectId &&
+    conversationTestRun.conversationId === activeConversationId
+      ? (runs.find((run) => run.id === conversationTestRun.run.id) ?? conversationTestRun.run)
+      : undefined;
+  const selectedPlanRun =
+    selectedExecutionPlan === undefined
+      ? undefined
+      : runs.find((run) => run.planId === selectedExecutionPlan.id);
+  const timelineRun = currentConversationRun ?? selectedPlanRun;
+  const timelineRunVersion =
+    timelineRun === undefined
+      ? ""
+      : [
+          timelineRun.id,
+          timelineRun.status,
+          timelineRun.message ?? "",
+          ...timelineRun.steps.map((step) => `${step.index}:${step.status}:${step.message ?? ""}`),
+        ].join("|");
+  useEffect(() => {
+    const timeline = workspaceRef.current?.querySelector<HTMLDivElement>(".ai-test-timeline");
+    if (timeline !== undefined && timeline !== null && timelineRunVersion.length > 0) {
+      timeline.scrollTop = timeline.scrollHeight;
+    }
+  }, [timelineRunVersion]);
   const completedExplorationRun =
     selectedExecutionPlan?.liveUiExecution === undefined
       ? undefined
@@ -957,11 +1077,15 @@ export function AiPlanPanel({
     }
 
     testExecutionMutation.mutate({
-      plan,
-      deviceSerial: device.serial,
-      appId: targetAppId,
-      name: response.reply.slice(0, 80),
-      approved: true,
+      projectId,
+      conversationId: activeConversationId,
+      request: {
+        plan,
+        deviceSerial: device.serial,
+        appId: targetAppId,
+        name: response.reply.slice(0, 80),
+        approved: true,
+      },
     });
   };
 
@@ -1272,51 +1396,12 @@ export function AiPlanPanel({
             </div>
 
             <div className="ai-test-timeline" aria-label="测试过程">
-              {activeRun !== undefined && (
-                <section
-                  className={`ai-test-active-run ${activeRun.status}`}
-                  aria-label="当前测试执行"
-                >
-                  <header>
-                    <div>
-                      <span>当前执行</span>
-                      <strong>{activeRun.name}</strong>
-                    </div>
-                    <span className={`test-status test-status-${activeRun.status}`}>
-                      {statusIcon(activeRun.status)}
-                      {statusLabel(activeRun.status)}
-                    </span>
-                    <button
-                      className="icon-button danger-icon-button"
-                      type="button"
-                      aria-label="取消当前测试"
-                      title="取消当前测试"
-                      disabled={cancelMutation.isPending}
-                      onClick={() => cancelMutation.mutate(activeRun.id)}
-                    >
-                      <Square aria-hidden="true" size={13} fill="currentColor" strokeWidth={1.8} />
-                    </button>
-                  </header>
-                  <ol>
-                    {activeRun.steps.length === 0 ? (
-                      <li className="ai-test-active-run-pending">
-                        <LoaderCircle aria-hidden="true" size={15} className="test-run-spinner" />
-                        正在启动 Appium 会话并读取首个页面。
-                      </li>
-                    ) : (
-                      activeRun.steps.map((step) => (
-                        <li key={`${activeRun.id}:${step.index}`}>
-                          <span className="test-step-index">{step.index + 1}</span>
-                          <code>{step.action.action}</code>
-                          <span className={`test-status test-status-${step.status}`}>
-                            {statusIcon(step.status)}
-                            {statusLabel(step.status)}
-                          </span>
-                        </li>
-                      ))
-                    )}
-                  </ol>
-                </section>
+              {timelineRun !== undefined && (
+                <ConversationTestRunCard
+                  run={timelineRun}
+                  cancelling={cancelMutation.isPending}
+                  onCancel={(runId) => cancelMutation.mutate(runId)}
+                />
               )}
 
               {visibleMessages.length === 0 && !thinking ? (
@@ -1335,7 +1420,7 @@ export function AiPlanPanel({
                   {visibleMessages.map((message) => (
                     <article key={message.id} className={`ai-test-message ${message.role}`}>
                       <p>{message.content}</p>
-                      {message.role === "user" && (
+                      {(message.role === "user" || message.role === "assistant") && (
                         <time className="ai-test-message-time" dateTime={message.createdAt}>
                           {formatMessageTime(message.createdAt)}
                         </time>

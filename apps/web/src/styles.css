@@ -4683,12 +4683,32 @@ h3 {
   opacity: 1;
 }
 
+.ai-test-message.assistant .ai-test-message-time {
+  right: auto;
+  left: 3px;
+}
+
+.ai-test-message.assistant:hover .ai-test-message-time {
+  opacity: 1;
+}
+
 .ai-test-active-run {
   max-width: 680px;
   overflow: hidden;
   border: 1px solid #326960;
   border-radius: 5px;
   background: #152321;
+}
+
+.ai-test-active-run.succeeded {
+  border-color: #356a54;
+  background: #14241c;
+}
+
+.ai-test-active-run.failed,
+.ai-test-active-run.cancelled {
+  border-color: #70413d;
+  background: #291b1a;
 }
 
 .ai-test-active-run > header {
@@ -4749,6 +4769,32 @@ h3 {
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ai-test-active-run li > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.ai-test-active-run-message,
+.ai-test-active-run-step-message {
+  margin: 0;
+  color: #b7c8c5;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.ai-test-active-run-message {
+  padding: 8px 11px;
+  border-bottom: 1px solid #244b45;
+}
+
+.ai-test-active-run.failed .ai-test-active-run-message,
+.ai-test-active-run.cancelled .ai-test-active-run-message,
+.ai-test-active-run.failed .ai-test-active-run-step-message,
+.ai-test-active-run.cancelled .ai-test-active-run-step-message {
+  color: #efb7b2;
 }
 
 .ai-test-active-run .ai-test-active-run-pending {

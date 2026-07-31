@@ -1349,11 +1349,13 @@ describe("DeviceRobot Web UI", () => {
     expect(document.querySelector(".ai-test-message header")).toBeNull();
     expect(screen.queryByText("查看计划")).not.toBeInTheDocument();
     const messageTimes = [...document.querySelectorAll<HTMLTimeElement>(".ai-test-message-time")];
-    expect(messageTimes).toHaveLength(1);
+    expect(messageTimes).toHaveLength(2);
     expect(
       messageTimes.every((messageTime) => messageTime.dateTime === aiPlanResponse.generatedAt),
     ).toBe(true);
-    expect(document.querySelector(".ai-test-message.assistant .ai-test-message-time")).toBeNull();
+    expect(
+      document.querySelector(".ai-test-message.assistant .ai-test-message-time"),
+    ).not.toBeNull();
     expect(screen.queryByRole("status", { name: "AI 正在思考" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "当前计划" })).toBeInTheDocument();
     expect(screen.getByText("assert.visible")).toBeInTheDocument();
@@ -1434,6 +1436,9 @@ describe("DeviceRobot Web UI", () => {
     });
     expect(screen.getByRole("region", { name: "AI 会话" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "最近测试运行" })).toBeInTheDocument();
+    const execution = await screen.findByRole("region", { name: "当前测试执行" });
+    expect(within(execution).getByText("assert.visible")).toBeInTheDocument();
+    expect(within(execution).getByText("等待中")).toBeInTheDocument();
   });
 
   it("saves a completed AI exploration and starts its local DSL regression without a new AI request", async () => {
@@ -1567,6 +1572,11 @@ describe("DeviceRobot Web UI", () => {
     renderApp();
 
     await user.click(await screen.findByRole("button", { name: "AI" }));
+    await user.type(screen.getByRole("textbox", { name: "测试目标" }), "验证首页可见");
+    await user.click(screen.getByRole("button", { name: "生成操作计划" }));
+    const result = await screen.findByRole("region", { name: "测试执行结果" });
+    expect(within(result).getByText("首页未出现。")).toBeInTheDocument();
+    expect(within(result).getByText("找不到文本：首页")).toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: "查看 首页可见性检查 的运行详情" }));
 
     const dialog = await screen.findByRole("dialog", { name: "测试运行详情" });

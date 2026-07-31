@@ -98,6 +98,24 @@ type ConversationTestRun = {
   run: TestExecutionRun;
 };
 
+type ConversationWorkspaceExecutionRequest = {
+  id: string;
+  plan: ActionPlan;
+  deviceSerial: string;
+  projectId: string;
+  conversationId: string;
+};
+
+type ConversationWorkspaceExecution = {
+  id: string;
+  plan: ActionPlan;
+  projectId: string;
+  conversationId: string;
+  status: "running" | WorkspaceExecutionResponse["status"];
+  error?: string;
+  result?: WorkspaceExecutionResponse;
+};
+
 const LAST_AI_PROJECT_STORAGE_KEY = "device-robot:ai:last-project";
 const LAST_AI_CONVERSATION_STORAGE_PREFIX = "device-robot:ai:last-conversation:";
 
@@ -332,6 +350,60 @@ function ConversationTestRunCard({
   );
 }
 
+function ConversationWorkspaceExecutionCard({
+  execution,
+}: {
+  execution: ConversationWorkspaceExecution;
+}): React.JSX.Element {
+  const running = execution.status === "running";
+  const resultsByIndex = new Map(
+    execution.result?.results.map((result) => [result.index, result]) ?? [],
+  );
+
+  return (
+    <section
+      className={`ai-test-active-run ${execution.status}`}
+      aria-label={running ? "当前测试执行" : "测试执行结果"}
+    >
+      <header>
+        <div>
+          <span>{running ? "当前执行" : "执行结果"}</span>
+          <strong>工作区操作</strong>
+        </div>
+        <span className={`test-status test-status-${execution.status}`}>
+          {statusIcon(execution.status)}
+          {statusLabel(execution.status)}
+        </span>
+        <span aria-hidden="true" />
+      </header>
+      {execution.error !== undefined && (
+        <p className="ai-test-active-run-message">{execution.error}</p>
+      )}
+      <ol>
+        {execution.plan.actions.map((action, index) => {
+          const result = resultsByIndex.get(index);
+          const stepStatus: TestStepExecution["status"] = result?.status ?? "pending";
+          return (
+            <li key={`${execution.id}:${index}`}>
+              <span className="test-step-index">{index + 1}</span>
+              <div>
+                <code>{actionLabel(action)}</code>
+                {result?.message !== undefined && (
+                  <p className="ai-test-active-run-step-message">{result.message}</p>
+                )}
+              </div>
+              <span className={`test-status test-status-${stepStatus}`}>
+                {statusIcon(stepStatus)}
+                {statusLabel(stepStatus)}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
 function TestRunDetailsDialog({
   run,
   runs,
@@ -555,6 +627,8 @@ export function AiPlanPanel({
   const [lastWorkspaceExecution, setLastWorkspaceExecution] =
     useState<WorkspaceExecutionResponse>();
   const [conversationTestRun, setConversationTestRun] = useState<ConversationTestRun>();
+  const [conversationWorkspaceExecution, setConversationWorkspaceExecution] =
+    useState<ConversationWorkspaceExecution>();
   const [projectMenuId, setProjectMenuId] = useState<string>();
   const [renamingProject, setRenamingProject] = useState<AndroidProject>();
   const [projectNameDraft, setProjectNameDraft] = useState("");
@@ -788,7 +862,13 @@ export function AiPlanPanel({
         current?.id === exchangeId ? undefined : current,
       );
       if (response.plan.workspaceExecution === true && device !== undefined) {
-        workspaceExecutionMutation.mutate({ plan: response.plan, deviceSerial: device.serial });
+        workspaceExecutionMutation.mutate({
+          id: crypto.randomUUID(),
+          plan: response.plan,
+          deviceSerial: device.serial,
+          projectId: response.plan.projectId,
+          conversationId: request.conversationId ?? activeConversationId,
+        });
       }
     },
     onError: (_error, { exchangeId, request }) => {
@@ -853,6 +933,7 @@ export function AiPlanPanel({
     mutationFn: async ({ request }: ConversationTestExecutionRequest) =>
       await startTestExecution(request),
     onSuccess: async (run, { conversationId, projectId, request }) => {
+      setConversationWorkspaceExecution(undefined);
       setConversationTestRun({ projectId, conversationId, run });
       const consumedArtifactIds = new Set(
         request.plan.actions.flatMap((action) =>
@@ -886,8 +967,35 @@ export function AiPlanPanel({
     },
   });
   const workspaceExecutionMutation = useMutation({
-    mutationFn: startWorkspaceExecution,
-    onSuccess: (result) => setLastWorkspaceExecution(result),
+    mutationFn: async ({ plan, deviceSerial }: ConversationWorkspaceExecutionRequest) =>
+      await startWorkspaceExecution({ plan, deviceSerial }),
+    onMutate: ({ id, plan, projectId, conversationId }) => {
+      setConversationTestRun(undefined);
+      setConversationWorkspaceExecution({
+        id,
+        plan,
+        projectId,
+        conversationId,
+        status: "running",
+      });
+    },
+    onSuccess: (result, { id }) => {
+      setLastWorkspaceExecution(result);
+      setConversationWorkspaceExecution((current) =>
+        current?.id === id ? { ...current, status: result.status, result } : current,
+      );
+    },
+    onError: (error, { id }) => {
+      setConversationWorkspaceExecution((current) =>
+        current?.id === id
+          ? {
+              ...current,
+              status: "failed",
+              error: error instanceof Error ? error.message : "工作区操作失败。",
+            }
+          : current,
+      );
+    },
   });
   const cancelMutation = useMutation({
     mutationFn: cancelTestExecution,
@@ -1021,22 +1129,42 @@ export function AiPlanPanel({
     selectedExecutionPlan === undefined
       ? undefined
       : runs.find((run) => run.planId === selectedExecutionPlan.id);
-  const timelineRun = currentConversationRun ?? selectedPlanRun;
-  const timelineRunVersion =
-    timelineRun === undefined
-      ? ""
-      : [
-          timelineRun.id,
-          timelineRun.status,
-          timelineRun.message ?? "",
-          ...timelineRun.steps.map((step) => `${step.index}:${step.status}:${step.message ?? ""}`),
-        ].join("|");
+  const timelineTestRun = currentConversationRun ?? selectedPlanRun;
+  const timelineWorkspaceExecution =
+    conversationWorkspaceExecution !== undefined &&
+    conversationWorkspaceExecution.projectId === projectId &&
+    conversationWorkspaceExecution.conversationId === activeConversationId
+      ? conversationWorkspaceExecution
+      : undefined;
+  const timelineExecutionVersion =
+    timelineTestRun !== undefined
+      ? [
+          timelineTestRun.id,
+          timelineTestRun.status,
+          timelineTestRun.message ?? "",
+          ...timelineTestRun.steps.map(
+            (step) => `${step.index}:${step.status}:${step.message ?? ""}`,
+          ),
+        ].join("|")
+      : timelineWorkspaceExecution === undefined
+        ? ""
+        : [
+            timelineWorkspaceExecution.id,
+            timelineWorkspaceExecution.status,
+            timelineWorkspaceExecution.error ?? "",
+            ...timelineWorkspaceExecution.plan.actions.map((action, index) => {
+              const result = timelineWorkspaceExecution.result?.results.find(
+                (candidate) => candidate.index === index,
+              );
+              return `${action.action}:${result?.status ?? "pending"}:${result?.message ?? ""}`;
+            }),
+          ].join("|");
   useEffect(() => {
     const timeline = workspaceRef.current?.querySelector<HTMLDivElement>(".ai-test-timeline");
-    if (timeline !== undefined && timeline !== null && timelineRunVersion.length > 0) {
+    if (timeline !== undefined && timeline !== null && timelineExecutionVersion.length > 0) {
       timeline.scrollTop = timeline.scrollHeight;
     }
-  }, [timelineRunVersion]);
+  }, [timelineExecutionVersion]);
   const completedExplorationRun =
     selectedExecutionPlan?.liveUiExecution === undefined
       ? undefined
@@ -1058,7 +1186,13 @@ export function AiPlanPanel({
       if (device === undefined) {
         return;
       }
-      workspaceExecutionMutation.mutate({ plan, deviceSerial: device.serial });
+      workspaceExecutionMutation.mutate({
+        id: crypto.randomUUID(),
+        plan,
+        deviceSerial: device.serial,
+        projectId,
+        conversationId: activeConversationId,
+      });
       return;
     }
     const targetAppId = plan.targetAppId ?? appId;
@@ -1396,14 +1530,6 @@ export function AiPlanPanel({
             </div>
 
             <div className="ai-test-timeline" aria-label="测试过程">
-              {timelineRun !== undefined && (
-                <ConversationTestRunCard
-                  run={timelineRun}
-                  cancelling={cancelMutation.isPending}
-                  onCancel={(runId) => cancelMutation.mutate(runId)}
-                />
-              )}
-
               {visibleMessages.length === 0 && !thinking ? (
                 <section className="ai-test-flow-empty" aria-label="暂无 AI 计划">
                   <MessageSquareText aria-hidden="true" size={24} strokeWidth={1.6} />
@@ -1427,6 +1553,16 @@ export function AiPlanPanel({
                       )}
                     </article>
                   ))}
+                  {timelineTestRun !== undefined && (
+                    <ConversationTestRunCard
+                      run={timelineTestRun}
+                      cancelling={cancelMutation.isPending}
+                      onCancel={(runId) => cancelMutation.mutate(runId)}
+                    />
+                  )}
+                  {timelineTestRun === undefined && timelineWorkspaceExecution !== undefined && (
+                    <ConversationWorkspaceExecutionCard execution={timelineWorkspaceExecution} />
+                  )}
                   {thinking && (
                     <article
                       className="ai-test-message assistant ai-test-message-thinking"

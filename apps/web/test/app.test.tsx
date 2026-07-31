@@ -1548,6 +1548,9 @@ describe("DeviceRobot Web UI", () => {
       plan: { actions: [{ action: "app.uninstall", appId: "com.example.other" }] },
     });
     expect(confirm).not.toHaveBeenCalled();
+    const execution = await screen.findByRole("region", { name: "测试执行结果" });
+    expect(within(execution).getByText("卸载应用")).toBeInTheDocument();
+    expect(within(execution).getAllByText("通过")).toHaveLength(2);
     expect(await screen.findByText("工作区操作完成：1 个动作。")).toBeInTheDocument();
   });
 

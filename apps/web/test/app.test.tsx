@@ -500,6 +500,7 @@ function mockApis(
       reason?: string;
     };
     aiPlan?: AiPlanResponse;
+    delayAiPlan?: boolean;
     completedProjectBuild?: boolean;
     failedProjectBuild?: boolean;
     projectBuildRuns?: Array<typeof completedProjectBuildResponse>;
@@ -517,6 +518,7 @@ function mockApis(
   getProjectBuildRequests: () => number;
   getProjectArtifactInstallRequests: () => number;
   getAiPlanRequests: () => number;
+  getAiPlanAbortRequests: () => number;
   getLastAiPlanRequest: () => unknown;
   getAiModelListRequests: () => number;
   getAiConfigurationTestRequests: () => number;
@@ -544,6 +546,7 @@ function mockApis(
   let currentProjectBuildRun = runningProjectBuildResponse;
   let projectArtifactInstallRequests = 0;
   let aiPlanRequests = 0;
+  let aiPlanAbortRequests = 0;
   let lastAiPlanRequest: unknown;
   let aiModelListRequests = 0;
   let aiConfigurationTestRequests = 0;
@@ -653,6 +656,18 @@ function mockApis(
     if (url === "/api/v1/ai/plans" && method === "POST") {
       aiPlanRequests += 1;
       lastAiPlanRequest = JSON.parse(String(init?.body ?? "{}"));
+      if (options.delayAiPlan === true) {
+        return await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => {
+              aiPlanAbortRequests += 1;
+              reject(new DOMException("The operation was aborted.", "AbortError"));
+            },
+            { once: true },
+          );
+        });
+      }
       const request = lastAiPlanRequest as { conversationId?: string; goal?: string };
       const response = options.aiPlan ?? aiPlanResponse;
       const conversationId = request.conversationId ?? aiConversation.id;
@@ -1063,6 +1078,7 @@ function mockApis(
     getProjectBuildRequests: () => projectBuildRequests,
     getProjectArtifactInstallRequests: () => projectArtifactInstallRequests,
     getAiPlanRequests: () => aiPlanRequests,
+    getAiPlanAbortRequests: () => aiPlanAbortRequests,
     getLastAiPlanRequest: () => lastAiPlanRequest,
     getAiModelListRequests: () => aiModelListRequests,
     getAiConfigurationTestRequests: () => aiConfigurationTestRequests,
@@ -1330,10 +1346,11 @@ describe("DeviceRobot Web UI", () => {
     expect(document.querySelector(".ai-test-message header")).toBeNull();
     expect(screen.queryByText("查看计划")).not.toBeInTheDocument();
     const messageTimes = [...document.querySelectorAll<HTMLTimeElement>(".ai-test-message-time")];
-    expect(messageTimes).toHaveLength(2);
+    expect(messageTimes).toHaveLength(1);
     expect(
       messageTimes.every((messageTime) => messageTime.dateTime === aiPlanResponse.generatedAt),
     ).toBe(true);
+    expect(document.querySelector(".ai-test-message.assistant .ai-test-message-time")).toBeNull();
     expect(screen.getByText("ActionPlan 预览")).toBeInTheDocument();
     expect(screen.getByText("assert.visible")).toBeInTheDocument();
     expect(screen.getByText("执行前必须确认")).toBeInTheDocument();
@@ -1350,6 +1367,23 @@ describe("DeviceRobot Web UI", () => {
 
     await vi.waitFor(() => expect(getAiPlanRequests()).toBe(1));
     expect(getLastAiPlanRequest()).toMatchObject({ goal: "验证首页可见" });
+  });
+
+  it("stops an in-progress AI reply from the circular composer button", async () => {
+    const { getAiPlanAbortRequests, getAiPlanRequests } = mockApis({ delayAiPlan: true });
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "AI" }));
+    await user.type(screen.getByRole("textbox", { name: "测试目标" }), "验证首页可见");
+    await user.click(screen.getByRole("button", { name: "生成操作计划" }));
+
+    expect(await screen.findByRole("button", { name: "停止生成" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "停止生成" }));
+
+    await vi.waitFor(() => expect(getAiPlanAbortRequests()).toBe(1));
+    expect(getAiPlanRequests()).toBe(1);
+    expect(await screen.findByRole("button", { name: "生成操作计划" })).toBeEnabled();
   });
 
   it("starts an approved AI plan only after explicit confirmation", async () => {

@@ -121,13 +121,17 @@ export async function testAiModelConfiguration(
   );
 }
 
-export async function generateAiPlan(request: GenerateAiPlanRequest): Promise<AiPlanResponse> {
+export async function generateAiPlan(
+  request: GenerateAiPlanRequest,
+  signal?: AbortSignal,
+): Promise<AiPlanResponse> {
   return await requestJson(
     "/api/v1/ai/plans",
     {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(request),
+      ...(signal === undefined ? {} : { signal }),
     },
     aiPlanResponseSchema,
     "AI 计划生成失败。",

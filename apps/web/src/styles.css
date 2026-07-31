@@ -4602,7 +4602,7 @@ h3 {
   white-space: nowrap;
 }
 
-.ai-test-message:hover .ai-test-message-time {
+.ai-test-message.user:hover .ai-test-message-time {
   opacity: 1;
 }
 
@@ -5309,6 +5309,20 @@ h3 {
   place-items: center;
   padding: 0;
   border-radius: 50%;
+  border-color: #e2e8e7;
+  color: #172021;
+  background: #e2e8e7;
+}
+
+.ai-test-composer .ai-test-composer-submit:hover:not(:disabled) {
+  border-color: #ffffff;
+  background: #ffffff;
+}
+
+.ai-test-composer .ai-test-composer-submit[aria-label="停止生成"] {
+  border-color: #f0f2f1;
+  color: #1f2425;
+  background: #f0f2f1;
 }
 
 .ai-test-composer .ai-test-composer-submit:disabled {

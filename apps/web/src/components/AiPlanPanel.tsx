@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
+  ArrowUp,
   CheckCircle2,
   CircleX,
   Clock3,
@@ -17,7 +18,6 @@ import {
   Paperclip,
   Play,
   RefreshCw,
-  SendHorizontal,
   ShieldCheck,
   Smartphone,
   Square,
@@ -31,6 +31,7 @@ import type {
   ApkArtifact,
   AndroidDevice,
   AndroidProject,
+  GenerateAiPlanRequest,
   TestExecutionRun,
   TestStepExecution,
   TestSuiteRecord,
@@ -65,6 +66,11 @@ type ConversationMessage = {
   content: string;
   createdAt: string;
   plan?: AiPlanResponse;
+};
+
+type PlanGenerationRequest = {
+  request: GenerateAiPlanRequest;
+  controller: AbortController;
 };
 
 const LAST_AI_PROJECT_STORAGE_KEY = "device-robot:ai:last-project";
@@ -104,6 +110,10 @@ function formatMessageTime(createdAt: string): string {
   })
     .format(timestamp)
     .replaceAll(" ", "");
+}
+
+function isRequestAborted(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 function actionLabel(action: AiPlanResponse["plan"]["actions"][number]): string {
@@ -438,6 +448,7 @@ export function AiPlanPanel({
     useState<WorkspaceExecutionResponse>();
   const apkInputRef = useRef<HTMLInputElement>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
+  const planRequestAbortControllerRef = useRef<AbortController | undefined>(undefined);
   const queryClient = useQueryClient();
   const statusQuery = useQuery({
     queryKey: ["ai-model-status"],
@@ -552,6 +563,12 @@ export function AiPlanPanel({
 
     timeline.scrollTop = timeline.scrollHeight;
   }, [latestMessageId, messages.length, selectedConversationId]);
+  useEffect(
+    () => () => {
+      planRequestAbortControllerRef.current?.abort();
+    },
+    [],
+  );
   useEffect(() => {
     const planIds = messages.flatMap((message) =>
       message.plan === undefined ? [] : [message.plan.plan.id],
@@ -561,8 +578,9 @@ export function AiPlanPanel({
     }
   }, [messages, selectedPlanId]);
   const planMutation = useMutation({
-    mutationFn: generateAiPlan,
-    onSuccess: async (response, request) => {
+    mutationFn: async ({ request, controller }: PlanGenerationRequest) =>
+      await generateAiPlan(request, controller.signal),
+    onSuccess: async (response, { request }) => {
       setSelectedPlanId(response.plan.id);
       setSavedExplorationSuite(undefined);
       setGoal("");
@@ -573,6 +591,11 @@ export function AiPlanPanel({
       }
       if (response.plan.workspaceExecution === true && device !== undefined) {
         workspaceExecutionMutation.mutate({ plan: response.plan, deviceSerial: device.serial });
+      }
+    },
+    onSettled: (_response, _error, { controller }) => {
+      if (planRequestAbortControllerRef.current === controller) {
+        planRequestAbortControllerRef.current = undefined;
       }
     },
   });
@@ -713,7 +736,7 @@ export function AiPlanPanel({
           ? conversationsQuery.error.message
           : conversationDetailQuery.isError
             ? conversationDetailQuery.error.message
-            : planMutation.isError
+            : planMutation.isError && !isRequestAborted(planMutation.error)
               ? planMutation.error.message
               : uploadApkMutation.isError
                 ? uploadApkMutation.error.message
@@ -1144,9 +1167,11 @@ export function AiPlanPanel({
                 messages.map((message) => (
                   <article key={message.id} className={`ai-test-message ${message.role}`}>
                     <p>{message.content}</p>
-                    <time className="ai-test-message-time" dateTime={message.createdAt}>
-                      {formatMessageTime(message.createdAt)}
-                    </time>
+                    {message.role === "user" && (
+                      <time className="ai-test-message-time" dateTime={message.createdAt}>
+                        {formatMessageTime(message.createdAt)}
+                      </time>
+                    )}
                   </article>
                 ))
               )}
@@ -1162,21 +1187,26 @@ export function AiPlanPanel({
               onSubmit={(event) => {
                 event.preventDefault();
                 if (canGenerate) {
+                  const controller = new AbortController();
+                  planRequestAbortControllerRef.current = controller;
                   planMutation.mutate({
-                    projectId,
-                    conversationId: selectedConversationId,
-                    ...(device === undefined ? {} : { deviceSerial: device.serial }),
-                    appId,
-                    ...(installableArtifacts.length === 0
-                      ? {}
-                      : {
-                          installableArtifactIds: installableArtifacts.map(
-                            (artifact) => artifact.id,
-                          ),
-                        }),
-                    liveUiExecution: true,
-                    workspaceExecution: false,
-                    goal: goal.trim(),
+                    controller,
+                    request: {
+                      projectId,
+                      conversationId: selectedConversationId,
+                      ...(device === undefined ? {} : { deviceSerial: device.serial }),
+                      appId,
+                      ...(installableArtifacts.length === 0
+                        ? {}
+                        : {
+                            installableArtifactIds: installableArtifacts.map(
+                              (artifact) => artifact.id,
+                            ),
+                          }),
+                      liveUiExecution: true,
+                      workspaceExecution: false,
+                      goal: goal.trim(),
+                    },
                   });
                 }
               }}
@@ -1249,15 +1279,20 @@ export function AiPlanPanel({
                 </div>
                 <button
                   className="primary-command ai-test-composer-submit"
-                  type="submit"
-                  aria-label="生成操作计划"
-                  title="生成操作计划"
-                  disabled={!canGenerate || planMutation.isPending}
+                  type={planMutation.isPending ? "button" : "submit"}
+                  aria-label={planMutation.isPending ? "停止生成" : "生成操作计划"}
+                  title={planMutation.isPending ? "停止生成" : "生成操作计划"}
+                  disabled={planMutation.isPending ? false : !canGenerate}
+                  onClick={
+                    planMutation.isPending
+                      ? () => planRequestAbortControllerRef.current?.abort()
+                      : undefined
+                  }
                 >
                   {planMutation.isPending ? (
-                    <LoaderCircle aria-hidden="true" size={15} className="test-run-spinner" />
+                    <Square aria-hidden="true" size={13} fill="currentColor" strokeWidth={2} />
                   ) : (
-                    <SendHorizontal aria-hidden="true" size={15} strokeWidth={1.9} />
+                    <ArrowUp aria-hidden="true" size={16} strokeWidth={2.2} />
                   )}
                 </button>
               </footer>

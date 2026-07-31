@@ -16,7 +16,10 @@ export async function requestJson<T>(
   let response: Response;
   try {
     response = await fetch(url, init);
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error;
+    }
     throw new Error("无法连接本地 Agent。请确认 Agent 正在运行。");
   }
   if (!response.ok) {

@@ -1369,6 +1369,10 @@ describe("DeviceRobot Web UI", () => {
 
     await user.click(await screen.findByRole("button", { name: "AI" }));
     expect(await screen.findByRole("status", { name: "Example 测试正在执行" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Example 的更多项目操作" })).toBeNull();
+
+    const execution = await screen.findByRole("region", { name: "当前测试执行" });
+    expect(within(execution).getByText("assert.visible")).toBeInTheDocument();
   });
 
   it("sends an AI test goal when Enter is pressed in the composer", async () => {

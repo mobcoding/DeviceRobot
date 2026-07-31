@@ -1156,17 +1156,13 @@ export function AiPlanPanel({
     conversationTestRun.conversationId === activeConversationId
       ? (runs.find((run) => run.id === conversationTestRun.run.id) ?? conversationTestRun.run)
       : undefined;
-  const currentConversationPlanIds = new Set(
-    messages.flatMap((message) => (message.plan === undefined ? [] : [message.plan.plan.id])),
-  );
-  const activeConversationRun = runs.find(
-    (run) => isTestRunInProgress(run) && currentConversationPlanIds.has(run.planId),
-  );
   const selectedPlanRun =
     selectedExecutionPlan === undefined
       ? undefined
       : runs.find((run) => run.planId === selectedExecutionPlan.id);
-  const timelineTestRun = currentConversationRun ?? activeConversationRun ?? selectedPlanRun;
+  // Each project currently has one AI conversation. Prefer its active run even while the
+  // conversation detail is refreshing, so execution steps never disappear from the timeline.
+  const timelineTestRun = currentConversationRun ?? activeRun ?? selectedPlanRun;
   const timelineTestPlanActions =
     timelineTestRun === undefined
       ? []
@@ -1451,73 +1447,70 @@ export function AiPlanPanel({
                       >
                         <Folder aria-hidden="true" size={16} strokeWidth={1.8} />
                         <strong title={projectLabel(project)}>{projectLabel(project)}</strong>
-                        {testRunning && (
-                          <span
-                            className="ai-test-project-running"
-                            role="status"
-                            aria-label={`${projectLabel(project)} 测试正在执行`}
-                            title="测试正在执行"
-                          >
-                            <LoaderCircle
-                              aria-hidden="true"
-                              size={14}
-                              className="test-run-spinner"
-                            />
-                          </span>
-                        )}
                       </button>
-                      <div
-                        ref={projectMenuId === project.id ? projectMenuRef : undefined}
-                        className="ai-test-project-actions"
-                      >
-                        <button
-                          className="icon-button ai-test-project-more"
-                          type="button"
-                          aria-label={`${project.name} 的更多项目操作`}
-                          aria-expanded={projectMenuId === project.id}
-                          aria-haspopup="menu"
-                          title="更多项目操作"
-                          onClick={() =>
-                            setProjectMenuId((current) =>
-                              current === project.id ? undefined : project.id,
-                            )
-                          }
+                      {testRunning ? (
+                        <span
+                          className="ai-test-project-running"
+                          role="status"
+                          aria-label={`${projectLabel(project)} 测试正在执行`}
+                          title="测试正在执行"
                         >
-                          <MoreHorizontal aria-hidden="true" size={17} strokeWidth={2} />
-                        </button>
-                        {projectMenuId === project.id && (
-                          <div
-                            className="ai-test-project-menu"
-                            role="menu"
-                            aria-label={`${project.name} 的项目操作`}
+                          <LoaderCircle aria-hidden="true" size={15} className="test-run-spinner" />
+                        </span>
+                      ) : (
+                        <div
+                          ref={projectMenuId === project.id ? projectMenuRef : undefined}
+                          className="ai-test-project-actions"
+                        >
+                          <button
+                            className="icon-button ai-test-project-more"
+                            type="button"
+                            aria-label={`${project.name} 的更多项目操作`}
+                            aria-expanded={projectMenuId === project.id}
+                            aria-haspopup="menu"
+                            title="更多项目操作"
+                            onClick={() =>
+                              setProjectMenuId((current) =>
+                                current === project.id ? undefined : project.id,
+                              )
+                            }
                           >
-                            <button
-                              type="button"
-                              role="menuitem"
-                              onClick={() => {
-                                setProjectMenuId(undefined);
-                                setProjectNameDraft(project.name);
-                                setRenamingProject(project);
-                              }}
+                            <MoreHorizontal aria-hidden="true" size={17} strokeWidth={2} />
+                          </button>
+                          {projectMenuId === project.id && (
+                            <div
+                              className="ai-test-project-menu"
+                              role="menu"
+                              aria-label={`${project.name} 的项目操作`}
                             >
-                              <Pencil aria-hidden="true" size={15} strokeWidth={1.9} />
-                              编辑项目名称
-                            </button>
-                            <button
-                              className="ai-test-project-menu-danger"
-                              type="button"
-                              role="menuitem"
-                              onClick={() => {
-                                setProjectMenuId(undefined);
-                                setRemovingProjectConversation(project);
-                              }}
-                            >
-                              <Trash2 aria-hidden="true" size={15} strokeWidth={1.9} />
-                              移除项目会话
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setProjectMenuId(undefined);
+                                  setProjectNameDraft(project.name);
+                                  setRenamingProject(project);
+                                }}
+                              >
+                                <Pencil aria-hidden="true" size={15} strokeWidth={1.9} />
+                                编辑项目名称
+                              </button>
+                              <button
+                                className="ai-test-project-menu-danger"
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setProjectMenuId(undefined);
+                                  setRemovingProjectConversation(project);
+                                }}
+                              >
+                                <Trash2 aria-hidden="true" size={15} strokeWidth={1.9} />
+                                移除项目会话
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </article>
                   );
                 })
@@ -1587,7 +1580,10 @@ export function AiPlanPanel({
             </div>
 
             <div className="ai-test-timeline" aria-label="测试过程">
-              {visibleMessages.length === 0 && !thinking ? (
+              {visibleMessages.length === 0 &&
+              !thinking &&
+              timelineTestRun === undefined &&
+              timelineWorkspaceExecution === undefined ? (
                 <section className="ai-test-flow-empty" aria-label="暂无 AI 计划">
                   <MessageSquareText aria-hidden="true" size={24} strokeWidth={1.6} />
                   <div>

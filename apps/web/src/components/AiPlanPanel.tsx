@@ -64,6 +64,29 @@ type ConversationMessage = {
   plan?: AiPlanResponse;
 };
 
+const LAST_AI_PROJECT_STORAGE_KEY = "device-robot:ai:last-project";
+const LAST_AI_CONVERSATION_STORAGE_PREFIX = "device-robot:ai:last-conversation:";
+
+function storedAiWorkspaceId(storageKey: string): string {
+  try {
+    return globalThis.localStorage.getItem(storageKey)?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function saveAiWorkspaceId(storageKey: string, value: string): void {
+  try {
+    globalThis.localStorage.setItem(storageKey, value);
+  } catch {
+    // Private browsing or browser policy can make local storage unavailable.
+  }
+}
+
+function lastAiConversationStorageKey(projectId: string): string {
+  return `${LAST_AI_CONVERSATION_STORAGE_PREFIX}${projectId}`;
+}
+
 function actionLabel(action: AiPlanResponse["plan"]["actions"][number]): string {
   switch (action.action) {
     case "app.install":
@@ -365,7 +388,9 @@ function bindPlanToApplication(plan: ActionPlan, appId: string): ActionPlan {
 export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): React.JSX.Element {
   const agentUnavailable = useAgentUnavailable();
   const [goal, setGoal] = useState("");
-  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [selectedProjectId, setSelectedProjectId] = useState(() =>
+    storedAiWorkspaceId(LAST_AI_PROJECT_STORAGE_KEY),
+  );
   const [selectedConversationId, setSelectedConversationId] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -399,8 +424,22 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
     refetchInterval: (query) =>
       query.state.data?.runs.some((run) => run.status === "running") ? 1_000 : 8_000,
   });
-  const projects = projectsQuery.data?.projects ?? [];
-  const projectId = selectedProjectId || projects[0]?.id || "";
+  const availableProjects = projectsQuery.data?.projects ?? [];
+  const projectId = availableProjects.some((project) => project.id === selectedProjectId)
+    ? selectedProjectId
+    : (availableProjects[0]?.id ?? "");
+  const projects =
+    projectId.length === 0
+      ? availableProjects
+      : [...availableProjects].sort((left, right) => {
+          if (left.id === projectId) {
+            return -1;
+          }
+          if (right.id === projectId) {
+            return 1;
+          }
+          return 0;
+        });
   const selectedProject = projects.find((project) => project.id === projectId);
   const appIds = applicationIds(selectedProject);
   const appId = appIds[0] ?? "";
@@ -425,8 +464,37 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
     }
   }, [statusQuery.data?.baseUrl, statusQuery.data?.model]);
   useEffect(() => {
-    setSelectedConversationId(conversationsQuery.data?.conversations[0]?.id ?? "");
-  }, [conversationsQuery.data?.conversations]);
+    if (projectId.length === 0) {
+      return;
+    }
+
+    if (selectedProjectId !== projectId) {
+      setSelectedProjectId(projectId);
+    }
+    saveAiWorkspaceId(LAST_AI_PROJECT_STORAGE_KEY, projectId);
+  }, [projectId, selectedProjectId]);
+  useEffect(() => {
+    const conversations = conversationsQuery.data?.conversations;
+    if (conversations === undefined || projectId.length === 0) {
+      return;
+    }
+
+    const storedConversationId = storedAiWorkspaceId(lastAiConversationStorageKey(projectId));
+    const conversationId = conversations.some(
+      (conversation) => conversation.id === selectedConversationId,
+    )
+      ? selectedConversationId
+      : conversations.some((conversation) => conversation.id === storedConversationId)
+        ? storedConversationId
+        : (conversations[0]?.id ?? "");
+
+    if (conversationId !== selectedConversationId) {
+      setSelectedConversationId(conversationId);
+    }
+    if (conversationId.length > 0) {
+      saveAiWorkspaceId(lastAiConversationStorageKey(projectId), conversationId);
+    }
+  }, [conversationsQuery.data?.conversations, projectId, selectedConversationId]);
   const messages: ConversationMessage[] = (conversationDetailQuery.data?.messages ?? []).map(
     (message) => ({
       id: message.id,
@@ -816,6 +884,7 @@ export function AiPlanPanel({ device }: { device: AndroidDevice | undefined }): 
                       type="button"
                       aria-pressed={selected}
                       onClick={() => {
+                        saveAiWorkspaceId(LAST_AI_PROJECT_STORAGE_KEY, project.id);
                         setSelectedProjectId(project.id);
                         setSelectedConversationId("");
                         setSelectedPlanId("");

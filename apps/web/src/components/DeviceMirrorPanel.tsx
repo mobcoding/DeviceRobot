@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronUp,
+  ClipboardCopy,
   House,
   ListVideo,
   LoaderCircle,
@@ -15,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AndroidDevice } from "@device-robot/contracts";
 
 import { useAgentUnavailable } from "../agent-availability";
+import { captureDeviceScreenshot } from "../api/device-control";
 import { formatDeviceName } from "../ui/formatters";
 
 type DeviceMirrorPanelProps = {
@@ -153,6 +155,7 @@ export function DeviceMirrorPanel({
   const [streamState, setStreamState] = useState<"connecting" | "live" | "error">("connecting");
   const [streamError, setStreamError] = useState<string>();
   const [controlError, setControlError] = useState<string>();
+  const [copyingScreenshot, setCopyingScreenshot] = useState(false);
   const [screenSize, setScreenSize] = useState<DevicePoint>();
   const [quickControlsCollapsed, setQuickControlsCollapsed] = useState(false);
   const [apkDragActive, setApkDragActive] = useState(false);
@@ -408,6 +411,32 @@ export function DeviceMirrorPanel({
     return true;
   };
 
+  const supportsImageClipboard =
+    globalThis.navigator.clipboard?.write !== undefined && globalThis.ClipboardItem !== undefined;
+
+  const handleCopyScreenshot = async (): Promise<void> => {
+    const clipboard = globalThis.navigator.clipboard;
+    const ClipboardItemConstructor = globalThis.ClipboardItem;
+    if (
+      copyingScreenshot ||
+      clipboard?.write === undefined ||
+      ClipboardItemConstructor === undefined
+    ) {
+      return;
+    }
+
+    setCopyingScreenshot(true);
+    setControlError(undefined);
+    try {
+      const screenshot = await captureDeviceScreenshot(serial);
+      await clipboard.write([new ClipboardItemConstructor({ "image/png": screenshot })]);
+    } catch {
+      setControlError("设备截图复制到剪贴板失败。");
+    } finally {
+      setCopyingScreenshot(false);
+    }
+  };
+
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>): void => {
     if (event.button !== 0 || screenSize === undefined) {
       return;
@@ -621,6 +650,26 @@ export function DeviceMirrorPanel({
                   onClick={() => sendControl({ type: "key", key: "power" })}
                 >
                   <Power aria-hidden="true" size={18} strokeWidth={1.8} />
+                </button>
+              </div>
+              <div className="mirror-quick-group mirror-quick-group-secondary">
+                <button
+                  type="button"
+                  className="mirror-quick-button"
+                  aria-label={copyingScreenshot ? "正在截屏并复制到剪贴板" : "截屏并复制到剪贴板"}
+                  title={
+                    supportsImageClipboard
+                      ? "截屏并复制到剪贴板"
+                      : "当前浏览器不支持复制图片到剪贴板"
+                  }
+                  disabled={agentUnavailable || copyingScreenshot || !supportsImageClipboard}
+                  onClick={() => void handleCopyScreenshot()}
+                >
+                  {copyingScreenshot ? (
+                    <LoaderCircle aria-hidden="true" size={17} className="test-run-spinner" />
+                  ) : (
+                    <ClipboardCopy aria-hidden="true" size={18} strokeWidth={1.8} />
+                  )}
                 </button>
               </div>
             </div>

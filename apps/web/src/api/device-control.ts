@@ -33,6 +33,23 @@ export function deviceScreenshotUrl(serial: string, revision: number): string {
   return `${deviceEndpoint(serial, "screenshot")}?revision=${revision}`;
 }
 
+export async function captureDeviceScreenshot(serial: string): Promise<Blob> {
+  const response = await requestDeviceEndpoint(serial, `screenshot?revision=${Date.now()}`, {
+    headers: { Accept: "image/png" },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw await responseError(response);
+  }
+
+  if (response.headers.get("Content-Type")?.toLowerCase().startsWith("image/png") !== true) {
+    throw new Error("设备未返回有效的 PNG 截图。");
+  }
+
+  return await response.blob();
+}
+
 export async function fetchDeviceUiTree(
   serial: string,
   signal?: AbortSignal,

@@ -530,6 +530,7 @@ function mockApis(
   getTestSuiteRunRequests: () => number;
   getLastTestSuiteRunRequest: () => unknown;
   getExplorationSaveRequests: () => number;
+  getScreenshotRequests: () => number;
 } {
   let deviceRequests = 0;
   let actionRequests = 0;
@@ -558,6 +559,7 @@ function mockApis(
   let testSuiteRunRequests = 0;
   let lastTestSuiteRunRequest: unknown;
   let explorationSaveRequests = 0;
+  let screenshotRequests = 0;
   let importedTestSuites: unknown[] = [];
   const aiConversation = {
     id: "723e4567-e89b-12d3-a456-426614174000",
@@ -1022,6 +1024,17 @@ function mockApis(
     if (url.includes("/api/v1/devices")) {
       deviceRequests += 1;
 
+      if (url.includes("/screenshot")) {
+        screenshotRequests += 1;
+        return new Response(
+          new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: "image/png" }),
+          {
+            status: 200,
+            headers: { "Content-Type": "image/png" },
+          },
+        );
+      }
+
       if (url.includes("/ui-tree")) {
         return new Response(JSON.stringify(uiTreeResponse), {
           status: 200,
@@ -1090,6 +1103,7 @@ function mockApis(
     getTestSuiteRunRequests: () => testSuiteRunRequests,
     getLastTestSuiteRunRequest: () => lastTestSuiteRunRequest,
     getExplorationSaveRequests: () => explorationSaveRequests,
+    getScreenshotRequests: () => screenshotRequests,
   };
 }
 
@@ -2086,6 +2100,42 @@ describe("DeviceRobot Web UI", () => {
 
     await user.click(within(mirror).getByRole("button", { name: "展开快捷操作" }));
     expect(within(mirror).getByRole("button", { name: "主页" })).toBeInTheDocument();
+  });
+
+  it("captures the device screen and copies the PNG to the clipboard", async () => {
+    const { getScreenshotRequests } = mockApis();
+    const clipboardWrite = vi.fn(async () => undefined);
+    const clipboardItemConstructed = vi.fn();
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(globalThis.navigator, "clipboard");
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "ClipboardItem",
+      class {
+        public constructor(readonly items: Record<string, Blob>) {
+          clipboardItemConstructed(items);
+        }
+      },
+    );
+    Object.defineProperty(globalThis.navigator, "clipboard", {
+      configurable: true,
+      value: { write: clipboardWrite },
+    });
+
+    try {
+      renderApp();
+      const mirror = await screen.findByRole("region", { name: "屏幕镜像" });
+      await user.click(within(mirror).getByRole("button", { name: "截屏并复制到剪贴板" }));
+
+      await vi.waitFor(() => expect(getScreenshotRequests()).toBe(1));
+      await vi.waitFor(() => expect(clipboardItemConstructed).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(clipboardWrite).toHaveBeenCalledTimes(1));
+    } finally {
+      if (clipboardDescriptor === undefined) {
+        Reflect.deleteProperty(globalThis.navigator, "clipboard");
+      } else {
+        Object.defineProperty(globalThis.navigator, "clipboard", clipboardDescriptor);
+      }
+    }
   });
 
   it("resizes the mirror area without exceeding the golden-ratio width", async () => {

@@ -1126,15 +1126,6 @@ export function AiPlanPanel({
                 messages.map((message) => (
                   <article key={message.id} className={`ai-test-message ${message.role}`}>
                     <p>{message.content}</p>
-                    {message.plan !== undefined && (
-                      <button
-                        className="ai-test-message-plan-action"
-                        type="button"
-                        onClick={() => setSelectedPlanId(message.plan?.plan.id ?? "")}
-                      >
-                        查看计划
-                      </button>
-                    )}
                   </article>
                 ))
               )}

@@ -25,6 +25,7 @@ type TestExecutionRunRow = {
   name: string;
   device_serial: string;
   app_id: string;
+  execution_mode: string;
   status: string;
   message: string | null;
   started_at: string;
@@ -87,8 +88,8 @@ export class SqliteTestExecutionStore implements TestExecutionStore {
     const insertRun = this.#sqlite.prepare(
       `
         INSERT INTO test_execution_runs (
-          id, project_id, plan_id, name, device_serial, app_id, status, message, started_at, finished_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          id, project_id, plan_id, name, device_serial, app_id, execution_mode, status, message, started_at, finished_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
     );
     const insertStep = this.#sqlite.prepare(
@@ -106,6 +107,7 @@ export class SqliteTestExecutionStore implements TestExecutionStore {
         run.name,
         run.deviceSerial,
         run.appId,
+        run.executionMode ?? "static-plan",
         run.status,
         run.message ?? null,
         run.startedAt,
@@ -215,6 +217,7 @@ export class SqliteTestExecutionStore implements TestExecutionStore {
       name: row.name,
       deviceSerial: row.device_serial,
       appId: row.app_id,
+      executionMode: row.execution_mode,
       status: row.status,
       ...(row.message === null ? {} : { message: row.message }),
       steps: stepRows.map(toStep),

@@ -7,7 +7,7 @@ export const testExecutionReportSchema = z.object({
   generatedAt: z.iso.datetime(),
   htmlFileName: z.string().min(1).max(255),
   zipFileName: z.string().min(1).max(255),
-  screenshotCount: z.number().int().nonnegative().max(20),
+  screenshotCount: z.number().int().nonnegative().max(60),
   evidence: z.object({
     uiXml: z.boolean(),
     logcat: z.boolean(),

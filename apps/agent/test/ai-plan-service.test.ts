@@ -756,7 +756,7 @@ describe("AI action plan service", () => {
     ).resolves.toMatchObject({
       plan: {
         targetAppId: "com.example.app",
-        liveUiExecution: { goal: "从启动页进入首页", maxSteps: 20 },
+        liveUiExecution: { goal: "从启动页进入首页", maxSteps: 60 },
         requiresApproval: true,
       },
     });

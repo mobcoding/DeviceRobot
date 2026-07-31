@@ -10,7 +10,7 @@ export const sourceEvidenceSchema = z.object({
 export const testStepSchema = z.object({
   id: z.string().min(1).max(256),
   action: agentActionSchema,
-  healingEnabled: z.boolean().default(true),
+  healingEnabled: z.boolean().default(false),
 });
 
 export const testCaseSchema = z.object({
@@ -23,7 +23,7 @@ export const testCaseSchema = z.object({
     .record(z.string().max(256), z.string().max(8_000))
     .refine((value) => Object.keys(value).length <= 100, "测试数据键数不能超过 100。")
     .default({}),
-  steps: z.array(testStepSchema).min(1).max(20),
+  steps: z.array(testStepSchema).min(1).max(60),
 });
 
 export const testSuiteSchema = z.object({
@@ -33,6 +33,9 @@ export const testSuiteSchema = z.object({
     id: z.string().min(1).max(256),
     name: z.string().min(1).max(256),
     sourceRevision: z.string().min(1).max(256),
+    origin: z.enum(["imported", "ai-exploration"]).default("imported"),
+    version: z.number().int().positive().max(10_000).default(1),
+    sourceRunIds: z.array(z.uuid()).max(500).default([]),
   }),
   cases: z.array(testCaseSchema).min(1).max(500),
 });
@@ -57,6 +60,13 @@ export const startTestSuiteCaseRequestSchema = z
   })
   .strict();
 
+export const saveExplorationAsTestSuiteRequestSchema = z
+  .object({
+    runId: z.uuid(),
+    name: z.string().trim().min(1).max(256).optional(),
+  })
+  .strict();
+
 export type SourceEvidence = z.infer<typeof sourceEvidenceSchema>;
 export type TestStep = z.infer<typeof testStepSchema>;
 export type TestCase = z.infer<typeof testCaseSchema>;
@@ -64,3 +74,6 @@ export type TestSuite = z.infer<typeof testSuiteSchema>;
 export type TestSuiteRecord = z.infer<typeof testSuiteRecordSchema>;
 export type TestSuiteListResponse = z.infer<typeof testSuiteListResponseSchema>;
 export type StartTestSuiteCaseRequest = z.infer<typeof startTestSuiteCaseRequestSchema>;
+export type SaveExplorationAsTestSuiteRequest = z.infer<
+  typeof saveExplorationAsTestSuiteRequestSchema
+>;

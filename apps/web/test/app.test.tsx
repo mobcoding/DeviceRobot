@@ -2,7 +2,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AiPlanResponse } from "@device-robot/contracts";
+import {
+  testExecutionRunSchema,
+  testSuiteRecordSchema,
+  type AiPlanResponse,
+} from "@device-robot/contracts";
 
 import { App } from "../src/App";
 
@@ -425,6 +429,50 @@ const testSuiteRecordResponse = {
   importedAt: "2026-07-23T10:00:00.000Z",
 };
 
+const aiExplorationPlanResponse: AiPlanResponse = {
+  ...aiPlanResponse,
+  plan: {
+    ...aiPlanResponse.plan,
+    liveUiExecution: { goal: "进入首页", maxSteps: 8 },
+  },
+};
+
+const completedAiExplorationRun = testExecutionRunSchema.parse({
+  ...testExecutionRunResponse,
+  planId: aiExplorationPlanResponse.plan.id,
+  executionMode: "ai-exploration",
+  status: "succeeded",
+  finishedAt: "2026-07-23T10:03:00.000Z",
+});
+
+const savedExplorationCase = testSuiteRecordResponse.suite.cases[0]!;
+const savedExplorationSuiteResponse = testSuiteRecordSchema.parse({
+  ...testSuiteRecordResponse,
+  id: "723e4567-e89b-12d3-a456-426614174000",
+  fileName: "ai-exploration-com-example-app.json",
+  suite: {
+    ...testSuiteRecordResponse.suite,
+    suite: {
+      id: "ai-exploration-com-example-app",
+      name: "AI 探索离线用例",
+      sourceRevision: "local",
+      origin: "ai-exploration" as const,
+      version: 1,
+      sourceRunIds: [completedAiExplorationRun.id],
+    },
+    cases: [
+      {
+        ...savedExplorationCase,
+        id: `exploration-${completedAiExplorationRun.id}`,
+        steps: savedExplorationCase.steps.map((step) => ({
+          ...step,
+          healingEnabled: false,
+        })),
+      },
+    ],
+  },
+});
+
 const apkArtifactResponse = {
   id: "123e4567-e89b-12d3-a456-426614174000",
   fileName: "sample.apk",
@@ -455,7 +503,7 @@ function mockApis(
     completedProjectBuild?: boolean;
     failedProjectBuild?: boolean;
     projectBuildRuns?: Array<typeof completedProjectBuildResponse>;
-    testRuns?: readonly (typeof testExecutionRunResponse)[];
+    testRuns?: readonly unknown[];
   } = {},
 ): {
   getDeviceRequests: () => number;
@@ -479,6 +527,7 @@ function mockApis(
   getTestSuiteImportRequests: () => number;
   getTestSuiteRunRequests: () => number;
   getLastTestSuiteRunRequest: () => unknown;
+  getExplorationSaveRequests: () => number;
 } {
   let deviceRequests = 0;
   let actionRequests = 0;
@@ -505,7 +554,8 @@ function mockApis(
   let testSuiteImportRequests = 0;
   let testSuiteRunRequests = 0;
   let lastTestSuiteRunRequest: unknown;
-  let importedTestSuites: (typeof testSuiteRecordResponse)[] = [];
+  let explorationSaveRequests = 0;
+  let importedTestSuites: unknown[] = [];
   const aiConversation = {
     id: "723e4567-e89b-12d3-a456-426614174000",
     projectId: exampleProject.id,
@@ -738,6 +788,15 @@ function mockApis(
       );
     }
 
+    if (url === `${testSuiteBaseUrl}/from-exploration` && method === "POST") {
+      explorationSaveRequests += 1;
+      importedTestSuites = [savedExplorationSuiteResponse, ...importedTestSuites];
+      return new Response(JSON.stringify(savedExplorationSuiteResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     if (
       url === `${testSuiteBaseUrl}/${testSuiteRecordResponse.id}/cases/launch-home/runs` &&
       method === "POST"
@@ -746,6 +805,23 @@ function mockApis(
       lastTestSuiteRunRequest = JSON.parse(String(init?.body ?? "{}"));
       return new Response(
         JSON.stringify({ ...testExecutionRunResponse, planId: "dsl:smoke:launch-home" }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    if (
+      url ===
+        `${testSuiteBaseUrl}/${savedExplorationSuiteResponse.id}/cases/exploration-${completedAiExplorationRun.id}/runs` &&
+      method === "POST"
+    ) {
+      testSuiteRunRequests += 1;
+      lastTestSuiteRunRequest = JSON.parse(String(init?.body ?? "{}"));
+      return new Response(
+        JSON.stringify({
+          ...testExecutionRunResponse,
+          planId: `dsl:${savedExplorationSuiteResponse.id}:exploration-${completedAiExplorationRun.id}`,
+          executionMode: "local-dsl",
+        }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     }
@@ -997,6 +1073,7 @@ function mockApis(
     getTestSuiteImportRequests: () => testSuiteImportRequests,
     getTestSuiteRunRequests: () => testSuiteRunRequests,
     getLastTestSuiteRunRequest: () => lastTestSuiteRunRequest,
+    getExplorationSaveRequests: () => explorationSaveRequests,
   };
 }
 
@@ -1295,6 +1372,38 @@ describe("DeviceRobot Web UI", () => {
       await screen.findByRole("heading", { level: 1, name: "实施测试流程" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "最近测试运行" })).toBeInTheDocument();
+  });
+
+  it("saves a completed AI exploration and starts its local DSL regression without a new AI request", async () => {
+    const {
+      getAiPlanRequests,
+      getExplorationSaveRequests,
+      getLastTestSuiteRunRequest,
+      getTestSuiteRunRequests,
+    } = mockApis({
+      aiPlan: aiExplorationPlanResponse,
+      testRuns: [completedAiExplorationRun],
+    });
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "confirm",
+      vi.fn(() => true),
+    );
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "AI" }));
+    await user.type(screen.getByRole("textbox", { name: "测试目标" }), "验证启动进入首页");
+    await user.click(screen.getByRole("button", { name: "生成操作计划" }));
+    await screen.findByText("ActionPlan 预览");
+    await user.click(screen.getByRole("button", { name: "保存为 DSL 用例" }));
+
+    await vi.waitFor(() => expect(getExplorationSaveRequests()).toBe(1));
+    expect(await screen.findByText(/后续执行仅使用本地 DSL，不会调用 AI/u)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "本地回归" }));
+
+    await vi.waitFor(() => expect(getTestSuiteRunRequests()).toBe(1));
+    expect(getLastTestSuiteRunRequest()).toEqual({ deviceSerial: "8B3Y0THX0", approved: true });
+    expect(getAiPlanRequests()).toBe(1);
   });
 
   it("binds legacy AI app actions to the selected testing application before execution", async () => {

@@ -122,10 +122,7 @@ describe("ADB device control", () => {
 
   it("refuses to bypass a secure lockscreen", async () => {
     const runner = createRunner({
-      runText: vi
-        .fn()
-        .mockResolvedValueOnce("")
-        .mockResolvedValueOnce("showing=true\nsecure=true"),
+      runText: vi.fn().mockResolvedValueOnce("").mockResolvedValueOnce("showing=true\nsecure=true"),
     });
     const service = new AdbDeviceControlService({
       deviceService: createDiscoveryService(),

@@ -192,7 +192,9 @@ function compileSdkFromBuildScript(contents: string): number | undefined {
 
 function nativeBuildPackagesFromBuildScript(contents: string): string[] {
   const packages: string[] = [];
-  for (const match of contents.matchAll(/\bndkVersion\s*(?:=)?\s*["']([0-9]+(?:\.[0-9]+)+)["']/gu)) {
+  for (const match of contents.matchAll(
+    /\bndkVersion\s*(?:=)?\s*["']([0-9]+(?:\.[0-9]+)+)["']/gu,
+  )) {
     const version = match[1];
     if (version !== undefined) {
       packages.push(`ndk;${version}`);
@@ -434,7 +436,8 @@ export class AndroidSdkService {
     this.#paths = options.paths;
     this.#environment = options.environment ?? process.env;
     this.#managedSdkInstaller =
-      options.managedSdkInstaller ?? (async (requiredPackages) => await this.#installManagedSdk(requiredPackages));
+      options.managedSdkInstaller ??
+      (async (requiredPackages) => await this.#installManagedSdk(requiredPackages));
   }
 
   public async inspect(

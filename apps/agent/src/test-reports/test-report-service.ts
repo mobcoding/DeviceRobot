@@ -75,6 +75,17 @@ function statusLabel(status: TestExecutionRun["status"] | TestStepExecution["sta
   }
 }
 
+function executionModeLabel(mode: TestExecutionRun["executionMode"]): string {
+  switch (mode) {
+    case "ai-exploration":
+      return "AI 自主探索";
+    case "local-dsl":
+      return "本地 DSL 回归（未调用 AI）";
+    default:
+      return "固定计划执行（未调用 AI）";
+  }
+}
+
 function reportDirectory(paths: AgentPaths, runId: string): string {
   return join(paths.reports, runId);
 }
@@ -287,7 +298,7 @@ export class LocalTestReportService implements TestReportService {
   </style>
 </head>
 <body><main>
-  <header class="report"><h1>${escapeHtml(run.name)}</h1><p>DeviceRobot 测试执行报告</p><section class="meta"><div><span>运行状态</span><strong>${statusLabel(run.status)}</strong></div><div><span>设备</span><strong>${escapeHtml(run.deviceSerial)}</strong></div><div><span>应用包名</span><strong>${escapeHtml(run.appId)}</strong></div><div><span>开始时间</span><strong>${escapeHtml(formatDateTime(run.startedAt))}</strong></div><div><span>结束时间</span><strong>${escapeHtml(formatDateTime(run.finishedAt))}</strong></div></section>${run.message === undefined ? "" : `<p>${escapeHtml(run.message)}</p>`}</header>
+  <header class="report"><h1>${escapeHtml(run.name)}</h1><p>DeviceRobot 测试执行报告</p><section class="meta"><div><span>运行状态</span><strong>${statusLabel(run.status)}</strong></div><div><span>执行模式</span><strong>${executionModeLabel(run.executionMode)}</strong></div><div><span>设备</span><strong>${escapeHtml(run.deviceSerial)}</strong></div><div><span>应用包名</span><strong>${escapeHtml(run.appId)}</strong></div><div><span>开始时间</span><strong>${escapeHtml(formatDateTime(run.startedAt))}</strong></div><div><span>结束时间</span><strong>${escapeHtml(formatDateTime(run.finishedAt))}</strong></div></section>${run.message === undefined ? "" : `<p>${escapeHtml(run.message)}</p>`}</header>
   <section><h2>执行步骤</h2><div class="steps">${stepRows}</div></section>
   <section><h2>失败证据</h2><div class="evidence">${evidenceSections || "<p>本次运行未收集额外失败证据。</p>"}</div></section>
 </main></body></html>`;

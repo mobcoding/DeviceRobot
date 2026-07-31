@@ -27,7 +27,7 @@ describe("test suite DSL", () => {
       ],
     });
 
-    expect(suite.cases[0]?.steps[0]?.healingEnabled).toBe(true);
+    expect(suite.cases[0]?.steps[0]?.healingEnabled).toBe(false);
   });
 
   it("rejects unsupported schema versions", () => {

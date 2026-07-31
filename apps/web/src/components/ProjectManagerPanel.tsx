@@ -501,15 +501,15 @@ export function ProjectManagerPanel({
         ? createMutation.error?.message
         : deleteMutation.isError
           ? deleteMutation.error?.message
-        : projectBuildError !== undefined
-          ? projectBuildError.message
-          : buildMutation.isError
-            ? buildMutation.error?.message
-            : installSdkMutation.isError
-              ? installSdkMutation.error?.message
-              : installArtifactMutation.isError && pendingSignatureConflict === undefined
-                ? installArtifactMutation.error?.message
-                : undefined;
+          : projectBuildError !== undefined
+            ? projectBuildError.message
+            : buildMutation.isError
+              ? buildMutation.error?.message
+              : installSdkMutation.isError
+                ? installSdkMutation.error?.message
+                : installArtifactMutation.isError && pendingSignatureConflict === undefined
+                  ? installArtifactMutation.error?.message
+                  : undefined;
   const pendingBuildSubmitting =
     pendingBuild !== undefined &&
     buildMutation.isPending &&
@@ -653,7 +653,9 @@ export function ProjectManagerPanel({
                     aria-haspopup="menu"
                     title="更多项目操作"
                     onClick={() =>
-                      setProjectMenuId((current) => (current === project.id ? undefined : project.id))
+                      setProjectMenuId((current) =>
+                        current === project.id ? undefined : project.id,
+                      )
                     }
                   >
                     <MoreHorizontal aria-hidden="true" size={18} strokeWidth={2} />

@@ -25,8 +25,7 @@ const GIT_PARTIAL_CLONE_BLOB_LIMIT = "2m";
 const gitHttpConfiguration = ["-c", "http.version=HTTP/1.1"] as const;
 const gitFallbackSparsePatterns = ["/*", "!/.idea/", "!/docs/", "!/tools/"] as const;
 const appConfigurationFileNames = ["app-config.gradle.kts", "app-config.gradle"] as const;
-const androidApplicationIdPattern =
-  /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/u;
+const androidApplicationIdPattern = /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/u;
 const ignoredDirectories = new Set([
   ".git",
   ".gradle",
@@ -214,7 +213,9 @@ async function resolveConfiguredApplicationId(
 
   for (const directory of new Set([modulePath, rootPath])) {
     for (const fileName of appConfigurationFileNames) {
-      const applicationId = parseConfiguredApplicationId(await readableText(join(directory, fileName)));
+      const applicationId = parseConfiguredApplicationId(
+        await readableText(join(directory, fileName)),
+      );
       if (applicationId !== undefined) {
         return applicationId;
       }
@@ -438,7 +439,9 @@ function repositoryName(remoteUrl: string): string {
   try {
     const pathname = new URL(remoteUrl).pathname;
     const lastSegment = pathname.split("/").filter(Boolean).at(-1);
-    const name = decodeURIComponent(lastSegment ?? "").replace(/\.git$/iu, "").trim();
+    const name = decodeURIComponent(lastSegment ?? "")
+      .replace(/\.git$/iu, "")
+      .trim();
     return name || "未命名项目";
   } catch {
     return "未命名项目";
@@ -562,15 +565,7 @@ export class LocalProjectService implements ProjectService {
       try {
         await this.#runner.run(
           this.#gitExecutable,
-          [
-            ...gitHttpConfiguration,
-            "clone",
-            "--depth",
-            "1",
-            "--no-tags",
-            remoteUrl,
-            checkoutPath,
-          ],
+          [...gitHttpConfiguration, "clone", "--depth", "1", "--no-tags", remoteUrl, checkoutPath],
           5 * 60_000,
         );
         return;
@@ -618,14 +613,7 @@ export class LocalProjectService implements ProjectService {
         );
         await this.#runner.run(
           this.#gitExecutable,
-          [
-            "-C",
-            checkoutPath,
-            "sparse-checkout",
-            "set",
-            "--no-cone",
-            ...gitFallbackSparsePatterns,
-          ],
+          ["-C", checkoutPath, "sparse-checkout", "set", "--no-cone", ...gitFallbackSparsePatterns],
           30_000,
         );
         await this.#runner.run(
@@ -676,7 +664,10 @@ export class LocalProjectService implements ProjectService {
     const now = new Date().toISOString();
     const project = androidProjectSchema.parse({
       id: randomUUID(),
-      name: source === "git" && remoteUrl !== undefined ? repositoryName(remoteUrl) : basename(rootPath) || "未命名项目",
+      name:
+        source === "git" && remoteUrl !== undefined
+          ? repositoryName(remoteUrl)
+          : basename(rootPath) || "未命名项目",
       source,
       rootPath,
       ...(remoteUrl === undefined ? {} : { remoteUrl }),

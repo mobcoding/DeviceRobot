@@ -130,9 +130,7 @@ function displaySize(output: string): { width: number; height: number } {
 }
 
 function keyguardShowing(output: string): boolean {
-  return /(?:\bmIsShowing|\bmKeyguardShowing|\bshowing|\bmShowingLockscreen)=true\b/u.test(
-    output,
-  );
+  return /(?:\bmIsShowing|\bmKeyguardShowing|\bshowing|\bmShowingLockscreen)=true\b/u.test(output);
 }
 
 function secureKeyguardShowing(output: string): boolean {

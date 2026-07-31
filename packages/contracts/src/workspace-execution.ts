@@ -18,7 +18,7 @@ export const workspaceExecutionResponseSchema = z.object({
   projectId: z.uuid(),
   deviceSerial: z.string().min(1).max(256),
   status: workspaceActionExecutionStatusSchema,
-  results: z.array(workspaceActionResultSchema).min(1).max(20),
+  results: z.array(workspaceActionResultSchema).min(1).max(60),
   startedAt: z.iso.datetime(),
   finishedAt: z.iso.datetime(),
 });

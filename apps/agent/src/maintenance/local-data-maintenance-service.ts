@@ -127,7 +127,9 @@ export class FilesystemLocalDataMaintenanceService implements LocalDataMaintenan
     const summaries = await Promise.all(
       request.categories.map(async (category) => {
         const root = roots[category];
-        return existsSync(root) ? await cleanRoot(root, cutoff) : { deletedFileCount: 0, reclaimedBytes: 0 };
+        return existsSync(root)
+          ? await cleanRoot(root, cutoff)
+          : { deletedFileCount: 0, reclaimedBytes: 0 };
       }),
     );
     return cleanupLocalDataResponseSchema.parse({

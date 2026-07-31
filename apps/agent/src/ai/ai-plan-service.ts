@@ -543,6 +543,7 @@ function planPromptRules(workspaceExecution = false, liveUiExecution = false): s
         ? [
             "严禁输出 adb.shell、文件路径、命令行、未在证据中出现的 resourceId、accessibilityId、页面文案或路由。证据不足时使用 ui.wait、device.screenshot 或在 reply 中说明限制。",
             "自主页面测试允许在计划开头执行 device.unlock、以及以当前测试应用包名执行 app.uninstall、app.clearData、app.install 作为准备步骤；device.unlock 只会尝试无凭据唤醒和滑动解锁，安全锁屏需要人工认证。如目标要求卸载重装，顺序必须是 app.uninstall 后紧接 app.install。artifactId 必须逐字使用已提供的 ID。",
+            "若目标明确要求热启动，准备步骤应仅使用 app.stop（可选 device.unlock），不得包含 app.uninstall、app.install 或 app.clearData；系统会保留已完成的首次启动数据后重新激活应用。",
           ]
         : [
             "严禁输出 adb.shell、文件路径、命令行、未在证据中出现的 resourceId、accessibilityId、页面文案或路由。证据不足时使用 ui.wait、device.screenshot 或在 reply 中说明限制。",
@@ -900,7 +901,8 @@ function deviceUnlockPlan(request: GenerateAiPlanRequest): ModelPlanPayload | un
     return undefined;
   }
   return {
-    reply: "将唤醒设备、尝试无凭据滑动解锁，并收起可能遮挡页面的通知栏。安全锁屏需要你在设备上完成认证。",
+    reply:
+      "将唤醒设备、尝试无凭据滑动解锁，并收起可能遮挡页面的通知栏。安全锁屏需要你在设备上完成认证。",
     actions: [{ action: "device.unlock" }],
   };
 }
@@ -1056,9 +1058,11 @@ function runtimeSystemPrompt(): string {
     "continue 的 action 只能是 ui.tap、ui.longPress、ui.input、ui.swipe、ui.back、ui.wait、assert.visible、assert.notVisible、assert.text、assert.activity、device.screenshot。",
     "completed 只能提供 assert.visible、assert.notVisible、assert.text 或 assert.activity，且该断言必须能从当前 UI 或当前 Activity 直接证明测试目标完成。",
     "ui.tap、ui.longPress、assert.visible、assert.notVisible、assert.text 的 target 优先使用当前 UI 树中的 text、resourceId、accessibilityId、className；当 UI 树缺少语义但截图清晰可见时，可使用截图对应的 x/y 坐标。",
+    '当前 UI 仅提供 accessibilityId 时，它仍是合法且优先的定位器；例如看到 accessibilityId="Close" 时，必须输出 {"action":"ui.tap","target":{"accessibilityId":"Close"}}，不得因缺少 resourceId 而返回 blocked。',
+    "验证开屏广告时先保存可见广告证据，不得点击广告正文、下载、安装或跳转按钮。若已进入第三方页面，只能使用当前真实可见的关闭入口或 ui.back 返回测试应用，再继续验证流程。",
     "禁止 app.install、adb.shell、任何权限修改、应用启动/停止、文件路径、命令行，以及输入账号密码、验证码、密钥或其他敏感数据。",
     "对于“检索启动页面顺序”等目标，先记录当前页面特征，再按真实引导或入口推进；reason 必须写明当前观察到的页面或状态，便于报告还原页面顺序。",
-    "若当前是 Splash 或启动加载页，尚未出现可交互控件时，不得返回 blocked；返回 continue，并使用 {\"action\":\"ui.wait\",\"durationMs\":1000} 等待页面自动跳转后重新识别。",
+    '若当前是 Splash 或启动加载页，尚未出现可交互控件时，不得返回 blocked；返回 continue，并使用 {"action":"ui.wait","durationMs":1000} 等待页面自动跳转后重新识别。',
     "会话会提供此前已执行的动作与观察。利用这些历史持续补全页面顺序；完成时在 reason 中给出简洁的页面顺序结论和最终页面依据。",
     "不要为了凑步骤而操作无关控件。仅在截图和 UI 树都无法识别可继续路径时返回 blocked。",
   ].join("\n");
@@ -1109,6 +1113,7 @@ function preparationActionsAreOrdered(
   for (const action of actions) {
     const isPreparationAction =
       action.action === "device.unlock" ||
+      action.action === "app.stop" ||
       action.action === "app.install" ||
       (allowsLifecyclePreparation &&
         (action.action === "app.uninstall" || action.action === "app.clearData"));
@@ -1134,17 +1139,19 @@ function normalizeLiveUiPreparationActions(actions: readonly AgentAction[]): Age
     switch (action.action) {
       case "device.unlock":
         return 0;
-      case "app.uninstall":
+      case "app.stop":
         return 1;
-      case "app.install":
+      case "app.uninstall":
         return 2;
-      case "app.clearData":
+      case "app.install":
         return 3;
+      case "app.clearData":
+        return 4;
       default:
         return undefined;
     }
   };
-  const orderedPreparation = [0, 1, 2, 3].flatMap((targetPhase) =>
+  const orderedPreparation = [0, 1, 2, 3, 4].flatMap((targetPhase) =>
     actions.filter((action) => phase(action) === targetPhase),
   );
   const flowActions = actions.filter((action) => phase(action) === undefined);
@@ -1463,14 +1470,21 @@ export class LocalAiPlanService implements AiPlanService {
           effectiveRequest.liveUiExecution === true,
           effectiveRequest.workspaceExecution === true,
         ),
-        user: userPrompt(project, effectiveRequest, history, installableArtifacts, projectArtifacts),
+        user: userPrompt(
+          project,
+          effectiveRequest,
+          history,
+          installableArtifacts,
+          projectArtifacts,
+        ),
       }));
     const plannedActions =
       effectiveRequest.workspaceExecution !== true && effectiveRequest.liveUiExecution === true
         ? normalizeLiveUiPreparationActions(modelPayload.actions)
         : modelPayload.actions;
-    const preparationActionsWereReordered =
-      plannedActions.some((action, index) => action !== modelPayload.actions[index]);
+    const preparationActionsWereReordered = plannedActions.some(
+      (action, index) => action !== modelPayload.actions[index],
+    );
     const restrictedTestActions =
       effectiveRequest.workspaceExecution === true
         ? []
@@ -1487,10 +1501,7 @@ export class LocalAiPlanService implements AiPlanService {
     }
     if (
       effectiveRequest.workspaceExecution !== true &&
-      !preparationActionsAreOrdered(
-        plannedActions,
-        effectiveRequest.liveUiExecution === true,
-      )
+      !preparationActionsAreOrdered(plannedActions, effectiveRequest.liveUiExecution === true)
     ) {
       throw new AiPlanError(
         effectiveRequest.liveUiExecution === true
@@ -1523,7 +1534,7 @@ export class LocalAiPlanService implements AiPlanService {
         : { deviceSerial: effectiveRequest.deviceSerial }),
       ...(effectiveRequest.appId === undefined ? {} : { targetAppId: effectiveRequest.appId }),
       ...(effectiveRequest.liveUiExecution === true
-        ? { liveUiExecution: { goal: effectiveRequest.goal.trim(), maxSteps: 20 } }
+        ? { liveUiExecution: { goal: effectiveRequest.goal.trim(), maxSteps: 60 } }
         : {}),
       ...(effectiveRequest.workspaceExecution === true ? { workspaceExecution: true } : {}),
       actions: bindActionsToTargetApplication(

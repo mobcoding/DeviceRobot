@@ -273,7 +273,9 @@ export class LocalWorkspaceActionService implements WorkspaceActionService {
           : output;
       }
       case "device.unlock": {
-        const execution = await this.#deviceControlService.execute(serial, { action: "device.unlock" });
+        const execution = await this.#deviceControlService.execute(serial, {
+          action: "device.unlock",
+        });
         return execution.message ?? "已唤醒设备并恢复到可交互界面。";
       }
       case "device.screenshot": {

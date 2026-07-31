@@ -4,6 +4,8 @@ import { actionPlanSchema, agentActionSchema } from "./action-plan.js";
 
 export const testExecutionStatusSchema = z.enum(["running", "succeeded", "failed", "cancelled"]);
 
+export const testExecutionModeSchema = z.enum(["ai-exploration", "local-dsl", "static-plan"]);
+
 export const testStepExecutionStatusSchema = z.enum([
   "pending",
   "running",
@@ -29,9 +31,10 @@ export const testExecutionRunSchema = z.object({
   name: z.string().min(1).max(256),
   deviceSerial: z.string().min(1).max(256),
   appId: z.string().min(1).max(512),
+  executionMode: testExecutionModeSchema.optional(),
   status: testExecutionStatusSchema,
   message: z.string().min(1).max(8_000).optional(),
-  steps: z.array(testStepExecutionSchema).max(20),
+  steps: z.array(testStepExecutionSchema).max(60),
   startedAt: z.iso.datetime(),
   finishedAt: z.iso.datetime().optional(),
 });
@@ -51,6 +54,7 @@ export const testExecutionRunListResponseSchema = z.object({
 });
 
 export type TestExecutionStatus = z.infer<typeof testExecutionStatusSchema>;
+export type TestExecutionMode = z.infer<typeof testExecutionModeSchema>;
 export type TestStepExecutionStatus = z.infer<typeof testStepExecutionStatusSchema>;
 export type TestStepExecution = z.infer<typeof testStepExecutionSchema>;
 export type TestExecutionRun = z.infer<typeof testExecutionRunSchema>;

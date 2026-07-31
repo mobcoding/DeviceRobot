@@ -137,6 +137,115 @@ describe("test suite service", () => {
     database.close();
   });
 
+  it("saves a successful AI exploration as a versioned local DSL suite without temporary APK steps", async () => {
+    const database = openDatabase(join(createTemporaryRoot(), "test.db"));
+    const firstRunId = randomUUID();
+    const secondRunId = randomUUID();
+    const runs: Record<string, TestExecutionRun> = {
+      [firstRunId]: {
+        id: firstRunId,
+        projectId,
+        planId: randomUUID(),
+        name: "进入首页",
+        deviceSerial: "device-1",
+        appId: "com.example.app",
+        executionMode: "ai-exploration",
+        status: "succeeded",
+        steps: [
+          {
+            index: 0,
+            action: {
+              action: "app.install",
+              artifactId: randomUUID(),
+              replaceExisting: true,
+              allowTestPackage: true,
+            },
+            status: "succeeded",
+            screenshotAvailable: false,
+          },
+          {
+            index: 1,
+            action: { action: "ui.tap", target: { text: "继续" } },
+            status: "succeeded",
+            screenshotAvailable: true,
+          },
+          {
+            index: 2,
+            action: { action: "assert.visible", target: { text: "首页" } },
+            status: "succeeded",
+            screenshotAvailable: true,
+          },
+        ],
+        startedAt: "2026-07-25T10:00:00.000Z",
+        finishedAt: "2026-07-25T10:01:00.000Z",
+      },
+      [secondRunId]: {
+        id: secondRunId,
+        projectId,
+        planId: randomUUID(),
+        name: "验证首页",
+        deviceSerial: "device-1",
+        appId: "com.example.app",
+        executionMode: "ai-exploration",
+        status: "succeeded",
+        steps: [
+          {
+            index: 0,
+            action: { action: "assert.visible", target: { text: "首页" } },
+            status: "succeeded",
+            screenshotAvailable: true,
+          },
+        ],
+        startedAt: "2026-07-25T11:00:00.000Z",
+        finishedAt: "2026-07-25T11:01:00.000Z",
+      },
+    };
+    const service = new LocalTestSuiteService({
+      store: new SqliteTestSuiteStore(database.sqlite),
+      projectStore: projectStore(),
+      testExecutionService: {
+        find: async (runId: string) => {
+          const run = runs[runId];
+          if (run === undefined) {
+            throw new Error("not found");
+          }
+          return run;
+        },
+      } as unknown as TestExecutionService,
+    });
+
+    const first = await service.saveExploration(projectId, { runId: firstRunId });
+    expect(first).toMatchObject({
+      suite: {
+        appId: "com.example.app",
+        suite: { origin: "ai-exploration", version: 1, sourceRunIds: [firstRunId] },
+        cases: [
+          {
+            id: `exploration-${firstRunId}`,
+            steps: [
+              { action: { action: "ui.tap", target: { text: "继续" } }, healingEnabled: false },
+              {
+                action: { action: "assert.visible", target: { text: "首页" } },
+                healingEnabled: false,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    await expect(service.saveExploration(projectId, { runId: firstRunId })).resolves.toEqual(first);
+    const second = await service.saveExploration(projectId, { runId: secondRunId });
+    expect(second).toMatchObject({
+      id: first.id,
+      suite: {
+        suite: { version: 2, sourceRunIds: [firstRunId, secondRunId] },
+        cases: [{ id: `exploration-${firstRunId}` }, { id: `exploration-${secondRunId}` }],
+      },
+    });
+    database.close();
+  });
+
   it("rejects unsupported uploads and missing test cases", async () => {
     const database = openDatabase(join(createTemporaryRoot(), "test.db"));
     const service = new LocalTestSuiteService({

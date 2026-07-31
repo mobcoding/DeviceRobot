@@ -144,7 +144,9 @@ export type AgentAction = z.infer<typeof agentActionSchema>;
 export const liveUiExecutionSchema = z
   .object({
     goal: z.string().min(1).max(4_000),
-    maxSteps: z.number().int().min(1).max(20),
+    // First-launch flows can include Android permissions, consent pages, and in-app onboarding.
+    // Keep this bounded, but do not make a normal first-run flow impossible to complete.
+    maxSteps: z.number().int().min(1).max(60),
   })
   .strict();
 
@@ -155,7 +157,7 @@ export const actionPlanSchema = z.object({
   targetAppId: z.string().min(1).optional(),
   liveUiExecution: liveUiExecutionSchema.optional(),
   workspaceExecution: z.boolean().optional(),
-  actions: z.array(agentActionSchema).min(1).max(20),
+  actions: z.array(agentActionSchema).min(1).max(60),
   requiresApproval: z.boolean(),
 });
 

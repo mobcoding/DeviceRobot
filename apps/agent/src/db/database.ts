@@ -9,6 +9,7 @@ type Migration = {
   version: number;
   name: string;
   sql: string;
+  skipWhen?: (sqlite: Database.Database) => boolean;
 };
 
 const migrations: Migration[] = [
@@ -408,6 +409,22 @@ const migrations: Migration[] = [
       DROP TABLE project_ai_conversation_map;
     `,
   },
+  {
+    version: 13,
+    name: "test-execution-mode",
+    sql: `
+      ALTER TABLE test_execution_runs
+        ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'static-plan';
+    `,
+    // Some historical, test-only database snapshots predate test execution entirely.
+    // Mark this migration applied there; real Agent databases always have the table from v8.
+    skipWhen: (sqlite) =>
+      sqlite
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'test_execution_runs'",
+        )
+        .get() === undefined,
+  },
 ];
 
 export type DatabaseHandle = {
@@ -436,7 +453,9 @@ export function migrateDatabase(sqlite: Database.Database): void {
     }
 
     sqlite.transaction(() => {
-      sqlite.exec(migration.sql);
+      if (migration.skipWhen?.(sqlite) !== true) {
+        sqlite.exec(migration.sql);
+      }
       recordMigration.run(migration.version, migration.name, new Date().toISOString());
     })();
   }

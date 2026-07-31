@@ -112,6 +112,7 @@ describe("test execution service", () => {
     const database = openDatabase(paths.database);
     const clear = vi.fn(async () => {});
     const captureScreenshot = vi.fn(async () => Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const decideRuntimeStep = vi.fn();
     const service = new LocalTestExecutionService({
       paths,
       store: new SqliteTestExecutionStore(database.sqlite),
@@ -129,6 +130,7 @@ describe("test execution service", () => {
           finishedAt: new Date().toISOString(),
         }),
       } satisfies DeviceControlService,
+      aiPlanService: { decideRuntimeStep } as never,
       appiumRuntimeService: {
         start: async () => ({ server: { state: "running" } }),
       } as never,
@@ -142,7 +144,7 @@ describe("test execution service", () => {
 
     const started = await service.start({
       plan: {
-        id: "plan-1",
+        id: "dsl:offline-suite:launch-home",
         projectId: project().id,
         actions: [
           { action: "app.launch", appId: "com.example.app" },
@@ -159,8 +161,10 @@ describe("test execution service", () => {
 
     expect(finished).toMatchObject({
       status: "succeeded",
+      executionMode: "local-dsl",
       steps: [{ status: "succeeded" }, { status: "succeeded" }, { status: "succeeded" }],
     });
+    expect(decideRuntimeStep).not.toHaveBeenCalled();
     expect(clear).toHaveBeenCalledWith("device-1", "com.example.app");
     expect(captureScreenshot).toHaveBeenCalledTimes(3);
     await expect(service.screenshotPath(started.id, 0)).resolves.toContain(`${started.id}`);
@@ -219,16 +223,12 @@ describe("test execution service", () => {
         start: async () => ({ server: { state: "running" } }),
       } as never,
       transport: (() => {
-        let executeCalls = 0;
         return transport((path) => {
           if (path === "/session") {
             return { value: { sessionId: "session-1" } };
           }
-          if (path.endsWith("/execute/sync")) {
-            executeCalls += 1;
-            if (executeCalls > 1) {
-              throw new Error("UiAutomator2 会话不可用。");
-            }
+          if (path.endsWith("/element")) {
+            throw new Error("UiAutomator2 会话不可用。");
           }
           return undefined;
         });
@@ -246,6 +246,7 @@ describe("test execution service", () => {
         projectId: project().id,
         actions: [
           { action: "app.launch", appId: "com.example.app" },
+          { action: "ui.tap", target: { text: "继续" } },
           { action: "ui.wait", durationMs: 1 },
         ],
         requiresApproval: true,
@@ -258,13 +259,16 @@ describe("test execution service", () => {
 
     expect(finished.status).toBe("failed");
     expect(finished.message).toContain("UiAutomator2 会话不可用");
-    expect(finished.steps).toMatchObject([{ status: "failed" }, { status: "cancelled" }]);
-    expect(readUiTree).toHaveBeenCalledWith("device-1");
+    expect(finished.steps).toMatchObject([
+      { status: "succeeded" },
+      { status: "failed" },
+      { status: "cancelled" },
+    ]);
+    expect(readUiTree).not.toHaveBeenCalled();
     expect(readLogcat).toHaveBeenCalledWith("device-1", 500);
     const evidenceDirectory = join(paths.reports, started.id, "evidence");
-    expect(existsSync(join(evidenceDirectory, "step-001.xml"))).toBe(true);
-    expect(existsSync(join(evidenceDirectory, "step-001-logcat.log"))).toBe(true);
-    expect(existsSync(join(evidenceDirectory, "appium.log"))).toBe(true);
+    expect(existsSync(join(evidenceDirectory, "step-002.xml"))).toBe(false);
+    expect(existsSync(join(evidenceDirectory, "step-002-logcat.log"))).toBe(true);
     await service.dispose();
     database.close();
   });
@@ -415,6 +419,12 @@ describe("test execution service", () => {
         if (path === "/session") {
           return { value: { sessionId: "session-1" } };
         }
+        if (path.endsWith("/source")) {
+          return {
+            value:
+              '<hierarchy><android.widget.TextView text="Loading" class="android.widget.TextView" bounds="[20,400][240,480]" /></hierarchy>',
+          };
+        }
         if (path.endsWith("/element")) {
           return { value: { ELEMENT: "element-1" } };
         }
@@ -471,6 +481,83 @@ describe("test execution service", () => {
     database.close();
   });
 
+  it("keeps completed startup data when a live UI run explicitly requests a hot start", async () => {
+    const root = createTemporaryRoot();
+    const paths = resolveAgentPaths(root);
+    const database = openDatabase(paths.database);
+    const clear = vi.fn(async () => {});
+    const execute = vi.fn(async () => ({
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+    }));
+    const service = new LocalTestExecutionService({
+      paths,
+      store: new SqliteTestExecutionStore(database.sqlite),
+      projectStore: projectStore(),
+      deviceService: readyDeviceService(),
+      deviceControlService: {
+        captureScreenshot: async () => pngScreenshot(1_080, 2_160),
+        readUiTree: async () => ({
+          serial: "device-1",
+          xml: "<hierarchy/>",
+          capturedAt: new Date().toISOString(),
+        }),
+        execute,
+      } satisfies DeviceControlService,
+      aiPlanService: {
+        decideRuntimeStep: async () => ({
+          status: "completed" as const,
+          assertion: { action: "assert.activity" as const, expected: "MainActivity" },
+          reason: "已进入主页面。",
+        }),
+      } as never,
+      appiumRuntimeService: { start: async () => ({ server: { state: "running" } }) } as never,
+      transport: transport((path) => {
+        if (path === "/session") {
+          return { value: { sessionId: "session-1" } };
+        }
+        if (path.endsWith("/source")) {
+          return {
+            value:
+              '<hierarchy><android.widget.TextView text="首页" class="android.widget.TextView" bounds="[20,400][240,480]" /></hierarchy>',
+          };
+        }
+        if (path.endsWith("/appium/device/current_activity")) {
+          return { value: "com.example.MainActivity" };
+        }
+        return undefined;
+      }),
+      applicationDataService: {
+        uninstall: async () => {},
+        clear,
+        setPermission: async () => {},
+      },
+    });
+
+    const started = await service.start({
+      plan: {
+        id: "plan-live-ui-hot-start",
+        projectId: project().id,
+        liveUiExecution: { goal: "验证热启动进入主页面", maxSteps: 1 },
+        actions: [{ action: "app.stop", appId: "com.example.app" }],
+        requiresApproval: true,
+      },
+      deviceSerial: "device-1",
+      appId: "com.example.app",
+      approved: true,
+    });
+    const finished = await waitForFinished(service, started.id);
+
+    expect(finished.status).toBe("succeeded");
+    expect(execute).toHaveBeenCalledWith("device-1", {
+      action: "app.stop",
+      appId: "com.example.app",
+    });
+    expect(clear).not.toHaveBeenCalled();
+    await service.dispose();
+    database.close();
+  });
+
   it("uses the live UI to execute AI-selected steps before asserting the target result", async () => {
     const root = createTemporaryRoot();
     const paths = resolveAgentPaths(root);
@@ -520,6 +607,9 @@ describe("test execution service", () => {
               '<hierarchy><android.widget.Button text="继续" resource-id="com.example.app:id/continue" clickable="true" enabled="true" bounds="[20,400][240,480]" /></hierarchy>',
           };
         }
+        if (path.endsWith("/appium/device/current_activity")) {
+          return { value: "com.example.app.MainActivity" };
+        }
         if (path.endsWith("/element")) {
           return { value: { "element-6066-11e4-a52e-4f735466cecf": "element-1" } };
         }
@@ -566,8 +656,102 @@ describe("test execution service", () => {
         dataUrl: expect.stringMatching(/^data:image\/png;base64,/u),
       },
     });
+    expect(decideRuntimeStep.mock.calls[0]?.[0].uiContext).toContain(
+      "当前 Android Activity：com.example.app.MainActivity",
+    );
     expect(readUiTree).not.toHaveBeenCalled();
     expect(finished.steps[0]).toMatchObject({ message: "继续按钮是当前页面唯一可见的导航入口。" });
+    await service.dispose();
+    database.close();
+  });
+
+  it("uses XPath for a visible resource id returned without an Android package prefix", async () => {
+    const root = createTemporaryRoot();
+    const paths = resolveAgentPaths(root);
+    const database = openDatabase(paths.database);
+    const requests: Array<{ path: string; body: unknown }> = [];
+    const service = new LocalTestExecutionService({
+      paths,
+      store: new SqliteTestExecutionStore(database.sqlite),
+      projectStore: projectStore(),
+      deviceService: readyDeviceService(),
+      deviceControlService: {
+        captureScreenshot: async () => pngScreenshot(1_080, 2_160),
+        readUiTree: async () => ({
+          serial: "device-1",
+          xml: "<hierarchy/>",
+          capturedAt: new Date().toISOString(),
+        }),
+        execute: async () => ({
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+        }),
+      } satisfies DeviceControlService,
+      aiPlanService: {
+        decideRuntimeStep: vi
+          .fn()
+          .mockResolvedValueOnce({
+            status: "continue",
+            action: { action: "ui.tap", target: { resourceId: "close-button" } },
+            reason: "关闭广告并返回应用。",
+          })
+          .mockResolvedValueOnce({
+            status: "completed",
+            assertion: { action: "assert.activity", expected: "MainActivity" },
+            reason: "已进入主页面。",
+          }),
+      } as never,
+      appiumRuntimeService: { start: async () => ({ server: { state: "running" } }) } as never,
+      transport: {
+        request: async (_method, path, body) => {
+          requests.push({ path, body });
+          if (path === "/session") {
+            return { value: { sessionId: "session-1" } };
+          }
+          if (path.endsWith("/source")) {
+            return {
+              value:
+                '<hierarchy><android.view.View resource-id="close-button" clickable="true" bounds="[250,140][1080,230]" /></hierarchy>',
+            };
+          }
+          if (path.endsWith("/element")) {
+            return { value: { "element-6066-11e4-a52e-4f735466cecf": "close-1" } };
+          }
+          if (path.endsWith("/displayed")) {
+            return { value: true };
+          }
+          if (path.endsWith("/appium/device/current_activity")) {
+            return { value: "com.example.MainActivity" };
+          }
+          return { value: null };
+        },
+      },
+      applicationDataService: {
+        uninstall: async () => {},
+        clear: async () => {},
+        setPermission: async () => {},
+      },
+    });
+
+    const started = await service.start({
+      plan: {
+        id: "plan-live-ui-plain-resource-id",
+        projectId: project().id,
+        liveUiExecution: { goal: "关闭广告后进入主页面", maxSteps: 2 },
+        actions: [{ action: "app.launch", appId: "com.example.app" }],
+        requiresApproval: true,
+      },
+      deviceSerial: "device-1",
+      appId: "com.example.app",
+      approved: true,
+    });
+    const finished = await waitForFinished(service, started.id);
+
+    expect(finished.status).toBe("succeeded");
+    expect(requests.find((request) => request.path.endsWith("/element"))?.body).toEqual({
+      using: "xpath",
+      value: "//*[@resource-id='close-button']",
+    });
     await service.dispose();
     database.close();
   });
@@ -611,6 +795,12 @@ describe("test execution service", () => {
       transport: transport((path) => {
         if (path === "/session") {
           return { value: { sessionId: "session-1" } };
+        }
+        if (path.endsWith("/source")) {
+          return {
+            value:
+              '<hierarchy><android.widget.TextView text="首页" class="android.widget.TextView" bounds="[20,400][240,480]" /></hierarchy>',
+          };
         }
         if (path.endsWith("/element")) {
           return { value: { ELEMENT: "element-1" } };
@@ -695,6 +885,12 @@ describe("test execution service", () => {
         if (path === "/session") {
           return { value: { sessionId: "session-1" } };
         }
+        if (path.endsWith("/source")) {
+          return {
+            value:
+              '<hierarchy><android.widget.Button text="继续" resource-id="com.example.app:id/continue" class="android.widget.Button" clickable="true" bounds="[20,400][240,480]" /></hierarchy>',
+          };
+        }
         if (path.endsWith("/appium/device/current_activity")) {
           return { value: "com.example.MainActivity" };
         }
@@ -729,6 +925,74 @@ describe("test execution service", () => {
     expect(decideRuntimeStep.mock.calls[1]?.[0]?.runtimeHistory).toEqual(
       expect.arrayContaining([expect.stringMatching(/ui\.tap/u)]),
     );
+    await service.dispose();
+    database.close();
+  });
+
+  it("does not start an ADB UI dump while an Appium source request is unavailable", async () => {
+    const root = createTemporaryRoot();
+    const paths = resolveAgentPaths(root);
+    const database = openDatabase(paths.database);
+    const readUiTree = vi.fn(async () => ({
+      serial: "device-1",
+      xml: '<hierarchy><node text="fallback" /></hierarchy>',
+      capturedAt: new Date().toISOString(),
+    }));
+    const decideRuntimeStep = vi.fn(async () => ({
+      status: "completed" as const,
+      assertion: { action: "assert.activity" as const, expected: "MainActivity" },
+      reason: "已进入主页面。",
+    }));
+    const service = new LocalTestExecutionService({
+      paths,
+      store: new SqliteTestExecutionStore(database.sqlite),
+      projectStore: projectStore(),
+      deviceService: readyDeviceService(),
+      deviceControlService: {
+        captureScreenshot: async () => pngScreenshot(1_080, 2_160),
+        readUiTree,
+        execute: async () => ({
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+        }),
+      } satisfies DeviceControlService,
+      aiPlanService: { decideRuntimeStep } as never,
+      appiumRuntimeService: { start: async () => ({ server: { state: "running" } }) } as never,
+      transport: transport((path) => {
+        if (path === "/session") {
+          return { value: { sessionId: "session-1" } };
+        }
+        if (path.endsWith("/source")) {
+          throw new Error("UiAutomator2 source unavailable during startup");
+        }
+        if (path.endsWith("/appium/device/current_activity")) {
+          return { value: "com.example.MainActivity" };
+        }
+        return undefined;
+      }),
+      applicationDataService: {
+        uninstall: async () => {},
+        clear: async () => {},
+        setPermission: async () => {},
+      },
+    });
+
+    const started = await service.start({
+      plan: {
+        id: "plan-live-ui-no-adb-fallback",
+        projectId: project().id,
+        liveUiExecution: { goal: "进入主页面", maxSteps: 2 },
+        actions: [{ action: "app.launch", appId: "com.example.app" }],
+        requiresApproval: true,
+      },
+      deviceSerial: "device-1",
+      appId: "com.example.app",
+      approved: true,
+    });
+    const finished = await waitForFinished(service, started.id);
+
+    expect(finished.status).toBe("succeeded");
+    expect(readUiTree).not.toHaveBeenCalled();
     await service.dispose();
     database.close();
   });

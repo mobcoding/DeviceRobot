@@ -7,6 +7,7 @@ import {
 
 export interface TestSuiteStore {
   create(record: TestSuiteRecord): void;
+  update(record: TestSuiteRecord): void;
   findById(projectId: string, suiteId: string): TestSuiteRecord | undefined;
   listByProject(projectId: string): TestSuiteRecord[];
 }
@@ -51,6 +52,25 @@ export class SqliteTestSuiteStore implements TestSuiteStore {
         parsed.fileName,
         JSON.stringify(parsed.suite),
         parsed.importedAt,
+      );
+  }
+
+  public update(record: TestSuiteRecord): void {
+    const parsed = testSuiteRecordSchema.parse(record);
+    this.#sqlite
+      .prepare(
+        `
+          UPDATE test_suites
+          SET file_name = ?, suite_json = ?, imported_at = ?
+          WHERE id = ? AND project_id = ?
+        `,
+      )
+      .run(
+        parsed.fileName,
+        JSON.stringify(parsed.suite),
+        parsed.importedAt,
+        parsed.id,
+        parsed.projectId,
       );
   }
 

@@ -34,6 +34,7 @@ import {
   installAndroidSdkRequestSchema,
   startProjectBuildRequestSchema,
   startTestSuiteCaseRequestSchema,
+  saveExplorationAsTestSuiteRequestSchema,
   startTestExecutionRequestSchema,
   testExecutionRunListResponseSchema,
   testExecutionRunSchema,
@@ -691,6 +692,19 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
       );
     } catch (error) {
       return apiErrorReply(reply, error, "测试用例导入失败。");
+    }
+  });
+
+  app.post("/api/v1/projects/:projectId/test-suites/from-exploration", async (request, reply) => {
+    try {
+      return testSuiteRecordSchema.parse(
+        await testSuiteService.saveExploration(
+          parseProjectId(request.params),
+          saveExplorationAsTestSuiteRequestSchema.parse(request.body),
+        ),
+      );
+    } catch (error) {
+      return apiErrorReply(reply, error, "保存 AI 探索用例失败。");
     }
   });
 

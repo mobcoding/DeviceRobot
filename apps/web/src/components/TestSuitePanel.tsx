@@ -144,7 +144,11 @@ export function TestSuitePanel({
             <article key={suite.id} className="test-suite-item">
               <header>
                 <div>
-                  <strong>{suite.suite.suite.name}</strong>
+                  <strong>
+                    {suite.suite.suite.name}
+                    {suite.suite.suite.origin === "ai-exploration" &&
+                      ` v${suite.suite.suite.version}`}
+                  </strong>
                   <span>{suite.suite.suite.sourceRevision}</span>
                 </div>
                 <code>{suite.suite.appId}</code>

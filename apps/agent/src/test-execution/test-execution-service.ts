@@ -25,7 +25,7 @@ const execFileAsync = promisify(execFile);
 const APPIUM_BASE_URL = "http://127.0.0.1:4723";
 const DEFAULT_ACTION_TIMEOUT_MS = 8_000;
 const MAX_ACTION_TIMEOUT_MS = 120_000;
-const MAX_TEST_RUN_STEPS = 20;
+const MAX_TEST_RUN_STEPS = 60;
 const STARTUP_RECOVERY_WAIT_MS = 1_200;
 const POLL_INTERVAL_MS = 250;
 const WEB_DRIVER_ELEMENT_KEY = "element-6066-11e4-a52e-4f735466cecf";
@@ -193,13 +193,7 @@ function defaultApplicationDataService(): ApplicationDataService {
       validateAppId(appId);
       let output: string;
       try {
-        output = await execute([
-          "-s",
-          serial,
-          "uninstall",
-          ...(keepData ? ["-k"] : []),
-          appId,
-        ]);
+        output = await execute(["-s", serial, "uninstall", ...(keepData ? ["-k"] : []), appId]);
       } catch (error) {
         const failureOutput = commandFailureOutput(error);
         if (/\b(?:not installed|unknown package)\b/iu.test(failureOutput)) {
@@ -260,7 +254,9 @@ function locatorFor(
     return { using: "accessibility id", value: action.accessibilityId };
   }
   if (action.resourceId !== undefined) {
-    return { using: "id", value: action.resourceId };
+    return action.resourceId.includes(":")
+      ? { using: "id", value: action.resourceId }
+      : { using: "xpath", value: `//*[@resource-id=${escapeXpathText(action.resourceId)}]` };
   }
   if (action.text !== undefined) {
     return { using: "xpath", value: `//*[@text=${escapeXpathText(action.text)}]` };
@@ -315,9 +311,7 @@ function assertNotCancelled(signal: AbortSignal): void {
 }
 
 function blockedOnTransientStartupPage(reason: string): boolean {
-  return /splash|启动|加载|初始|未发现.*控件|暂无.*控件|no\s+(?:control|element)/iu.test(
-    reason,
-  );
+  return /splash|启动|加载|初始|未发现.*控件|暂无.*控件|no\s+(?:control|element)/iu.test(reason);
 }
 
 function activityMatches(actual: unknown, expected: string): boolean {
@@ -573,9 +567,31 @@ function ensureActionScope(action: AgentAction, appId: string): void {
 function isLiveUiPreparationAction(action: AgentAction): boolean {
   return (
     action.action === "device.unlock" ||
+    action.action === "app.stop" ||
     action.action === "app.uninstall" ||
     action.action === "app.clearData" ||
     action.action === "app.install"
+  );
+}
+
+function executionModeFor(
+  plan: StartTestExecutionRequest["plan"],
+): TestExecutionRun["executionMode"] {
+  if (plan.liveUiExecution !== undefined) {
+    return "ai-exploration";
+  }
+  return plan.id.startsWith("dsl:") ? "local-dsl" : "static-plan";
+}
+
+function preservesApplicationDataForHotStart(steps: readonly TestStepExecution[]): boolean {
+  return (
+    steps.some((step) => step.action.action === "app.stop") &&
+    !steps.some(
+      (step) =>
+        step.action.action === "app.uninstall" ||
+        step.action.action === "app.install" ||
+        step.action.action === "app.clearData",
+    )
   );
 }
 
@@ -801,6 +817,7 @@ export class LocalTestExecutionService implements TestExecutionService {
       name: testName(request),
       deviceSerial: request.deviceSerial,
       appId: request.appId,
+      executionMode: executionModeFor(request.plan),
       status: "running",
       steps: (request.plan.liveUiExecution === undefined
         ? request.plan.actions
@@ -873,6 +890,8 @@ export class LocalTestExecutionService implements TestExecutionService {
         assertNotCancelled(signal);
         if (step.action.action === "app.uninstall") {
           await this.#executeUninstallStep(run, step, signal);
+        } else if (step.action.action === "app.stop") {
+          await this.#executeStopStep(run, step, signal);
         } else if (step.action.action === "device.unlock") {
           await this.#executeUnlockStep(run, step, signal);
         } else if (step.action.action === "app.clearData") {
@@ -886,15 +905,24 @@ export class LocalTestExecutionService implements TestExecutionService {
         throw new TestExecutionError(runtime.server.error ?? "Appium 服务未能启动。", 503);
       }
       assertNotCancelled(signal);
-      if (!run.steps.some((step) => step.action.action === "app.clearData")) {
+      if (
+        !preservesApplicationDataForHotStart(run.steps) &&
+        !run.steps.some((step) => step.action.action === "app.clearData")
+      ) {
         await this.#applicationDataService.clear(run.deviceSerial, run.appId);
       }
       assertNotCancelled(signal);
+      // Launch before creating the UiAutomator2 session. On some physical devices, creating a
+      // session first and then racing Appium's activateApp with a force-stop can leave Android
+      // on the launcher even though both commands report success.
+      await this.#deviceControlService.execute(run.deviceSerial, {
+        action: "app.launch",
+        appId: run.appId,
+      });
+      assertNotCancelled(signal);
       session = await createSession(this.#transport, run.deviceSerial, signal);
-      // The harness owns the clean launch boundary; reviewed steps then describe the flow under test.
-      await sessionRequest(session, "POST", "/execute/sync", {
-        script: "mobile: activateApp",
-        args: [{ appId: run.appId }],
+      await sessionRequest(session, "POST", "/appium/device/activate_app", {
+        appId: run.appId,
       });
       const completionMessage =
         liveUiExecution === undefined
@@ -908,7 +936,7 @@ export class LocalTestExecutionService implements TestExecutionService {
             );
       if (liveUiExecution === undefined) {
         for (const step of run.steps.filter(
-          (candidate) => candidate.action.action !== "app.install",
+          (candidate) => !isLiveUiPreparationAction(candidate.action),
         )) {
           assertNotCancelled(signal);
           await this.#executeStep(run, step, session, signal);
@@ -982,12 +1010,16 @@ export class LocalTestExecutionService implements TestExecutionService {
     let recoveredInitialStartupBlock = false;
     for (let stepNumber = 1; stepNumber <= maxSteps; stepNumber += 1) {
       assertNotCancelled(signal);
-      const [uiXml, screenshot] = await Promise.all([
-        this.#readRuntimeUiXml(session, run.deviceSerial),
+      const [uiXml, screenshot, activity] = await Promise.all([
+        this.#readRuntimeUiXml(session),
         this.#deviceControlService.captureScreenshot(run.deviceSerial),
+        this.#readRuntimeActivity(session),
       ]);
       const vision = runtimeScreenshot(screenshot);
-      const uiContext = conciseUiContext(uiXml);
+      const uiContext = [
+        `当前 Android Activity：${activity ?? "未能读取"}`,
+        conciseUiContext(uiXml),
+      ].join("\n");
       if (runtimeHistory.length === 0 && !uiContextHasSafeTarget(uiContext)) {
         const action: AgentAction = { action: "ui.wait", durationMs: STARTUP_RECOVERY_WAIT_MS };
         const reason = "启动页尚无可交互控件，等待页面自动跳转后重新识别。";
@@ -1018,7 +1050,12 @@ export class LocalTestExecutionService implements TestExecutionService {
           runtimeHistory.push(`${stepNumber}. ${action.action}：${reason}`);
           continue;
         }
-        await this.#captureFailureEvidence(run.id, this.#nextStepIndex(run.id), run.deviceSerial);
+        await this.#captureFailureEvidence(
+          run.id,
+          this.#nextStepIndex(run.id),
+          run.deviceSerial,
+          session,
+        );
         throw new TestExecutionError(`AI 无法继续当前页面流程：${decision.reason}`, 422);
       }
       if (decision.status === "completed") {
@@ -1036,20 +1073,37 @@ export class LocalTestExecutionService implements TestExecutionService {
         `${stepNumber}. ${decision.action.action}：${decision.reason.slice(0, 500)}`,
       );
     }
-    await this.#captureFailureEvidence(run.id, this.#nextStepIndex(run.id), run.deviceSerial);
+    await this.#captureFailureEvidence(
+      run.id,
+      this.#nextStepIndex(run.id),
+      run.deviceSerial,
+      session,
+    );
     throw new TestExecutionError(`AI 未能在 ${maxSteps} 步内完成测试目标。`, 422);
   }
 
-  async #readRuntimeUiXml(session: WebDriverSession, serial: string): Promise<string> {
+  async #readRuntimeUiXml(session: WebDriverSession): Promise<string> {
     try {
       const source = completeUiXml(await sessionRequest(session, "GET", "/source"));
       if (source !== undefined) {
         return source;
       }
     } catch {
-      // On a degraded Appium session, preserve the ADB fallback for evidence collection.
+      // UiAutomator2 owns Android's sole UiAutomation service while a session is active.
+      // Starting `adb shell uiautomator dump` here races with Appium and crashes the dump command.
     }
-    return (await this.#deviceControlService.readUiTree(serial)).xml;
+    return "";
+  }
+
+  async #readRuntimeActivity(session: WebDriverSession): Promise<string | undefined> {
+    try {
+      const activity = await sessionRequest(session, "GET", "/appium/device/current_activity");
+      return typeof activity === "string" && activity.trim().length > 0
+        ? activity.trim()
+        : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   async #executeStep(
@@ -1086,7 +1140,7 @@ export class LocalTestExecutionService implements TestExecutionService {
         run.deviceSerial,
       ).catch(() => undefined);
       if (!signal.aborted) {
-        await this.#captureFailureEvidence(run.id, originalStep.index, run.deviceSerial);
+        await this.#captureFailureEvidence(run.id, originalStep.index, run.deviceSerial, session);
       }
       const message = signal.aborted ? "测试运行已取消。" : errorMessage(error);
       this.#store.updateStep(
@@ -1214,6 +1268,41 @@ export class LocalTestExecutionService implements TestExecutionService {
     }
   }
 
+  async #executeStopStep(
+    run: TestExecutionRun,
+    originalStep: TestStepExecution,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (originalStep.action.action !== "app.stop") {
+      throw new TestExecutionError("测试准备步骤无效。", 422);
+    }
+    const startedAt = now();
+    const runningStep = { ...originalStep, status: "running" as const, startedAt };
+    this.#store.updateStep(run.id, runningStep);
+    try {
+      assertNotCancelled(signal);
+      const execution = await this.#deviceControlService.execute(
+        run.deviceSerial,
+        originalStep.action,
+      );
+      this.#store.updateStep(run.id, {
+        ...runningStep,
+        status: "succeeded",
+        message:
+          execution.message ?? `已停止 ${originalStep.action.appId}，将保留应用数据执行热启动。`,
+        finishedAt: now(),
+      });
+    } catch (error) {
+      this.#store.updateStep(run.id, {
+        ...runningStep,
+        status: signal.aborted ? "cancelled" : "failed",
+        message: signal.aborted ? "测试运行已取消。" : errorMessage(error),
+        finishedAt: now(),
+      });
+      throw error;
+    }
+  }
+
   async #executeClearDataStep(
     run: TestExecutionRun,
     originalStep: TestStepExecution,
@@ -1262,19 +1351,36 @@ export class LocalTestExecutionService implements TestExecutionService {
     return path;
   }
 
-  async #captureFailureEvidence(runId: string, stepIndex: number, serial: string): Promise<void> {
+  async #captureFailureEvidence(
+    runId: string,
+    stepIndex: number,
+    serial: string,
+    activeSession?: WebDriverSession,
+  ): Promise<void> {
     const directory = join(this.#paths.reports, runId, "evidence");
     const filePrefix = `step-${String(stepIndex + 1).padStart(3, "0")}`;
     await mkdir(directory, { recursive: true });
     const tasks: Promise<void>[] = [
-      this.#deviceControlService
-        .readUiTree(serial)
-        .then(
-          async (tree) => await writeFile(join(directory, `${filePrefix}.xml`), tree.xml, "utf8"),
-        ),
       this.#captureFailureLogcat(directory, filePrefix, serial),
       this.#captureAppiumLog(directory),
     ];
+    if (activeSession === undefined) {
+      tasks.push(
+        this.#deviceControlService
+          .readUiTree(serial)
+          .then(
+            async (tree) => await writeFile(join(directory, `${filePrefix}.xml`), tree.xml, "utf8"),
+          ),
+      );
+    } else {
+      tasks.push(
+        this.#readRuntimeUiXml(activeSession).then(async (xml) => {
+          if (xml.length > 0) {
+            await writeFile(join(directory, `${filePrefix}.xml`), xml, "utf8");
+          }
+        }),
+      );
+    }
     await Promise.allSettled(tasks);
   }
 

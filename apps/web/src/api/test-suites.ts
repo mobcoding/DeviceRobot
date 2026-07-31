@@ -1,9 +1,11 @@
 import {
   startTestSuiteCaseRequestSchema,
+  saveExplorationAsTestSuiteRequestSchema,
   testExecutionRunSchema,
   testSuiteListResponseSchema,
   testSuiteRecordSchema,
   type StartTestSuiteCaseRequest,
+  type SaveExplorationAsTestSuiteRequest,
   type TestExecutionRun,
   type TestSuiteListResponse,
   type TestSuiteRecord,
@@ -38,6 +40,22 @@ export async function importTestSuite(projectId: string, file: File): Promise<Te
     },
     testSuiteRecordSchema,
     "测试用例导入失败。",
+  );
+}
+
+export async function saveExplorationAsTestSuite(
+  projectId: string,
+  request: SaveExplorationAsTestSuiteRequest,
+): Promise<TestSuiteRecord> {
+  return await requestJson(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/test-suites/from-exploration`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(saveExplorationAsTestSuiteRequestSchema.parse(request)),
+    },
+    testSuiteRecordSchema,
+    "保存 AI 探索用例失败。",
   );
 }
 

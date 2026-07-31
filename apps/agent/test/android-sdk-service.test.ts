@@ -97,7 +97,7 @@ describe("Android SDK service", () => {
         "android {",
         "  compileSdk = 36",
         '  ndkVersion = "28.1.13356709"',
-        "  externalNativeBuild { cmake { version = \"3.18.1\" } }",
+        '  externalNativeBuild { cmake { version = "3.18.1" } }',
         "}",
       ].join("\n"),
     );
@@ -173,7 +173,10 @@ describe("Android SDK service", () => {
     mkdirSync(join(firstProjectRoot, "app"), { recursive: true });
     mkdirSync(join(secondProjectRoot, "app"), { recursive: true });
     writeFileSync(join(firstProjectRoot, "app", "build.gradle.kts"), "android { compileSdk = 34 }");
-    writeFileSync(join(secondProjectRoot, "app", "build.gradle.kts"), "android { compileSdk = 35 }");
+    writeFileSync(
+      join(secondProjectRoot, "app", "build.gradle.kts"),
+      "android { compileSdk = 35 }",
+    );
     const firstModules = [
       { name: "app", path: "app", buildFile: "app/build.gradle.kts", variants: ["debug"] },
     ];

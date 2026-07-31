@@ -5,6 +5,7 @@ import {
   CircleX,
   Clock3,
   FileArchive,
+  FilePlus2,
   FileText,
   FolderGit2,
   Image,
@@ -32,6 +33,7 @@ import type {
   AndroidProject,
   TestExecutionRun,
   TestStepExecution,
+  TestSuiteRecord,
   WorkspaceExecutionResponse,
 } from "@device-robot/contracts";
 
@@ -46,6 +48,7 @@ import {
 } from "../api/ai";
 import { fetchProjects } from "../api/projects";
 import { discardApk, uploadApk } from "../api/apk";
+import { saveExplorationAsTestSuite, startTestSuiteCase } from "../api/test-suites";
 import {
   cancelTestExecution,
   fetchTestRuns,
@@ -412,6 +415,7 @@ export function AiPlanPanel({
   const [externalDataAcknowledged, setExternalDataAcknowledged] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
+  const [savedExplorationSuite, setSavedExplorationSuite] = useState<TestSuiteRecord>();
   const [installableArtifacts, setInstallableArtifacts] = useState<ApkArtifact[]>([]);
   const [lastWorkspaceExecution, setLastWorkspaceExecution] =
     useState<WorkspaceExecutionResponse>();
@@ -542,6 +546,7 @@ export function AiPlanPanel({
     mutationFn: generateAiPlan,
     onSuccess: async (response, request) => {
       setSelectedPlanId(response.plan.id);
+      setSavedExplorationSuite(undefined);
       setGoal("");
       if (request.conversationId !== undefined) {
         await queryClient.invalidateQueries({
@@ -615,6 +620,24 @@ export function AiPlanPanel({
       await queryClient.invalidateQueries({ queryKey: ["test-runs"] });
     },
   });
+  const saveExplorationMutation = useMutation({
+    mutationFn: async (input: { runId: string; name: string }) =>
+      await saveExplorationAsTestSuite(projectId, input),
+    onSuccess: async (suite) => {
+      setSavedExplorationSuite(suite);
+      await queryClient.invalidateQueries({ queryKey: ["test-suites", projectId] });
+    },
+  });
+  const offlineRegressionMutation = useMutation({
+    mutationFn: async (input: { suiteId: string; caseId: string; deviceSerial: string }) =>
+      await startTestSuiteCase(projectId, input.suiteId, input.caseId, {
+        deviceSerial: input.deviceSerial,
+        approved: true,
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["test-runs"] });
+    },
+  });
   const workspaceExecutionMutation = useMutation({
     mutationFn: startWorkspaceExecution,
     onSuccess: (result) => setLastWorkspaceExecution(result),
@@ -680,9 +703,13 @@ export function AiPlanPanel({
                   ? discardApkMutation.error.message
                   : testExecutionMutation.isError
                     ? testExecutionMutation.error.message
-                    : workspaceExecutionMutation.isError
-                      ? workspaceExecutionMutation.error.message
-                      : undefined;
+                    : saveExplorationMutation.isError
+                      ? saveExplorationMutation.error.message
+                      : offlineRegressionMutation.isError
+                        ? offlineRegressionMutation.error.message
+                        : workspaceExecutionMutation.isError
+                          ? workspaceExecutionMutation.error.message
+                          : undefined;
   const configurationError = agentUnavailable
     ? undefined
     : modelListMutation.isError
@@ -706,6 +733,21 @@ export function AiPlanPanel({
           );
   const activeRun = runs.find((run) => run.status === "running");
   const selectedRun = runs.find((run) => run.id === selectedRunId);
+  const completedExplorationRun =
+    selectedExecutionPlan?.liveUiExecution === undefined
+      ? undefined
+      : runs.find(
+          (run) =>
+            run.planId === selectedExecutionPlan.id &&
+            run.status === "succeeded" &&
+            run.executionMode === "ai-exploration",
+        );
+  const savedExplorationCase =
+    completedExplorationRun === undefined
+      ? undefined
+      : savedExplorationSuite?.suite.cases.find(
+          (testCase) => testCase.id === `exploration-${completedExplorationRun.id}`,
+        );
 
   const executePlan = (plan: ActionPlan, response: AiPlanResponse): void => {
     if (plan.workspaceExecution === true) {
@@ -917,6 +959,7 @@ export function AiPlanPanel({
                         setSelectedProjectId(project.id);
                         setSelectedConversationId("");
                         setSelectedPlanId("");
+                        setSavedExplorationSuite(undefined);
                       }}
                     >
                       <div className="ai-test-project-title">
@@ -1291,7 +1334,67 @@ export function AiPlanPanel({
                         ? "正在启动"
                         : "执行计划"}
                     </button>
+                    {completedExplorationRun !== undefined && (
+                      <button
+                        className="ai-secondary-command"
+                        type="button"
+                        disabled={
+                          saveExplorationMutation.isPending ||
+                          savedExplorationCase !== undefined ||
+                          activeRun !== undefined
+                        }
+                        onClick={() =>
+                          saveExplorationMutation.mutate({
+                            runId: completedExplorationRun.id,
+                            name: selectedPlanResponse.reply.slice(0, 80),
+                          })
+                        }
+                      >
+                        <FilePlus2 aria-hidden="true" size={14} strokeWidth={1.9} />
+                        {saveExplorationMutation.isPending
+                          ? "正在保存"
+                          : savedExplorationCase === undefined
+                            ? "保存为 DSL 用例"
+                            : "已保存为 DSL"}
+                      </button>
+                    )}
+                    {savedExplorationSuite !== undefined && savedExplorationCase !== undefined && (
+                      <button
+                        className="primary-command"
+                        type="button"
+                        disabled={
+                          device === undefined ||
+                          offlineRegressionMutation.isPending ||
+                          activeRun !== undefined
+                        }
+                        title="使用本地 DSL 固定步骤执行，不会请求 AI 模型"
+                        onClick={() => {
+                          if (
+                            device !== undefined &&
+                            globalThis.confirm(
+                              `确认在 ${device.model ?? device.serial} 上执行本地 DSL 回归吗？执行过程不会调用 AI 模型。`,
+                            )
+                          ) {
+                            offlineRegressionMutation.mutate({
+                              suiteId: savedExplorationSuite.id,
+                              caseId: savedExplorationCase.id,
+                              deviceSerial: device.serial,
+                            });
+                          }
+                        }}
+                      >
+                        <Play aria-hidden="true" size={14} fill="currentColor" strokeWidth={1.9} />
+                        {offlineRegressionMutation.isPending ? "正在启动" : "本地回归"}
+                      </button>
+                    )}
                   </footer>
+                  {savedExplorationSuite !== undefined && savedExplorationCase !== undefined && (
+                    <p className="ai-test-plan-evidence" role="status">
+                      已保存到“{savedExplorationSuite.suite.suite.name}” v
+                      {savedExplorationSuite.suite.suite.version}。后续执行仅使用本地 DSL，不会调用
+                      AI。
+                    </p>
+                  )}
                   {lastWorkspaceExecution !== undefined &&
                     lastWorkspaceExecution.projectId === selectedExecutionPlan.projectId && (
                       <p className="ai-test-plan-evidence" role="status">

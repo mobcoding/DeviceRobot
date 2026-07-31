@@ -118,6 +118,7 @@ export const testExecutionRuns = sqliteTable("test_execution_runs", {
   name: text("name").notNull(),
   deviceSerial: text("device_serial").notNull(),
   appId: text("app_id").notNull(),
+  executionMode: text("execution_mode").notNull(),
   status: text("status").notNull(),
   message: text("message"),
   startedAt: text("started_at").notNull(),

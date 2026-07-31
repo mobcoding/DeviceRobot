@@ -4559,7 +4559,9 @@ h3 {
 }
 
 .ai-test-message {
+  position: relative;
   max-width: min(720px, 84%);
+  margin-bottom: 12px;
   padding: 11px 14px;
   border: 1px solid transparent;
   border-radius: 18px 18px 18px 5px;
@@ -4585,6 +4587,23 @@ h3 {
   font-size: 13px;
   line-height: 1.7;
   white-space: pre-wrap;
+}
+
+.ai-test-message-time {
+  position: absolute;
+  right: 3px;
+  bottom: -18px;
+  color: #8b9394;
+  font-size: 11px;
+  line-height: 14px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+  white-space: nowrap;
+}
+
+.ai-test-message:hover .ai-test-message-time {
+  opacity: 1;
 }
 
 .ai-test-active-run {

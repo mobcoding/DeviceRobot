@@ -63,6 +63,7 @@ type ConversationMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  createdAt: string;
   plan?: AiPlanResponse;
 };
 
@@ -87,6 +88,22 @@ function saveAiWorkspaceId(storageKey: string, value: string): void {
 
 function lastAiConversationStorageKey(projectId: string): string {
   return `${LAST_AI_CONVERSATION_STORAGE_PREFIX}${projectId}`;
+}
+
+function formatMessageTime(createdAt: string): string {
+  const timestamp = new Date(createdAt);
+  if (Number.isNaN(timestamp.getTime())) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat("zh-CN", {
+    weekday: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
+    .format(timestamp)
+    .replaceAll(" ", "");
 }
 
 function actionLabel(action: AiPlanResponse["plan"]["actions"][number]): string {
@@ -522,6 +539,7 @@ export function AiPlanPanel({
       id: message.id,
       role: message.role,
       content: message.content,
+      createdAt: message.createdAt,
       ...(message.plan === undefined ? {} : { plan: message.plan }),
     }),
   );
@@ -1126,6 +1144,9 @@ export function AiPlanPanel({
                 messages.map((message) => (
                   <article key={message.id} className={`ai-test-message ${message.role}`}>
                     <p>{message.content}</p>
+                    <time className="ai-test-message-time" dateTime={message.createdAt}>
+                      {formatMessageTime(message.createdAt)}
+                    </time>
                   </article>
                 ))
               )}

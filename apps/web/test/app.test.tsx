@@ -1329,6 +1329,11 @@ describe("DeviceRobot Web UI", () => {
     expect(await screen.findByText("已生成首页可见性检查计划。")).toBeInTheDocument();
     expect(document.querySelector(".ai-test-message header")).toBeNull();
     expect(screen.queryByText("查看计划")).not.toBeInTheDocument();
+    const messageTimes = [...document.querySelectorAll<HTMLTimeElement>(".ai-test-message-time")];
+    expect(messageTimes).toHaveLength(2);
+    expect(
+      messageTimes.every((messageTime) => messageTime.dateTime === aiPlanResponse.generatedAt),
+    ).toBe(true);
     expect(screen.getByText("ActionPlan 预览")).toBeInTheDocument();
     expect(screen.getByText("assert.visible")).toBeInTheDocument();
     expect(screen.getByText("执行前必须确认")).toBeInTheDocument();

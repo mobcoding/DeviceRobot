@@ -59,28 +59,21 @@ export type AdbScreenRecordingServiceOptions = {
   runner?: ScreenRecordingCommandRunner;
   desktopDirectory?: string;
   wait?: (milliseconds: number) => Promise<void>;
-  openLocation?: (savedPath: string) => Promise<void>;
+  openLocation?: (directory: string) => Promise<void>;
 };
 
-function defaultLocationOpener(savedPath: string): Promise<void> {
+function defaultLocationOpener(directory: string): Promise<void> {
   const command =
     process.platform === "win32"
       ? "explorer.exe"
       : process.platform === "darwin"
         ? "open"
         : "xdg-open";
-  const args =
-    process.platform === "win32"
-      ? ["/select,", savedPath]
-      : process.platform === "darwin"
-        ? ["-R", savedPath]
-        : [dirname(savedPath)];
 
   return new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawn(command, [directory], {
       detached: true,
       stdio: "ignore",
-      windowsHide: true,
     });
     child.once("error", reject);
     child.once("spawn", () => {
@@ -230,7 +223,7 @@ export class AdbScreenRecordingService implements ScreenRecordingService {
   readonly #runner: ScreenRecordingCommandRunner;
   readonly #desktopDirectory: string;
   readonly #wait: (milliseconds: number) => Promise<void>;
-  readonly #openLocation: (savedPath: string) => Promise<void>;
+  readonly #openLocation: (directory: string) => Promise<void>;
   readonly #sessions = new Map<string, RecordingSession>();
 
   public constructor(options: AdbScreenRecordingServiceOptions) {
@@ -391,7 +384,7 @@ export class AdbScreenRecordingService implements ScreenRecordingService {
     }
 
     try {
-      await this.#openLocation(normalizedPath);
+      await this.#openLocation(dirname(normalizedPath));
     } catch (error) {
       throw this.#asControlError(error, "打开录屏保存位置失败");
     }

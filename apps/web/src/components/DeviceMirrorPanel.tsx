@@ -179,6 +179,7 @@ export function DeviceMirrorPanel({
   const [recordingError, setRecordingError] = useState<string>();
   const [recordingResult, setRecordingResult] = useState<ScreenRecordingResult>();
   const [openingRecordingLocation, setOpeningRecordingLocation] = useState(false);
+  const [recordingLocationOpened, setRecordingLocationOpened] = useState(false);
   const [recordingLocationError, setRecordingLocationError] = useState<string>();
   const [screenSize, setScreenSize] = useState<DevicePoint>();
   const [quickControlsCollapsed, setQuickControlsCollapsed] = useState(false);
@@ -197,6 +198,7 @@ export function DeviceMirrorPanel({
     setRecordingError(undefined);
     setRecordingResult(undefined);
     setRecordingLocationError(undefined);
+    setRecordingLocationOpened(false);
     setOpeningRecordingLocation(false);
 
     if (agentUnavailable) {
@@ -501,6 +503,7 @@ export function DeviceMirrorPanel({
     setRecordingError(undefined);
     setRecordingResult(undefined);
     setRecordingLocationError(undefined);
+    setRecordingLocationOpened(false);
     try {
       const status = await startScreenRecording(serial, configuration);
       setRecordingStatus(status);
@@ -523,6 +526,7 @@ export function DeviceMirrorPanel({
       );
       setRecordingResult(result);
       setRecordingLocationError(undefined);
+      setRecordingLocationOpened(false);
     } catch (error) {
       setRecordingError(error instanceof Error ? error.message : "停止录屏失败。");
     } finally {
@@ -539,6 +543,7 @@ export function DeviceMirrorPanel({
     setRecordingLocationError(undefined);
     try {
       await openScreenRecordingLocation(serial, recordingResult.savedPath);
+      setRecordingLocationOpened(true);
     } catch (error) {
       setRecordingLocationError(error instanceof Error ? error.message : "打开保存位置失败。");
     } finally {
@@ -703,11 +708,13 @@ export function DeviceMirrorPanel({
         <ScreenRecordingResultDialog
           result={recordingResult}
           openingLocation={openingRecordingLocation}
+          locationOpened={recordingLocationOpened}
           {...(recordingLocationError === undefined ? {} : { error: recordingLocationError })}
           onClose={() => {
             if (!openingRecordingLocation) {
               setRecordingResult(undefined);
               setRecordingLocationError(undefined);
+              setRecordingLocationOpened(false);
             }
           }}
           onOpenLocation={() => void handleOpenRecordingLocation()}
@@ -832,6 +839,7 @@ export function DeviceMirrorPanel({
                       setRecordingError(undefined);
                       setRecordingResult(undefined);
                       setRecordingLocationError(undefined);
+                      setRecordingLocationOpened(false);
                       setRecordingDialogOpen(true);
                     }
                   }}

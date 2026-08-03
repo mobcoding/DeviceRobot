@@ -2292,9 +2292,11 @@ describe("DeviceRobot Web UI", () => {
       ),
     ).toBeInTheDocument();
     expect(mirror.querySelector(".mirror-recording-saved")).toBeNull();
+    expect(within(resultDialog).queryByRole("button", { name: "关闭" })).not.toBeInTheDocument();
 
     await user.click(within(resultDialog).getByRole("button", { name: "打开保存位置" }));
     await vi.waitFor(() => expect(getScreenRecordingOpenLocationRequests()).toBe(1));
+    expect(within(resultDialog).getByRole("status")).toHaveTextContent("保存位置已打开");
   });
 
   it("resizes the mirror area without exceeding the golden-ratio width", async () => {

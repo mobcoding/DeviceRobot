@@ -4,6 +4,7 @@ import type { ScreenRecordingResult } from "@device-robot/contracts";
 type ScreenRecordingResultDialogProps = {
   result: ScreenRecordingResult;
   openingLocation: boolean;
+  locationOpened: boolean;
   error?: string;
   onClose(): void;
   onOpenLocation(): void;
@@ -12,6 +13,7 @@ type ScreenRecordingResultDialogProps = {
 export function ScreenRecordingResultDialog({
   result,
   openingLocation,
+  locationOpened,
   error,
   onClose,
   onOpenLocation,
@@ -50,14 +52,11 @@ export function ScreenRecordingResultDialog({
           )}
         </div>
         <footer>
-          <button
-            className="subtle-action dialog-command"
-            type="button"
-            disabled={openingLocation}
-            onClick={onClose}
-          >
-            关闭
-          </button>
+          {locationOpened && (
+            <span className="screen-recording-opened" role="status">
+              保存位置已打开
+            </span>
+          )}
           <button
             className="primary-command dialog-command"
             type="button"

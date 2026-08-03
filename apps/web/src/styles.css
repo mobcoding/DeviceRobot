@@ -3398,6 +3398,12 @@ summary:focus-visible {
   border-top: 1px solid #303030;
 }
 
+.screen-recording-opened {
+  margin-right: auto;
+  color: #a5dfbb;
+  font-size: 11px;
+}
+
 .apk-install-dialog > header,
 .apk-install-dialog > footer {
   display: flex;

@@ -69,7 +69,7 @@ afterEach(() => {
 });
 
 describe("ADB screen recording", () => {
-  it("opens the existing saved MP4 file in the local file manager", async () => {
+  it("opens the saved MP4 file's containing directory in the local file manager", async () => {
     const outputDirectory = createOutputDirectory();
     const savedPath = join(outputDirectory, "DeviceRobot-recording.mp4");
     const openLocation = vi.fn(async () => {});
@@ -82,7 +82,7 @@ describe("ADB screen recording", () => {
 
     await service.openLocation(savedPath);
 
-    expect(openLocation).toHaveBeenCalledWith(savedPath);
+    expect(openLocation).toHaveBeenCalledWith(outputDirectory);
   });
 
   it("starts with the configured video settings and saves a non-empty MP4 locally", async () => {

@@ -17,6 +17,8 @@ const execFileAsync = promisify(execFile);
 export const SCREEN_RECORDING_MAX_DURATION_SECONDS = 1_800;
 const SCREEN_RECORDING_FINALIZE_TIMEOUT_MS = 10_000;
 const SCREEN_RECORDING_FINALIZE_POLL_MS = 250;
+const SCREEN_RECORDING_TOUCH_SETTING_APPLY_TIMEOUT_MS = 5_000;
+const SCREEN_RECORDING_TOUCH_SETTING_APPLY_POLL_MS = 100;
 const DEFAULT_CONFIGURATION = {
   bitRateMbps: 4,
   resolutionPercent: 100,
@@ -256,16 +258,7 @@ export class AdbScreenRecordingService implements ScreenRecordingService {
 
     try {
       if (originalShowTouches !== desiredShowTouches) {
-        await this.#runner.runText([
-          "-s",
-          serial,
-          "shell",
-          "settings",
-          "put",
-          "system",
-          "show_touches",
-          desiredShowTouches,
-        ]);
+        await this.#setShowTouches(serial, desiredShowTouches);
         showTouchesChanged = true;
       }
 
@@ -396,15 +389,61 @@ export class AdbScreenRecordingService implements ScreenRecordingService {
   }
 
   async #restoreShowTouches(serial: string, value: string | undefined): Promise<void> {
-    if (value === undefined) {
-      await this.#runner
-        .runText(["-s", serial, "shell", "settings", "delete", "system", "show_touches"])
-        .catch(() => undefined);
-      return;
+    try {
+      if (value === undefined) {
+        await this.#runner.runText([
+          "-s",
+          serial,
+          "shell",
+          "settings",
+          "delete",
+          "system",
+          "show_touches",
+        ]);
+        await this.#waitForShowTouches(serial, false);
+        return;
+      }
+      await this.#setShowTouches(serial, value);
+    } catch {
+      // Restoring a developer setting must not hide the recording result.
     }
-    await this.#runner
-      .runText(["-s", serial, "shell", "settings", "put", "system", "show_touches", value])
-      .catch(() => undefined);
+  }
+
+  async #setShowTouches(serial: string, value: string): Promise<void> {
+    await this.#runner.runText([
+      "-s",
+      serial,
+      "shell",
+      "settings",
+      "put",
+      "system",
+      "show_touches",
+      value,
+    ]);
+    await this.#waitForShowTouches(serial, value === "1");
+  }
+
+  async #waitForShowTouches(serial: string, enabled: boolean): Promise<void> {
+    const attempts = Math.ceil(
+      SCREEN_RECORDING_TOUCH_SETTING_APPLY_TIMEOUT_MS /
+        SCREEN_RECORDING_TOUCH_SETTING_APPLY_POLL_MS,
+    );
+
+    for (let attempt = 0; attempt <= attempts; attempt += 1) {
+      const output = await this.#runner.runText(["-s", serial, "shell", "dumpsys", "input"]);
+      const match = /Show\s+Touches\s+Enabled:\s*(true|false)/iu.exec(output);
+      if (match?.[1] === String(enabled)) {
+        return;
+      }
+      if (attempt < attempts) {
+        await this.#wait(SCREEN_RECORDING_TOUCH_SETTING_APPLY_POLL_MS);
+      }
+    }
+
+    throw new DeviceControlError(
+      `设备未在 ${Math.round(SCREEN_RECORDING_TOUCH_SETTING_APPLY_TIMEOUT_MS / 1_000)} 秒内${enabled ? "启用" : "关闭"}显示触点。`,
+      502,
+    );
   }
 
   async #waitForRecordingFile(serial: string, remotePath: string): Promise<void> {

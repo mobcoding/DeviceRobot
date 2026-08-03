@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   parseAaptResourceFilePaths,
+  parseAaptResourcePaths,
   parseAaptIconPath,
+  parseAaptManifestIconResourceId,
+  parseAaptColorValues,
   parseAaptXmlResourceIds,
   parseInstalledApkPaths,
   selectBitmapIconResource,
@@ -62,11 +65,38 @@ describe("ADB application icon parsing", () => {
         '        (string8) "res/0w.xml"',
         "      resource 0x7f0800b5 com.example:drawable/ic_launcher_foreground: t=0x03",
         '        (string8) "res/Qr.xml"',
+        "      config mdpi:",
+        "        resource 0x7f0800b6 com.example:mipmap/launcher: t=0x03",
+        '          (string8) "res/low"',
+        "      config xhdpi:",
+        "        resource 0x7f0800b6 com.example:mipmap/launcher: t=0x03",
+        '          (string8) "res/preferred"',
+        "      config xxxhdpi:",
+        "        resource 0x7f0800b6 com.example:mipmap/launcher: t=0x03",
+        '          (string8) "res/high"',
       ].join("\n"),
     );
 
     expect(resources.get("0x7f0800b4")).toBe("res/0w.xml");
     expect(resources.get("0x7f0800b5")).toBe("res/Qr.xml");
+    expect(resources.get("0x7f0800b6")).toBe("res/preferred");
+    expect(
+      parseAaptColorValues(
+        [
+          "        resource 0x0106000b android:color/white: t=0x1c d=0xffffffff",
+          "          (color) #ffffffff",
+        ].join("\n"),
+      ).get("0x0106000b"),
+    ).toBe("0xffffffff");
+    expect(
+      parseAaptResourcePaths(
+        [
+          '        (string8) "res/0w.xml"',
+          '        (string8) "res/Qr.xml"',
+          '        (string8) "res/0w.xml"',
+        ].join("\n"),
+      ),
+    ).toEqual(["res/0w.xml", "res/Qr.xml"]);
     expect(
       parseAaptXmlResourceIds(
         [
@@ -75,6 +105,11 @@ describe("ADB application icon parsing", () => {
         ].join("\n"),
       ),
     ).toEqual(["0x7f0800b4", "0x7f0800b5"]);
+    expect(
+      parseAaptManifestIconResourceId(
+        "  A: http://schemas.android.com/apk/res/android:icon(0x01010002)=@0x7f0f0000",
+      ),
+    ).toBe("0x7f0f0000");
   });
 
   it("converts a decoded Android Vector Drawable into a browser-displayable SVG", () => {

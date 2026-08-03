@@ -1113,7 +1113,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
         parseApplicationPackage(request.params),
       );
       return reply
-        .header("Cache-Control", "private, max-age=300")
+        .header("Cache-Control", "private, max-age=0, must-revalidate")
         .type(icon.contentType)
         .send(icon.content);
     } catch (error) {

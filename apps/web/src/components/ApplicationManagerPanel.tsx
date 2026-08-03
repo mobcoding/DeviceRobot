@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AppWindow, Play, RefreshCw, Search, Square, Upload } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   AndroidDevice,
   DeviceApplication,
@@ -73,39 +73,15 @@ function ApplicationIcon({
   application: DeviceApplication;
 }): React.JSX.Element {
   const [failed, setFailed] = useState(false);
-  const [shouldLoad, setShouldLoad] = useState(
-    () => typeof globalThis.IntersectionObserver !== "function",
-  );
-  const iconRef = useRef<HTMLSpanElement>(null);
   const displayName = applicationDisplayName(application);
 
   useEffect(() => {
     setFailed(false);
-    if (typeof globalThis.IntersectionObserver !== "function") {
-      setShouldLoad(true);
-      return;
-    }
-
-    setShouldLoad(false);
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          setShouldLoad(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "160px 0px" },
-    );
-    const element = iconRef.current;
-    if (element !== null) {
-      observer.observe(element);
-    }
-    return () => observer.disconnect();
   }, [serial, application.packageName]);
 
   return (
-    <span ref={iconRef} className="application-icon-shell">
-      {shouldLoad && !failed ? (
+    <span className="application-icon-shell">
+      {!failed ? (
         <img
           className="application-icon-image"
           src={deviceApplicationIconUrl(serial, application.packageName)}
@@ -113,6 +89,7 @@ function ApplicationIcon({
           width={36}
           height={36}
           decoding="async"
+          loading="lazy"
           onError={() => setFailed(true)}
         />
       ) : (

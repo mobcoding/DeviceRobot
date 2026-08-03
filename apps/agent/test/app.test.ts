@@ -727,6 +727,7 @@ describe("DeviceRobot Agent", () => {
       });
       expect(applicationIcon.statusCode).toBe(200);
       expect(applicationIcon.headers["content-type"]).toContain("image/png");
+      expect(applicationIcon.headers["cache-control"]).toBe("private, max-age=0, must-revalidate");
       expect(applicationIcon.rawPayload).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
       expect(logcat.statusCode).toBe(200);
       expect(logcat.json()).toMatchObject({

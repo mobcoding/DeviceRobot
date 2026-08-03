@@ -215,3 +215,9 @@ export {
   type DeviceLogcatLevel,
   type DeviceLogcatResponse,
 } from "./device-management.js";
+export {
+  deviceTerminalCommandSchema,
+  deviceTerminalResponseSchema,
+  type DeviceTerminalCommand,
+  type DeviceTerminalResponse,
+} from "./device-terminal.js";

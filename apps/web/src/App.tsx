@@ -24,6 +24,7 @@ import { AiPlanPanel } from "./components/AiPlanPanel";
 import { DeviceControlPanel } from "./components/DeviceControlPanel";
 import { DeviceLogcatPanel } from "./components/DeviceLogcatPanel";
 import { DeviceMirrorPanel } from "./components/DeviceMirrorPanel";
+import { DeviceTerminalPanel } from "./components/DeviceTerminalPanel";
 import { FileManagerPanel } from "./components/FileManagerPanel";
 import { ProjectManagerPanel } from "./components/ProjectManagerPanel";
 import { formatDeviceName } from "./ui/formatters";
@@ -56,7 +57,7 @@ const LAST_MIRROR_ASPECT_RATIO_STORAGE_KEY = `${MIRROR_ASPECT_RATIO_STORAGE_PREF
 type ViewId = (typeof viewIds)[number];
 type PlannedViewId = Exclude<
   ViewId,
-  "devices" | "files" | "applications" | "logs" | "projects" | "conversations"
+  "devices" | "files" | "applications" | "logs" | "terminal" | "projects" | "conversations"
 >;
 type WorkspaceTab = { id: ViewId; label: string };
 type AgentStatus = "normal" | "running" | "unavailable" | "degraded";
@@ -149,11 +150,6 @@ const workspaceTabs: readonly WorkspaceTab[] = [
 ];
 
 const plannedViews: Record<PlannedViewId, PlannedViewContent> = {
-  terminal: {
-    title: "终端",
-    description: "终端能力尚未启用。",
-    capabilities: ["受控命令", "审批执行", "操作审计"],
-  },
   reports: {
     title: "测试报告",
     description: "尚未生成测试报告。",
@@ -743,7 +739,8 @@ export function App(): React.JSX.Element {
             (activeView === "devices" ||
               activeView === "files" ||
               activeView === "applications" ||
-              activeView === "logs") ? (
+              activeView === "logs" ||
+              activeView === "terminal") ? (
               <section className="main-empty-state" aria-label="设备工作台">
                 <h1>连接 Android 设备</h1>
                 <p>连接设备并完成 USB 调试授权后，即可在这里查看和管理设备内容。</p>
@@ -759,6 +756,8 @@ export function App(): React.JSX.Element {
               />
             ) : activeView === "logs" && selectedDevice !== undefined ? (
               <DeviceLogcatPanel device={selectedDevice} />
+            ) : activeView === "terminal" && selectedDevice !== undefined ? (
+              <DeviceTerminalPanel device={selectedDevice} />
             ) : activeView === "projects" ? (
               <ProjectManagerPanel device={selectedDevice} />
             ) : activeView === "conversations" ? (

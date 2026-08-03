@@ -833,6 +833,35 @@ describe("DeviceRobot Agent", () => {
     }
   });
 
+  it("executes a terminal command only through the device terminal service", async () => {
+    const execute = vi.fn(async (serial: string, command: string) => ({
+      serial,
+      command,
+      output: "Pixel 6\n",
+      exitCode: 0,
+      executedAt: "2026-08-03T10:00:00.000Z",
+    }));
+    const { app } = await createAgentApp({
+      localAppData: createTemporaryRoot(),
+      deviceTerminalService: { execute },
+    });
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/devices/device-1/terminal",
+        headers: { host: "127.0.0.1:43110" },
+        payload: { command: "getprop ro.product.model" },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ output: "Pixel 6\n", exitCode: 0 });
+      expect(execute).toHaveBeenCalledWith("device-1", "getprop ro.product.model");
+    } finally {
+      await app.close();
+    }
+  });
+
   it("stages and installs an uploaded APK through bounded routes", async () => {
     const artifact = {
       id: "123e4567-e89b-12d3-a456-426614174000",

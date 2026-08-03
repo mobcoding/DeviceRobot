@@ -12,6 +12,8 @@ import {
   deviceFileTransferResponseSchema,
   deviceListResponseSchema,
   deviceLogcatResponseSchema,
+  deviceTerminalCommandSchema,
+  deviceTerminalResponseSchema,
   deviceUiTreeResponseSchema,
   healthResponseSchema,
   projectListResponseSchema,
@@ -205,6 +207,22 @@ describe("shared contracts", () => {
         transferredAt: "2026-07-21T10:00:00.000Z",
       }),
     ).toMatchObject({ fileName: "notes.txt", sizeBytes: 12 });
+  });
+
+  it("accepts bounded device terminal commands and their output", () => {
+    expect(deviceTerminalCommandSchema.parse({ command: "getprop ro.product.model" })).toEqual({
+      command: "getprop ro.product.model",
+    });
+    expect(
+      deviceTerminalResponseSchema.parse({
+        serial: "device-1",
+        command: "getprop ro.product.model",
+        output: "Pixel 6\n",
+        exitCode: 0,
+        executedAt: "2026-08-03T10:00:00.000Z",
+      }),
+    ).toMatchObject({ exitCode: 0, output: "Pixel 6\n" });
+    expect(deviceTerminalCommandSchema.safeParse({ command: " " }).success).toBe(false);
   });
 
   it("accepts a local Appium runtime diagnostic", () => {

@@ -534,6 +534,8 @@ function mockApis(
   getScreenRecordingStartRequests: () => number;
   getScreenRecordingStopRequests: () => number;
   getLastScreenRecordingStartRequest: () => unknown;
+  getTerminalRequests: () => number;
+  getLastTerminalCommand: () => unknown;
 } {
   let deviceRequests = 0;
   let actionRequests = 0;
@@ -566,6 +568,8 @@ function mockApis(
   let screenRecordingStartRequests = 0;
   let screenRecordingStopRequests = 0;
   let lastScreenRecordingStartRequest: unknown;
+  let terminalRequests = 0;
+  let lastTerminalCommand: unknown;
   let recording = false;
   let recordingConfiguration = {
     bitRateMbps: 4,
@@ -1034,6 +1038,22 @@ function mockApis(
       });
     }
 
+    if (url.endsWith("/terminal") && method === "POST") {
+      terminalRequests += 1;
+      lastTerminalCommand = JSON.parse(String(init?.body ?? "{}"));
+      const command = (lastTerminalCommand as { command?: string }).command ?? "";
+      return new Response(
+        JSON.stringify({
+          serial: "8B3Y0THX0",
+          command,
+          output: "Pixel 3 XL\n",
+          exitCode: 0,
+          executedAt: "2026-08-03T10:00:00.000Z",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
     if (url.includes("/api/v1/devices")) {
       deviceRequests += 1;
 
@@ -1164,6 +1184,8 @@ function mockApis(
     getScreenRecordingStartRequests: () => screenRecordingStartRequests,
     getScreenRecordingStopRequests: () => screenRecordingStopRequests,
     getLastScreenRecordingStartRequest: () => lastScreenRecordingStartRequest,
+    getTerminalRequests: () => terminalRequests,
+    getLastTerminalCommand: () => lastTerminalCommand,
   };
 }
 
@@ -1248,6 +1270,23 @@ describe("DeviceRobot Web UI", () => {
     expect(screen.getByRole("heading", { level: 1, name: "终端" })).toBeInTheDocument();
     expect(globalThis.location.hash).toBe("#terminal");
     expect(screen.getByRole("button", { name: "终端" })).toBeInTheDocument();
+  });
+
+  it("executes device shell commands from the terminal workspace and clears output", async () => {
+    const { getLastTerminalCommand, getTerminalRequests } = mockApis();
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("button", { name: "添加工作页签" }));
+    await user.click(screen.getByRole("button", { name: "终端" }));
+    const commandInput = screen.getByRole("textbox", { name: "终端命令" });
+    await user.type(commandInput, "getprop ro.product.model{enter}");
+
+    expect(await screen.findByText("Pixel 3 XL", { selector: "pre" })).toBeInTheDocument();
+    expect(getTerminalRequests()).toBe(1);
+    expect(getLastTerminalCommand()).toEqual({ command: "getprop ro.product.model" });
+    await user.click(screen.getByRole("button", { name: "清除终端输出" }));
+    expect(screen.queryByText("Pixel 3 XL", { selector: "pre" })).not.toBeInTheDocument();
   });
 
   it("creates a project from the project-management form", async () => {

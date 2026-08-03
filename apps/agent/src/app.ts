@@ -17,6 +17,8 @@ import {
   deviceFileTransferResponseSchema,
   deviceListResponseSchema,
   deviceLogcatResponseSchema,
+  deviceTerminalCommandSchema,
+  deviceTerminalResponseSchema,
   deviceUiTreeResponseSchema,
   screenRecordingResultSchema,
   screenRecordingStatusSchema,
@@ -82,6 +84,10 @@ import {
   DeviceApplicationIconError,
   type DeviceApplicationIconService,
 } from "./devices/adb-device-application-icon-service.js";
+import {
+  AdbDeviceTerminalService,
+  type DeviceTerminalService,
+} from "./devices/adb-device-terminal-service.js";
 import {
   AdbDeviceFileTransferService,
   FileTransferError,
@@ -155,6 +161,7 @@ export type CreateAgentAppOptions = {
   deviceControlService?: DeviceControlService;
   screenRecordingService?: ScreenRecordingService;
   deviceManagementService?: DeviceManagementService;
+  deviceTerminalService?: DeviceTerminalService;
   deviceApplicationIconService?: DeviceApplicationIconService;
   deviceFileTransferService?: DeviceFileTransferService;
   projectService?: ProjectService;
@@ -179,6 +186,7 @@ export type AgentApp = {
   deviceControlService: DeviceControlService;
   screenRecordingService: ScreenRecordingService;
   deviceManagementService: DeviceManagementService;
+  deviceTerminalService: DeviceTerminalService;
   deviceApplicationIconService: DeviceApplicationIconService;
   deviceFileTransferService: DeviceFileTransferService;
   projectService: ProjectService;
@@ -553,6 +561,8 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     options.screenRecordingService ?? new AdbScreenRecordingService({ deviceService });
   const deviceManagementService =
     options.deviceManagementService ?? new AdbDeviceManagementService({ deviceService });
+  const deviceTerminalService =
+    options.deviceTerminalService ?? new AdbDeviceTerminalService({ deviceService });
   const deviceApplicationIconService =
     options.deviceApplicationIconService ??
     new AdbDeviceApplicationIconService({ paths, deviceService });
@@ -1145,6 +1155,19 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     }
   });
 
+  app.post("/api/v1/devices/:serial/terminal", async (request, reply) => {
+    try {
+      const command = deviceTerminalCommandSchema.parse(request.body);
+      const response = await deviceTerminalService.execute(
+        parseSerial(request.params),
+        command.command,
+      );
+      return deviceTerminalResponseSchema.parse(response);
+    } catch (error) {
+      return controlErrorReply(reply, error);
+    }
+  });
+
   app.get("/api/v1/appium/runtime", async () => {
     return appiumRuntimeSchema.parse(await appiumRuntimeService.inspect());
   });
@@ -1447,6 +1470,7 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
     deviceControlService,
     screenRecordingService,
     deviceManagementService,
+    deviceTerminalService,
     deviceApplicationIconService,
     deviceFileTransferService,
     projectService,

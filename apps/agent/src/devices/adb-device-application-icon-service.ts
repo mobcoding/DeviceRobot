@@ -17,12 +17,14 @@ const execFileAsync = promisify(execFile);
 const APPLICATION_ICON_TIMEOUT_MS = 60_000;
 const MAX_APPLICATION_ICON_SIZE_BYTES = 5 * 1_024 * 1_024;
 const MAX_CONCURRENT_ICON_EXTRACTIONS = 2;
-const SUPPORTED_ICON_EXTENSIONS = new Map([
+const BITMAP_ICON_EXTENSIONS = new Map([
   [".png", "image/png"],
   [".webp", "image/webp"],
   [".jpg", "image/jpeg"],
   [".jpeg", "image/jpeg"],
+  [".avif", "image/avif"],
 ]);
+const CACHED_ICON_EXTENSIONS = new Map([...BITMAP_ICON_EXTENSIONS, [".svg", "image/svg+xml"]]);
 
 export class DeviceApplicationIconError extends Error {
   public constructor(
@@ -37,6 +39,32 @@ export type DeviceApplicationIcon = {
   content: Buffer;
   contentType: string;
 };
+
+type IconArchive = {
+  apkPath: string;
+  entries: readonly string[];
+};
+
+type BitmapIconResource = {
+  archive: IconArchive;
+  resourcePath: string;
+};
+
+type VectorDrawable = {
+  viewBox: string;
+  markup: string;
+};
+
+type ResolvedIconResource =
+  | {
+      type: "bitmap";
+      resource: BitmapIconResource;
+    }
+  | {
+      type: "svg";
+      content: Buffer;
+      vector: VectorDrawable;
+    };
 
 export interface DeviceApplicationIconService {
   readIcon(serial: string, packageName: string): Promise<DeviceApplicationIcon>;
@@ -73,12 +101,13 @@ function createDefaultRunner(): ApkCommandRunner {
   };
 }
 
-function parseInstalledApkPath(output: string): string | undefined {
+export function parseInstalledApkPaths(output: string): readonly string[] {
   const paths = output
     .split(/\r?\n/u)
     .map((line) => /^package:(\/[^\s]+)$/u.exec(line.trim())?.[1])
     .filter((path): path is string => path !== undefined);
-  return paths.find((path) => path.endsWith("/base.apk")) ?? paths[0];
+  const baseApk = paths.find((path) => path.endsWith("/base.apk"));
+  return [...new Set(baseApk === undefined ? paths : [baseApk, ...paths])];
 }
 
 export function parseAaptIconPath(output: string): string | undefined {
@@ -106,7 +135,7 @@ function normalizeIconResourcePath(value: string): string {
   if (
     !normalized.startsWith("res/") ||
     value.split("/").includes("..") ||
-    ![...SUPPORTED_ICON_EXTENSIONS.keys(), ".xml"].includes(posix.extname(normalized).toLowerCase())
+    ![...BITMAP_ICON_EXTENSIONS.keys(), ".xml"].includes(posix.extname(normalized).toLowerCase())
   ) {
     throw new DeviceApplicationIconError("应用未提供可读取的位图图标。", 404);
   }
@@ -140,7 +169,7 @@ export function selectBitmapIconResource(
   archiveEntries: readonly string[],
 ): string | undefined {
   const normalized = normalizeIconResourcePath(iconResourcePath);
-  if (SUPPORTED_ICON_EXTENSIONS.has(posix.extname(normalized).toLowerCase())) {
+  if (BITMAP_ICON_EXTENSIONS.has(posix.extname(normalized).toLowerCase())) {
     return normalized;
   }
 
@@ -158,7 +187,7 @@ export function selectBitmapIconResource(
     const candidateName = posix.basename(path, extension);
     return candidateResourceType === resourceType &&
       candidateName === resourceName &&
-      SUPPORTED_ICON_EXTENSIONS.has(extension)
+      BITMAP_ICON_EXTENSIONS.has(extension)
       ? [{ path, density: densityForResourcePath(path) }]
       : [];
   });
@@ -167,16 +196,254 @@ export function selectBitmapIconResource(
   )[0]?.path;
 }
 
+function findResourceInArchives(
+  resourcePath: string,
+  archives: readonly IconArchive[],
+): BitmapIconResource | undefined {
+  const normalized = normalizeIconResourcePath(resourcePath);
+  for (const archive of archives) {
+    if (archive.entries.some((entry) => posix.normalize(entry.trim()) === normalized)) {
+      return { archive, resourcePath: normalized };
+    }
+  }
+  return undefined;
+}
+
+function findBitmapIconResource(
+  iconResourcePath: string,
+  archives: readonly IconArchive[],
+): BitmapIconResource | undefined {
+  const flattenedEntries = archives.flatMap((archive) => archive.entries);
+  const selected = selectBitmapIconResource(iconResourcePath, flattenedEntries);
+  return selected === undefined ? undefined : findResourceInArchives(selected, archives);
+}
+
+export function parseAaptResourceFilePaths(output: string): ReadonlyMap<string, string> {
+  const resourcePaths = new Map<string, string>();
+  const lines = output.split(/\r?\n/u);
+  for (let index = 0; index < lines.length; index += 1) {
+    const resourceMatch = /^\s*resource (0x[\da-f]+)\b/iu.exec(lines[index] ?? "");
+    if (resourceMatch?.[1] === undefined) {
+      continue;
+    }
+
+    for (let nextIndex = index + 1; nextIndex < lines.length; nextIndex += 1) {
+      const nextLine = lines[nextIndex] ?? "";
+      if (/^\s*resource 0x[\da-f]+\b/iu.test(nextLine)) {
+        break;
+      }
+      const filePathMatch = /\(string8\) "(res\/[^"\\]+)"/u.exec(nextLine);
+      if (filePathMatch?.[1] !== undefined) {
+        resourcePaths.set(resourceMatch[1].toLocaleLowerCase(), filePathMatch[1]);
+        break;
+      }
+    }
+  }
+  return resourcePaths;
+}
+
+export function parseAaptXmlResourceIds(output: string): readonly string[] {
+  return [...output.matchAll(/=@(0x[\da-f]+)/giu)].map((match) =>
+    (match[1] ?? "").toLocaleLowerCase(),
+  );
+}
+
+type AaptXmlNode = {
+  name: string;
+  indent: number;
+  attributes: Map<string, string>;
+  children: AaptXmlNode[];
+};
+
+function parseAaptXmlTree(output: string): readonly AaptXmlNode[] {
+  const roots: AaptXmlNode[] = [];
+  const stack: AaptXmlNode[] = [];
+  for (const line of output.split(/\r?\n/u)) {
+    const elementMatch = /^(\s*)E:\s+([\w-]+)/u.exec(line);
+    if (elementMatch?.[1] !== undefined && elementMatch[2] !== undefined) {
+      const indent = elementMatch[1].length;
+      while (stack.at(-1)?.indent !== undefined && stack.at(-1)!.indent >= indent) {
+        stack.pop();
+      }
+      const node: AaptXmlNode = {
+        name: elementMatch[2],
+        indent,
+        attributes: new Map(),
+        children: [],
+      };
+      const parent = stack.at(-1);
+      if (parent === undefined) {
+        roots.push(node);
+      } else {
+        parent.children.push(node);
+      }
+      stack.push(node);
+      continue;
+    }
+
+    const attributeMatch = /^\s*A:\s+(?:android:)?([\w-]+)\(/u.exec(line);
+    const current = stack.at(-1);
+    if (attributeMatch?.[1] === undefined || current === undefined) {
+      continue;
+    }
+    const rawValue = /\(Raw: "([^"]*)"\)/u.exec(line)?.[1];
+    const value = rawValue ?? /=([^\r\n]+)$/u.exec(line)?.[1]?.trim();
+    if (value !== undefined) {
+      current.attributes.set(attributeMatch[1], value);
+    }
+  }
+  return roots;
+}
+
+function aaptFloat(value: string | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const hexadecimalValues = [...value.matchAll(/0x([\da-f]{8})\b/giu)];
+  const hexadecimal = hexadecimalValues.at(-1)?.[1];
+  if (hexadecimal !== undefined) {
+    const buffer = Buffer.allocUnsafe(4);
+    buffer.writeUInt32BE(Number.parseInt(hexadecimal, 16));
+    const parsed = buffer.readFloatBE();
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  const decimal = Number.parseFloat(value);
+  return Number.isFinite(decimal) ? decimal : undefined;
+}
+
+function aaptColor(value: string | undefined): { color: string; opacity: number } | undefined {
+  const hexadecimal = /0x([\da-f]{8})\b/iu.exec(value ?? "")?.[1];
+  if (hexadecimal === undefined) {
+    return undefined;
+  }
+  const color = Number.parseInt(hexadecimal, 16);
+  const alpha = (color >>> 24) & 0xff;
+  const red = (color >>> 16) & 0xff;
+  const green = (color >>> 8) & 0xff;
+  const blue = color & 0xff;
+  return {
+    color: `#${red.toString(16).padStart(2, "0")}${green
+      .toString(16)
+      .padStart(2, "0")}${blue.toString(16).padStart(2, "0")}`,
+    opacity: alpha / 255,
+  };
+}
+
+function escapeSvgAttribute(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
+}
+
+function formatSvgNumber(value: number): string {
+  return Number.parseFloat(value.toFixed(4)).toString();
+}
+
+function renderVectorNode(node: AaptXmlNode): string {
+  if (node.name === "path") {
+    const pathData = node.attributes.get("pathData");
+    if (pathData === undefined) {
+      return "";
+    }
+    const fill = aaptColor(node.attributes.get("fillColor"));
+    const stroke = aaptColor(node.attributes.get("strokeColor"));
+    const fillAlpha = aaptFloat(node.attributes.get("fillAlpha")) ?? 1;
+    const strokeAlpha = aaptFloat(node.attributes.get("strokeAlpha")) ?? 1;
+    const attributes = [
+      `d="${escapeSvgAttribute(pathData)}"`,
+      `fill="${fill?.color ?? "#000000"}"`,
+    ];
+    const totalFillOpacity = (fill?.opacity ?? 1) * fillAlpha;
+    if (totalFillOpacity < 1) {
+      attributes.push(`fill-opacity="${formatSvgNumber(totalFillOpacity)}"`);
+    }
+    if (stroke !== undefined) {
+      attributes.push(`stroke="${stroke.color}"`);
+      const strokeWidth = aaptFloat(node.attributes.get("strokeWidth"));
+      if (strokeWidth !== undefined) {
+        attributes.push(`stroke-width="${formatSvgNumber(strokeWidth)}"`);
+      }
+      const totalStrokeOpacity = stroke.opacity * strokeAlpha;
+      if (totalStrokeOpacity < 1) {
+        attributes.push(`stroke-opacity="${formatSvgNumber(totalStrokeOpacity)}"`);
+      }
+    }
+    return `<path ${attributes.join(" ")} />`;
+  }
+
+  const children = node.children.map(renderVectorNode).join("");
+  if (node.name !== "group") {
+    return children;
+  }
+  const translateX = aaptFloat(node.attributes.get("translateX")) ?? 0;
+  const translateY = aaptFloat(node.attributes.get("translateY")) ?? 0;
+  const scaleX = aaptFloat(node.attributes.get("scaleX")) ?? 1;
+  const scaleY = aaptFloat(node.attributes.get("scaleY")) ?? 1;
+  const rotation = aaptFloat(node.attributes.get("rotation")) ?? 0;
+  const pivotX = aaptFloat(node.attributes.get("pivotX")) ?? 0;
+  const pivotY = aaptFloat(node.attributes.get("pivotY")) ?? 0;
+  const transforms = [
+    `translate(${formatSvgNumber(translateX)} ${formatSvgNumber(translateY)})`,
+    `rotate(${formatSvgNumber(rotation)} ${formatSvgNumber(pivotX)} ${formatSvgNumber(pivotY)})`,
+    `translate(${formatSvgNumber(pivotX)} ${formatSvgNumber(pivotY)})`,
+    `scale(${formatSvgNumber(scaleX)} ${formatSvgNumber(scaleY)})`,
+    `translate(${formatSvgNumber(-pivotX)} ${formatSvgNumber(-pivotY)})`,
+  ];
+  return `<g transform="${transforms.join(" ")}">${children}</g>`;
+}
+
+function parseVectorDrawable(output: string): VectorDrawable | undefined {
+  const vector = parseAaptXmlTree(output).find((node) => node.name === "vector");
+  if (vector === undefined) {
+    return undefined;
+  }
+  const viewportWidth = aaptFloat(vector.attributes.get("viewportWidth"));
+  const viewportHeight = aaptFloat(vector.attributes.get("viewportHeight"));
+  if (
+    viewportWidth === undefined ||
+    viewportHeight === undefined ||
+    viewportWidth <= 0 ||
+    viewportHeight <= 0
+  ) {
+    return undefined;
+  }
+  return {
+    viewBox: `0 0 ${formatSvgNumber(viewportWidth)} ${formatSvgNumber(viewportHeight)}`,
+    markup: vector.children.map(renderVectorNode).join(""),
+  };
+}
+
+export function vectorDrawableToSvg(output: string): string | undefined {
+  const vector = parseVectorDrawable(output);
+  return vector === undefined ? undefined : svgForVector(vector);
+}
+
+function svgForVector(vector: VectorDrawable): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vector.viewBox}">${vector.markup}</svg>`;
+}
+
+function compositeVectorDrawables(vectors: readonly VectorDrawable[]): VectorDrawable | undefined {
+  const primary = vectors[0];
+  if (primary === undefined || vectors.some((vector) => vector.viewBox !== primary.viewBox)) {
+    return undefined;
+  }
+  return {
+    viewBox: primary.viewBox,
+    markup: vectors.map((vector) => vector.markup).join(""),
+  };
+}
+
+function iconCachePrefix(serial: string, packageName: string, apkPaths: readonly string[]): string {
+  return createHash("sha256")
+    .update(`${serial}\u0000${packageName}\u0000${apkPaths.join("\u0000")}`)
+    .digest("hex");
+}
+
 function cacheFileName(
   serial: string,
   packageName: string,
-  apkPath: string,
+  apkPaths: readonly string[],
   extension: string,
 ): string {
-  const key = createHash("sha256")
-    .update(`${serial}\u0000${packageName}\u0000${apkPath}`)
-    .digest("hex");
-  return `${key}${extension}`;
+  return `${iconCachePrefix(serial, packageName, apkPaths)}${extension}`;
 }
 
 export class AdbDeviceApplicationIconService implements DeviceApplicationIconService {
@@ -226,29 +493,31 @@ export class AdbDeviceApplicationIconService implements DeviceApplicationIconSer
         ["-s", serial, "shell", "pm", "path", packageName],
         20_000,
       );
-      const apkPath = parseInstalledApkPath(commandOutput(packagePathResult));
-      if (apkPath === undefined) {
+      const apkPaths = parseInstalledApkPaths(commandOutput(packagePathResult));
+      if (apkPaths.length === 0) {
         throw new DeviceApplicationIconError("未找到应用的 APK 文件。", 404);
       }
 
       await mkdir(this.#iconDirectory, { recursive: true });
-      const cachePrefix = createHash("sha256")
-        .update(`${serial}\u0000${packageName}\u0000${apkPath}`)
-        .digest("hex");
+      const cachePrefix = iconCachePrefix(serial, packageName, apkPaths);
       const cached = await this.#readCachedIcon(cachePrefix);
       if (cached !== undefined) {
         return cached;
       }
 
       const workDirectory = join(this.#iconDirectory, randomUUID());
-      const downloadedApk = join(workDirectory, "application.apk");
       try {
         await mkdir(workDirectory, { recursive: true });
-        await this.#runner.run(
-          this.#adbExecutable,
-          ["-s", serial, "pull", apkPath, downloadedApk],
-          APPLICATION_ICON_TIMEOUT_MS,
-        );
+        const downloadedApks: string[] = [];
+        for (const [index, apkPath] of apkPaths.entries()) {
+          const downloadedApk = join(workDirectory, `application-${index}.apk`);
+          await this.#runner.run(
+            this.#adbExecutable,
+            ["-s", serial, "pull", apkPath, downloadedApk],
+            APPLICATION_ICON_TIMEOUT_MS,
+          );
+          downloadedApks.push(downloadedApk);
+        }
         const aaptPath = await resolveAaptPath({
           paths: this.#paths,
           adbExecutable: this.#adbExecutable,
@@ -256,46 +525,63 @@ export class AdbDeviceApplicationIconService implements DeviceApplicationIconSer
           environment: this.#environment,
           runner: this.#runner,
         });
+        const archives: IconArchive[] = [];
+        for (const downloadedApk of downloadedApks) {
+          const archiveContents = await this.#runner.run("tar", ["-tf", downloadedApk], 30_000);
+          archives.push({
+            apkPath: downloadedApk,
+            entries: commandOutput(archiveContents).split(/\r?\n/u),
+          });
+        }
         const badging = await this.#runner.run(
           aaptPath,
-          ["dump", "badging", downloadedApk],
+          ["dump", "badging", downloadedApks[0] ?? ""],
           30_000,
         );
         const iconResourcePath = parseAaptIconPath(commandOutput(badging));
         if (iconResourcePath === undefined) {
           throw new DeviceApplicationIconError("应用未提供可读取的位图图标。", 404);
         }
-        const archiveContents = await this.#runner.run("tar", ["-tf", downloadedApk], 30_000);
-        const normalizedResourcePath = selectBitmapIconResource(
-          iconResourcePath,
-          commandOutput(archiveContents).split(/\r?\n/u),
-        );
-        if (normalizedResourcePath === undefined) {
-          throw new DeviceApplicationIconError("应用未提供可读取的位图图标。", 404);
-        }
-        await this.#runner.run(
-          "tar",
-          ["-xf", downloadedApk, "-C", workDirectory, normalizedResourcePath],
-          30_000,
-        );
-        const extractedIcon = join(workDirectory, ...normalizedResourcePath.split("/"));
-        const metadata = await stat(extractedIcon);
-        if (!metadata.isFile() || metadata.size === 0) {
-          throw new DeviceApplicationIconError("应用图标文件不可用。", 404);
-        }
-        if (metadata.size > MAX_APPLICATION_ICON_SIZE_BYTES) {
-          throw new DeviceApplicationIconError("应用图标文件过大。", 413);
+
+        const resourcePaths = new Map<string, string>();
+        for (const archive of archives) {
+          const resources = await this.#runner.run(
+            aaptPath,
+            ["dump", "--values", "resources", archive.apkPath],
+            30_000,
+          );
+          for (const [resourceId, resourcePath] of parseAaptResourceFilePaths(
+            commandOutput(resources),
+          )) {
+            resourcePaths.set(resourceId, resourcePath);
+          }
         }
 
-        const extension = posix.extname(normalizedResourcePath).toLowerCase();
-        const contentType = SUPPORTED_ICON_EXTENSIONS.get(extension);
+        const resolved = await this.#resolveIconResource(
+          aaptPath,
+          archives,
+          resourcePaths,
+          iconResourcePath,
+          new Set(),
+        );
+        if (resolved === undefined) {
+          throw new DeviceApplicationIconError("应用未提供可读取的位图图标。", 404);
+        }
+
+        const icon =
+          resolved.type === "svg"
+            ? { content: resolved.content, contentType: "image/svg+xml", extension: ".svg" }
+            : await this.#readBitmapIcon(resolved.resource, workDirectory);
+        if (icon.content.length > MAX_APPLICATION_ICON_SIZE_BYTES) {
+          throw new DeviceApplicationIconError("应用图标文件过大。", 413);
+        }
+        const contentType = CACHED_ICON_EXTENSIONS.get(icon.extension);
         if (contentType === undefined) {
           throw new DeviceApplicationIconError("应用图标格式不受支持。", 404);
         }
-        const content = await readFile(extractedIcon);
         await writeFile(
-          join(this.#iconDirectory, cacheFileName(serial, packageName, apkPath, extension)),
-          content,
+          join(this.#iconDirectory, cacheFileName(serial, packageName, apkPaths, icon.extension)),
+          icon.content,
           {
             flag: "wx",
           },
@@ -304,7 +590,7 @@ export class AdbDeviceApplicationIconService implements DeviceApplicationIconSer
             throw error;
           }
         });
-        return { content, contentType };
+        return { content: icon.content, contentType };
       } finally {
         await rm(workDirectory, { force: true, recursive: true });
       }
@@ -319,8 +605,107 @@ export class AdbDeviceApplicationIconService implements DeviceApplicationIconSer
     }
   }
 
+  async #resolveIconResource(
+    aaptPath: string,
+    archives: readonly IconArchive[],
+    resourcePaths: ReadonlyMap<string, string>,
+    resourcePath: string,
+    visited: Set<string>,
+  ): Promise<ResolvedIconResource | undefined> {
+    const normalized = normalizeIconResourcePath(resourcePath);
+    if (visited.has(normalized)) {
+      return undefined;
+    }
+    visited.add(normalized);
+
+    const extension = posix.extname(normalized).toLowerCase();
+    if (BITMAP_ICON_EXTENSIONS.has(extension)) {
+      const bitmap = findResourceInArchives(normalized, archives);
+      return bitmap === undefined ? undefined : { type: "bitmap", resource: bitmap };
+    }
+    if (extension !== ".xml") {
+      return undefined;
+    }
+
+    const xmlResource = findResourceInArchives(normalized, archives);
+    if (xmlResource === undefined) {
+      const bitmap = findBitmapIconResource(normalized, archives);
+      return bitmap === undefined ? undefined : { type: "bitmap", resource: bitmap };
+    }
+    const xmlTree = await this.#runner.run(
+      aaptPath,
+      ["dump", "xmltree", xmlResource.archive.apkPath, normalized],
+      30_000,
+    );
+    const xmlTreeOutput = commandOutput(xmlTree);
+    const vector = parseVectorDrawable(xmlTreeOutput);
+    if (vector !== undefined) {
+      return {
+        type: "svg",
+        content: Buffer.from(svgForVector(vector), "utf8"),
+        vector,
+      };
+    }
+
+    const resolvedChildren: ResolvedIconResource[] = [];
+    for (const resourceId of new Set(parseAaptXmlResourceIds(xmlTreeOutput))) {
+      const childPath = resourcePaths.get(resourceId);
+      if (childPath === undefined) {
+        continue;
+      }
+      const child = await this.#resolveIconResource(
+        aaptPath,
+        archives,
+        resourcePaths,
+        childPath,
+        visited,
+      );
+      if (child !== undefined) {
+        resolvedChildren.push(child);
+      }
+    }
+
+    const vectors = resolvedChildren.flatMap((child) =>
+      child.type === "svg" ? [child.vector] : [],
+    );
+    const composite = compositeVectorDrawables(vectors);
+    if (composite !== undefined) {
+      return {
+        type: "svg",
+        content: Buffer.from(svgForVector(composite), "utf8"),
+        vector: composite,
+      };
+    }
+    const bitmap = resolvedChildren.findLast((child) => child.type === "bitmap");
+    if (bitmap !== undefined) {
+      return bitmap;
+    }
+    const fallbackBitmap = findBitmapIconResource(normalized, archives);
+    return fallbackBitmap === undefined ? undefined : { type: "bitmap", resource: fallbackBitmap };
+  }
+
+  async #readBitmapIcon(
+    resource: BitmapIconResource,
+    workDirectory: string,
+  ): Promise<{ content: Buffer; extension: string }> {
+    await this.#runner.run(
+      "tar",
+      ["-xf", resource.archive.apkPath, "-C", workDirectory, resource.resourcePath],
+      30_000,
+    );
+    const extractedIcon = join(workDirectory, ...resource.resourcePath.split("/"));
+    const metadata = await stat(extractedIcon);
+    if (!metadata.isFile() || metadata.size === 0) {
+      throw new DeviceApplicationIconError("应用图标文件不可用。", 404);
+    }
+    return {
+      content: await readFile(extractedIcon),
+      extension: posix.extname(resource.resourcePath).toLowerCase(),
+    };
+  }
+
   async #readCachedIcon(cachePrefix: string): Promise<DeviceApplicationIcon | undefined> {
-    for (const [extension, contentType] of SUPPORTED_ICON_EXTENSIONS) {
+    for (const [extension, contentType] of CACHED_ICON_EXTENSIONS) {
       const filePath = join(this.#iconDirectory, `${cachePrefix}${extension}`);
       try {
         const metadata = await stat(filePath);

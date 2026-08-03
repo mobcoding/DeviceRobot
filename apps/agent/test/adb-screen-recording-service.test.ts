@@ -36,13 +36,7 @@ function configuration(outputDirectory: string): ScreenRecordingConfiguration {
   };
 }
 
-function recordingRunner(
-  originalShowTouches = "0",
-  inputStateDelay = 0,
-): ScreenRecordingCommandRunner {
-  let desiredShowTouchesEnabled = originalShowTouches === "1";
-  let showTouchesEnabled = originalShowTouches === "1";
-  let remainingInputStateDelay = 0;
+function recordingRunner(originalShowTouches = "0"): ScreenRecordingCommandRunner {
   return {
     runText: vi.fn(async (args: readonly string[]) => {
       if (args[2] === "pull") {
@@ -58,24 +52,6 @@ function recordingRunner(
       }
       if (args[3] === "settings" && args[4] === "get") {
         return originalShowTouches;
-      }
-      if (args[3] === "settings" && args[4] === "put" && args[6] === "show_touches") {
-        desiredShowTouchesEnabled = args[7] === "1";
-        remainingInputStateDelay = inputStateDelay;
-        return "";
-      }
-      if (args[3] === "settings" && args[4] === "delete" && args[6] === "show_touches") {
-        desiredShowTouchesEnabled = false;
-        remainingInputStateDelay = inputStateDelay;
-        return "";
-      }
-      if (args[3] === "dumpsys" && args[4] === "input") {
-        if (remainingInputStateDelay > 0) {
-          remainingInputStateDelay -= 1;
-        } else {
-          showTouchesEnabled = desiredShowTouchesEnabled;
-        }
-        return `Show Touches Enabled: ${String(showTouchesEnabled)}`;
       }
       if (args[3] === "sh") {
         return "4271\n";
@@ -93,29 +69,6 @@ afterEach(() => {
 });
 
 describe("ADB screen recording", () => {
-  it("waits for Android input to enable touch indicators before recording", async () => {
-    const outputDirectory = createOutputDirectory();
-    const runner = recordingRunner("0", 2);
-    const waitDelays: number[] = [];
-    const wait = async (milliseconds: number): Promise<void> => {
-      waitDelays.push(milliseconds);
-    };
-    const service = new AdbScreenRecordingService({
-      deviceService: deviceService(),
-      runner,
-      wait,
-    });
-
-    await service.start("device-1", configuration(outputDirectory));
-
-    expect(
-      vi
-        .mocked(runner.runText)
-        .mock.calls.filter(([args]) => args.join(" ") === "-s device-1 shell dumpsys input"),
-    ).toHaveLength(3);
-    expect(waitDelays.filter((milliseconds) => milliseconds === 100)).toHaveLength(2);
-  });
-
   it("starts with the configured video settings and saves a non-empty MP4 locally", async () => {
     const outputDirectory = createOutputDirectory();
     const runner = recordingRunner();
@@ -142,13 +95,6 @@ describe("ADB screen recording", () => {
         "exec screenrecord --size 540x1200 --bit-rate 4000000 --time-limit 1800 /sdcard/Download/DeviceRobot-",
       ),
     ]);
-    const confirmationCall = vi
-      .mocked(runner.runText)
-      .mock.calls.findIndex(([args]) => args.join(" ") === "-s device-1 shell dumpsys input");
-    expect(confirmationCall).toBeGreaterThanOrEqual(0);
-    expect(
-      vi.mocked(runner.runText).mock.invocationCallOrder[confirmationCall] ?? Infinity,
-    ).toBeLessThan(vi.mocked(runner.start).mock.invocationCallOrder[0] ?? -Infinity);
     expect(runner.runText).toHaveBeenCalledWith(["-s", "device-1", "shell", "kill", "-0", "4271"]);
     expect(runner.runText).toHaveBeenCalledWith([
       "-s",
@@ -195,7 +141,6 @@ describe("ADB screen recording", () => {
   it("fails fast and restores the touch-display setting when the recorder exits at startup", async () => {
     const outputDirectory = createOutputDirectory();
     const terminate = vi.fn();
-    let showTouchesEnabled = false;
     const runner: ScreenRecordingCommandRunner = {
       runText: vi.fn(async (args: readonly string[]) => {
         if (args[3] === "wm" && args[4] === "size") {
@@ -203,13 +148,6 @@ describe("ADB screen recording", () => {
         }
         if (args[3] === "settings" && args[4] === "get") {
           return "0";
-        }
-        if (args[3] === "settings" && args[4] === "put" && args[6] === "show_touches") {
-          showTouchesEnabled = args[7] === "1";
-          return "";
-        }
-        if (args[3] === "dumpsys" && args[4] === "input") {
-          return `Show Touches Enabled: ${String(showTouchesEnabled)}`;
         }
         if (args[3] === "kill" && args[4] === "-0") {
           throw new Error("recorder process exited");

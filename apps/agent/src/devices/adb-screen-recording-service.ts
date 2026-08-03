@@ -2,7 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, extname, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import type {
   ScreenRecordingConfiguration,
@@ -49,6 +49,7 @@ export interface ScreenRecordingService {
     configuration: ScreenRecordingConfiguration,
   ): Promise<ScreenRecordingStatus>;
   stop(serial: string): Promise<ScreenRecordingResult>;
+  openLocation(savedPath: string): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -58,7 +59,36 @@ export type AdbScreenRecordingServiceOptions = {
   runner?: ScreenRecordingCommandRunner;
   desktopDirectory?: string;
   wait?: (milliseconds: number) => Promise<void>;
+  openLocation?: (savedPath: string) => Promise<void>;
 };
+
+function defaultLocationOpener(savedPath: string): Promise<void> {
+  const command =
+    process.platform === "win32"
+      ? "explorer.exe"
+      : process.platform === "darwin"
+        ? "open"
+        : "xdg-open";
+  const args =
+    process.platform === "win32"
+      ? ["/select,", savedPath]
+      : process.platform === "darwin"
+        ? ["-R", savedPath]
+        : [dirname(savedPath)];
+
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.once("error", reject);
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+  });
+}
 
 function defaultRunner(executable: string): ScreenRecordingCommandRunner {
   return {
@@ -200,6 +230,7 @@ export class AdbScreenRecordingService implements ScreenRecordingService {
   readonly #runner: ScreenRecordingCommandRunner;
   readonly #desktopDirectory: string;
   readonly #wait: (milliseconds: number) => Promise<void>;
+  readonly #openLocation: (savedPath: string) => Promise<void>;
   readonly #sessions = new Map<string, RecordingSession>();
 
   public constructor(options: AdbScreenRecordingServiceOptions) {
@@ -208,6 +239,7 @@ export class AdbScreenRecordingService implements ScreenRecordingService {
     this.#runner = options.runner ?? defaultRunner(executable);
     this.#desktopDirectory = options.desktopDirectory ?? join(homedir(), "Desktop");
     this.#wait = options.wait ?? sleep;
+    this.#openLocation = options.openLocation ?? defaultLocationOpener;
   }
 
   public async status(serial: string): Promise<ScreenRecordingStatus> {
@@ -339,6 +371,29 @@ export class AdbScreenRecordingService implements ScreenRecordingService {
         .runText(["-s", serial, "shell", "rm", "-f", session.remotePath])
         .catch(() => undefined);
       await this.#disableShowTouches(serial);
+    }
+  }
+
+  public async openLocation(savedPath: string): Promise<void> {
+    const normalizedPath = savedPath.trim();
+    if (!isAbsolute(normalizedPath) || extname(normalizedPath).toLowerCase() !== ".mp4") {
+      throw new DeviceControlError("录屏文件路径无效。", 400);
+    }
+
+    let details;
+    try {
+      details = await stat(normalizedPath);
+    } catch {
+      throw new DeviceControlError("录屏文件不存在。", 404);
+    }
+    if (!details.isFile()) {
+      throw new DeviceControlError("录屏保存位置不是文件。", 400);
+    }
+
+    try {
+      await this.#openLocation(normalizedPath);
+    } catch (error) {
+      throw this.#asControlError(error, "打开录屏保存位置失败");
     }
   }
 

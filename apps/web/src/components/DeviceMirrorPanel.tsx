@@ -1,6 +1,5 @@
 import {
   ArrowLeft,
-  CheckCircle2,
   ChevronDown,
   ChevronUp,
   ClipboardCopy,
@@ -19,6 +18,7 @@ import { useEffect, useRef, useState } from "react";
 import type {
   AndroidDevice,
   ScreenRecordingConfiguration,
+  ScreenRecordingResult,
   ScreenRecordingStatus,
 } from "@device-robot/contracts";
 
@@ -26,11 +26,13 @@ import { useAgentUnavailable } from "../agent-availability";
 import {
   captureDeviceScreenshot,
   fetchScreenRecordingStatus,
+  openScreenRecordingLocation,
   startScreenRecording,
   stopScreenRecording,
 } from "../api/device-control";
 import { formatDeviceName } from "../ui/formatters";
 import { ScreenRecordingDialog } from "./ScreenRecordingDialog";
+import { ScreenRecordingResultDialog } from "./ScreenRecordingResultDialog";
 
 type DeviceMirrorPanelProps = {
   device: AndroidDevice;
@@ -175,7 +177,9 @@ export function DeviceMirrorPanel({
   const [recordingDialogOpen, setRecordingDialogOpen] = useState(false);
   const [recordingBusy, setRecordingBusy] = useState(false);
   const [recordingError, setRecordingError] = useState<string>();
-  const [recordingSavedPath, setRecordingSavedPath] = useState<string>();
+  const [recordingResult, setRecordingResult] = useState<ScreenRecordingResult>();
+  const [openingRecordingLocation, setOpeningRecordingLocation] = useState(false);
+  const [recordingLocationError, setRecordingLocationError] = useState<string>();
   const [screenSize, setScreenSize] = useState<DevicePoint>();
   const [quickControlsCollapsed, setQuickControlsCollapsed] = useState(false);
   const [apkDragActive, setApkDragActive] = useState(false);
@@ -191,7 +195,9 @@ export function DeviceMirrorPanel({
     setRecordingStatus(undefined);
     setRecordingConfiguration(undefined);
     setRecordingError(undefined);
-    setRecordingSavedPath(undefined);
+    setRecordingResult(undefined);
+    setRecordingLocationError(undefined);
+    setOpeningRecordingLocation(false);
 
     if (agentUnavailable) {
       return () => {
@@ -493,7 +499,8 @@ export function DeviceMirrorPanel({
   ): Promise<void> => {
     setRecordingBusy(true);
     setRecordingError(undefined);
-    setRecordingSavedPath(undefined);
+    setRecordingResult(undefined);
+    setRecordingLocationError(undefined);
     try {
       const status = await startScreenRecording(serial, configuration);
       setRecordingStatus(status);
@@ -514,11 +521,28 @@ export function DeviceMirrorPanel({
       setRecordingStatus((current) =>
         current === undefined ? current : { ...current, recording: false, startedAt: undefined },
       );
-      setRecordingSavedPath(result.savedPath);
+      setRecordingResult(result);
+      setRecordingLocationError(undefined);
     } catch (error) {
       setRecordingError(error instanceof Error ? error.message : "停止录屏失败。");
     } finally {
       setRecordingBusy(false);
+    }
+  };
+
+  const handleOpenRecordingLocation = async (): Promise<void> => {
+    if (recordingResult === undefined || openingRecordingLocation) {
+      return;
+    }
+
+    setOpeningRecordingLocation(true);
+    setRecordingLocationError(undefined);
+    try {
+      await openScreenRecordingLocation(serial, recordingResult.savedPath);
+    } catch (error) {
+      setRecordingLocationError(error instanceof Error ? error.message : "打开保存位置失败。");
+    } finally {
+      setOpeningRecordingLocation(false);
     }
   };
 
@@ -675,6 +699,20 @@ export function DeviceMirrorPanel({
             onStart={(configuration) => void handleStartRecording(configuration)}
           />
         )}
+      {recordingResult !== undefined && (
+        <ScreenRecordingResultDialog
+          result={recordingResult}
+          openingLocation={openingRecordingLocation}
+          {...(recordingLocationError === undefined ? {} : { error: recordingLocationError })}
+          onClose={() => {
+            if (!openingRecordingLocation) {
+              setRecordingResult(undefined);
+              setRecordingLocationError(undefined);
+            }
+          }}
+          onOpenLocation={() => void handleOpenRecordingLocation()}
+        />
+      )}
       <header className="mirror-header">
         <div>
           <p>实时画面</p>
@@ -792,7 +830,8 @@ export function DeviceMirrorPanel({
                       void handleStopRecording();
                     } else {
                       setRecordingError(undefined);
-                      setRecordingSavedPath(undefined);
+                      setRecordingResult(undefined);
+                      setRecordingLocationError(undefined);
                       setRecordingDialogOpen(true);
                     }
                   }}
@@ -865,12 +904,6 @@ export function DeviceMirrorPanel({
         </div>
       </div>
       {error !== undefined && <p className="mirror-error">{error}</p>}
-      {recordingSavedPath !== undefined && (
-        <p className="mirror-recording-saved" role="status">
-          <CheckCircle2 aria-hidden="true" size={15} strokeWidth={1.8} />
-          录屏已保存：<code>{recordingSavedPath}</code>
-        </p>
-      )}
     </section>
   );
 }

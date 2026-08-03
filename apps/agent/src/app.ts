@@ -22,6 +22,8 @@ import {
   deviceUiTreeResponseSchema,
   screenRecordingResultSchema,
   screenRecordingStatusSchema,
+  openScreenRecordingLocationRequestSchema,
+  openScreenRecordingLocationResponseSchema,
   startScreenRecordingRequestSchema,
   healthResponseSchema,
   cleanupLocalDataRequestSchema,
@@ -1225,6 +1227,17 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
       return screenRecordingResultSchema.parse(
         await screenRecordingService.stop(parseSerial(request.params)),
       );
+    } catch (error) {
+      return controlErrorReply(reply, error);
+    }
+  });
+
+  app.post("/api/v1/devices/:serial/recording/open-location", async (request, reply) => {
+    try {
+      parseSerial(request.params);
+      const { savedPath } = openScreenRecordingLocationRequestSchema.parse(request.body);
+      await screenRecordingService.openLocation(savedPath);
+      return openScreenRecordingLocationResponseSchema.parse({ opened: true });
     } catch (error) {
       return controlErrorReply(reply, error);
     }

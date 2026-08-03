@@ -227,6 +227,7 @@ describe("DeviceRobot Agent", () => {
         startedAt: status.startedAt,
         finishedAt: "2026-07-31T10:00:05.000Z",
       })),
+      openLocation: vi.fn(async () => {}),
       dispose: vi.fn(async () => {}),
     };
     const { app } = await createAgentApp({
@@ -252,6 +253,14 @@ describe("DeviceRobot Agent", () => {
         url: "/api/v1/devices/device-1/recording/stop",
         headers,
       });
+      const opened = await app.inject({
+        method: "POST",
+        url: "/api/v1/devices/device-1/recording/open-location",
+        headers,
+        payload: {
+          savedPath: "C:\\Users\\tester\\Desktop\\DeviceRobot-20260731-100005-device-1.mp4",
+        },
+      });
 
       expect(current.statusCode).toBe(200);
       expect(current.json()).toMatchObject({ serial: "device-1", recording: false, configuration });
@@ -262,9 +271,14 @@ describe("DeviceRobot Agent", () => {
         serial: "device-1",
         savedPath: expect.stringMatching(/\.mp4$/u),
       });
+      expect(opened.statusCode).toBe(200);
+      expect(opened.json()).toEqual({ opened: true });
       expect(screenRecordingService.status).toHaveBeenCalledWith("device-1");
       expect(screenRecordingService.start).toHaveBeenCalledWith("device-1", configuration);
       expect(screenRecordingService.stop).toHaveBeenCalledWith("device-1");
+      expect(screenRecordingService.openLocation).toHaveBeenCalledWith(
+        "C:\\Users\\tester\\Desktop\\DeviceRobot-20260731-100005-device-1.mp4",
+      );
     } finally {
       await app.close();
     }

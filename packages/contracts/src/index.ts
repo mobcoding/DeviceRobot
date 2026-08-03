@@ -183,9 +183,12 @@ export {
 } from "./device-control.js";
 export {
   screenRecordingConfigurationSchema,
+  openScreenRecordingLocationRequestSchema,
+  openScreenRecordingLocationResponseSchema,
   screenRecordingResultSchema,
   screenRecordingStatusSchema,
   startScreenRecordingRequestSchema,
+  type OpenScreenRecordingLocationRequest,
   type ScreenRecordingConfiguration,
   type ScreenRecordingResult,
   type ScreenRecordingStatus,

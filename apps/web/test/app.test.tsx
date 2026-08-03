@@ -533,6 +533,7 @@ function mockApis(
   getScreenshotRequests: () => number;
   getScreenRecordingStartRequests: () => number;
   getScreenRecordingStopRequests: () => number;
+  getScreenRecordingOpenLocationRequests: () => number;
   getLastScreenRecordingStartRequest: () => unknown;
   getTerminalRequests: () => number;
   getLastTerminalCommand: () => unknown;
@@ -567,6 +568,7 @@ function mockApis(
   let screenshotRequests = 0;
   let screenRecordingStartRequests = 0;
   let screenRecordingStopRequests = 0;
+  let screenRecordingOpenLocationRequests = 0;
   let lastScreenRecordingStartRequest: unknown;
   let terminalRequests = 0;
   let lastTerminalCommand: unknown;
@@ -1089,6 +1091,14 @@ function mockApis(
           );
         }
 
+        if (url.endsWith("/recording/open-location") && method === "POST") {
+          screenRecordingOpenLocationRequests += 1;
+          return new Response(JSON.stringify({ opened: true }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
         return new Response(
           JSON.stringify({
             serial: "8B3Y0THX0",
@@ -1183,6 +1193,7 @@ function mockApis(
     getScreenshotRequests: () => screenshotRequests,
     getScreenRecordingStartRequests: () => screenRecordingStartRequests,
     getScreenRecordingStopRequests: () => screenRecordingStopRequests,
+    getScreenRecordingOpenLocationRequests: () => screenRecordingOpenLocationRequests,
     getLastScreenRecordingStartRequest: () => lastScreenRecordingStartRequest,
     getTerminalRequests: () => terminalRequests,
     getLastTerminalCommand: () => lastTerminalCommand,
@@ -2242,6 +2253,7 @@ describe("DeviceRobot Web UI", () => {
       getLastScreenRecordingStartRequest,
       getScreenRecordingStartRequests,
       getScreenRecordingStopRequests,
+      getScreenRecordingOpenLocationRequests,
     } = mockApis();
     const user = userEvent.setup();
     renderApp();
@@ -2273,11 +2285,16 @@ describe("DeviceRobot Web UI", () => {
 
     await user.click(within(mirror).getByRole("button", { name: "停止录制并保存" }));
     await vi.waitFor(() => expect(getScreenRecordingStopRequests()).toBe(1));
+    const resultDialog = await screen.findByRole("dialog", { name: "录制完成" });
     expect(
-      await within(mirror).findByText(
+      within(resultDialog).getByText(
         "C:\\Users\\tester\\Desktop\\DeviceRobot-20260731-100005-8B3Y0THX0.mp4",
       ),
     ).toBeInTheDocument();
+    expect(mirror.querySelector(".mirror-recording-saved")).toBeNull();
+
+    await user.click(within(resultDialog).getByRole("button", { name: "打开保存位置" }));
+    await vi.waitFor(() => expect(getScreenRecordingOpenLocationRequests()).toBe(1));
   });
 
   it("resizes the mirror area without exceeding the golden-ratio width", async () => {

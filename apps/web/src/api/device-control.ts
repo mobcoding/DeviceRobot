@@ -2,6 +2,7 @@ import {
   deviceActionHistoryResponseSchema,
   deviceActionResultSchema,
   deviceUiTreeResponseSchema,
+  openScreenRecordingLocationResponseSchema,
   type DeviceActionHistoryResponse,
   type DeviceActionResult,
   type DeviceControlAction,
@@ -88,6 +89,22 @@ export async function stopScreenRecording(serial: string): Promise<ScreenRecordi
     { method: "POST", headers: { Accept: "application/json" } },
     screenRecordingResultSchema,
     "停止录屏失败。",
+  );
+}
+
+export async function openScreenRecordingLocation(
+  serial: string,
+  savedPath: string,
+): Promise<void> {
+  await requestJson(
+    deviceEndpoint(serial, "recording/open-location"),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ savedPath }),
+    },
+    openScreenRecordingLocationResponseSchema,
+    "打开录屏保存位置失败。",
   );
 }
 

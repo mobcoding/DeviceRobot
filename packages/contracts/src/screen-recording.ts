@@ -12,6 +12,14 @@ export const screenRecordingConfigurationSchema = z.object({
 
 export const startScreenRecordingRequestSchema = screenRecordingConfigurationSchema;
 
+export const openScreenRecordingLocationRequestSchema = z.object({
+  savedPath: z.string().trim().min(1).max(1_024),
+});
+
+export const openScreenRecordingLocationResponseSchema = z.object({
+  opened: z.literal(true),
+});
+
 export const screenRecordingStatusSchema = z.object({
   serial: z.string().min(1),
   recording: z.boolean(),
@@ -29,5 +37,8 @@ export const screenRecordingResultSchema = z.object({
 
 export type ScreenRecordingConfiguration = z.infer<typeof screenRecordingConfigurationSchema>;
 export type StartScreenRecordingRequest = z.infer<typeof startScreenRecordingRequestSchema>;
+export type OpenScreenRecordingLocationRequest = z.infer<
+  typeof openScreenRecordingLocationRequestSchema
+>;
 export type ScreenRecordingStatus = z.infer<typeof screenRecordingStatusSchema>;
 export type ScreenRecordingResult = z.infer<typeof screenRecordingResultSchema>;

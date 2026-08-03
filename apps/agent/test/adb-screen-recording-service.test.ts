@@ -69,6 +69,22 @@ afterEach(() => {
 });
 
 describe("ADB screen recording", () => {
+  it("opens the existing saved MP4 file in the local file manager", async () => {
+    const outputDirectory = createOutputDirectory();
+    const savedPath = join(outputDirectory, "DeviceRobot-recording.mp4");
+    const openLocation = vi.fn(async () => {});
+    writeFileSync(savedPath, "mp4-data");
+    const service = new AdbScreenRecordingService({
+      deviceService: deviceService(),
+      runner: recordingRunner(),
+      openLocation,
+    });
+
+    await service.openLocation(savedPath);
+
+    expect(openLocation).toHaveBeenCalledWith(savedPath);
+  });
+
   it("starts with the configured video settings and saves a non-empty MP4 locally", async () => {
     const outputDirectory = createOutputDirectory();
     const runner = recordingRunner();

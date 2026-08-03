@@ -9,6 +9,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createAgentApp } from "../src/app.js";
+import { DeviceApplicationIconError } from "../src/devices/adb-device-application-icon-service.js";
 import type { ScreenRecordingService } from "../src/devices/adb-screen-recording-service.js";
 
 const temporaryDirectories: string[] = [];
@@ -686,6 +687,13 @@ describe("DeviceRobot Agent", () => {
       deviceApplicationIconService: {
         readIcon: async (serial, packageName) => {
           expect(serial).toBe("device-1");
+          if (packageName === "com.example.withouticon") {
+            throw new DeviceApplicationIconError(
+              "Application does not declare an icon.",
+              404,
+              true,
+            );
+          }
           expect(packageName).toBe("com.example.app");
           return { content: Buffer.from([0x89, 0x50, 0x4e, 0x47]), contentType: "image/png" };
         },
@@ -709,6 +717,11 @@ describe("DeviceRobot Agent", () => {
         url: "/api/v1/devices/device-1/applications/com.example.app/icon",
         headers,
       });
+      const unavailableApplicationIcon = await app.inject({
+        method: "GET",
+        url: "/api/v1/devices/device-1/applications/com.example.withouticon/icon",
+        headers,
+      });
       const logcat = await app.inject({
         method: "GET",
         url: "/api/v1/devices/device-1/logcat?limit=120",
@@ -729,6 +742,9 @@ describe("DeviceRobot Agent", () => {
       expect(applicationIcon.headers["content-type"]).toContain("image/png");
       expect(applicationIcon.headers["cache-control"]).toBe("private, max-age=0, must-revalidate");
       expect(applicationIcon.rawPayload).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      expect(unavailableApplicationIcon.statusCode).toBe(200);
+      expect(unavailableApplicationIcon.headers["content-type"]).toContain("image/svg+xml");
+      expect(unavailableApplicationIcon.rawPayload.toString("utf8")).toContain("<svg");
       expect(logcat.statusCode).toBe(200);
       expect(logcat.json()).toMatchObject({
         entries: [{ level: "info", tag: "ActivityManager" }],

@@ -32,6 +32,7 @@ export class DeviceApplicationIconError extends Error {
   public constructor(
     message: string,
     public readonly statusCode: 400 | 404 | 409 | 413 | 422 | 502 | 503,
+    public readonly fallbackIcon = false,
   ) {
     super(message);
   }
@@ -147,7 +148,7 @@ export function parseAaptManifestIconResourceId(output: string): string | undefi
 function normalizeIconResourcePath(value: string): string {
   const normalized = posix.normalize(value);
   if (!normalized.startsWith("res/") || value.split("/").includes("..")) {
-    throw new DeviceApplicationIconError("应用未提供可读取的位图图标。", 404);
+    throw new DeviceApplicationIconError("应用未提供可读取的位图图标。", 404, true);
   }
   return normalized;
 }
@@ -649,7 +650,7 @@ export class AdbDeviceApplicationIconService implements DeviceApplicationIconSer
         );
         const iconResourceId = parseAaptManifestIconResourceId(commandOutput(manifest));
         if (iconResourceId === undefined) {
-          throw new DeviceApplicationIconError("应用未提供可读取的位图图标。", 404);
+          throw new DeviceApplicationIconError("应用未提供可读取的位图图标。", 404, true);
         }
 
         const archives = loadedArchives.map(({ archive }) => archive);
@@ -669,7 +670,7 @@ export class AdbDeviceApplicationIconService implements DeviceApplicationIconSer
         }
         const iconResource = resourcePaths.get(iconResourceId);
         if (iconResource === undefined) {
-          throw new DeviceApplicationIconError("应用未提供可读取的位图图标。", 404);
+          throw new DeviceApplicationIconError("应用未提供可读取的位图图标。", 404, true);
         }
 
         const resolved = await this.#resolveIconResource(
@@ -682,7 +683,7 @@ export class AdbDeviceApplicationIconService implements DeviceApplicationIconSer
           new Set(),
         );
         if (resolved === undefined) {
-          throw new DeviceApplicationIconError("应用未提供可读取的位图图标。", 404);
+          throw new DeviceApplicationIconError("应用未提供可读取的位图图标。", 404, true);
         }
 
         const icon =
@@ -694,7 +695,7 @@ export class AdbDeviceApplicationIconService implements DeviceApplicationIconSer
         }
         const contentType = CACHED_ICON_EXTENSIONS.get(icon.extension);
         if (contentType === undefined) {
-          throw new DeviceApplicationIconError("应用图标格式不受支持。", 404);
+          throw new DeviceApplicationIconError("应用图标格式不受支持。", 404, true);
         }
         await writeFile(
           join(this.#iconDirectory, cacheFileName(serial, packageName, apkPaths, icon.extension)),
@@ -915,12 +916,12 @@ export class AdbDeviceApplicationIconService implements DeviceApplicationIconSer
     const extractedIcon = join(workDirectory, ...resource.resourcePath.split("/"));
     const metadata = await stat(extractedIcon);
     if (!metadata.isFile() || metadata.size === 0) {
-      throw new DeviceApplicationIconError("应用图标文件不可用。", 404);
+      throw new DeviceApplicationIconError("应用图标文件不可用。", 404, true);
     }
     const content = await readFile(extractedIcon);
     const extension = imageExtension(content);
     if (extension === undefined) {
-      throw new DeviceApplicationIconError("应用图标格式不受支持。", 404);
+      throw new DeviceApplicationIconError("应用图标格式不受支持。", 404, true);
     }
     return { content, extension };
   }

@@ -79,6 +79,7 @@ import {
 } from "./devices/adb-device-management-service.js";
 import {
   AdbDeviceApplicationIconService,
+  DeviceApplicationIconError,
   type DeviceApplicationIconService,
 } from "./devices/adb-device-application-icon-service.js";
 import {
@@ -378,6 +379,11 @@ function apiErrorReply(reply: FastifyReply, error: unknown, fallback: string): F
 function controlErrorReply(reply: FastifyReply, error: unknown): FastifyReply {
   return apiErrorReply(reply, error, "设备控制请求失败。");
 }
+
+const unavailableApplicationIcon = Buffer.from(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36"><rect width="36" height="36" rx="5" fill="#1d3033"/><rect x="8" y="7" width="20" height="22" rx="3" fill="#426a70"/><path d="M12 12h12v3H12zm0 6h8v3h-8z" fill="#bde8eb"/></svg>',
+  "utf8",
+);
 
 function parseFilePath(query: unknown): string | undefined {
   if (typeof query !== "object" || query === null) {
@@ -1117,6 +1123,12 @@ export async function createAgentApp(options: CreateAgentAppOptions = {}): Promi
         .type(icon.contentType)
         .send(icon.content);
     } catch (error) {
+      if (error instanceof DeviceApplicationIconError && error.fallbackIcon) {
+        return reply
+          .header("Cache-Control", "private, max-age=0, must-revalidate")
+          .type("image/svg+xml")
+          .send(unavailableApplicationIcon);
+      }
       return controlErrorReply(reply, error);
     }
   });

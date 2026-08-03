@@ -118,7 +118,7 @@ describe("ADB screen recording", () => {
     ]);
   });
 
-  it("does not alter a matching touch-display setting when recording stops", async () => {
+  it("disables touch indicators after recording even when they were already enabled", async () => {
     const outputDirectory = createOutputDirectory();
     const runner = recordingRunner("1");
     const service = new AdbScreenRecordingService({
@@ -130,12 +130,16 @@ describe("ADB screen recording", () => {
     await service.start("device-1", configuration(outputDirectory));
     await service.stop("device-1");
 
-    const touchSettingWrites = vi
-      .mocked(runner.runText)
-      .mock.calls.filter(
-        ([args]) => args[3] === "settings" && (args[4] === "put" || args[4] === "delete"),
-      );
-    expect(touchSettingWrites).toEqual([]);
+    expect(runner.runText).toHaveBeenCalledWith([
+      "-s",
+      "device-1",
+      "shell",
+      "settings",
+      "put",
+      "system",
+      "show_touches",
+      "0",
+    ]);
   });
 
   it("fails fast and restores the touch-display setting when the recorder exits at startup", async () => {

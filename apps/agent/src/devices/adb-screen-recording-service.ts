@@ -30,8 +30,6 @@ type RecordingSession = {
   processId: string;
   deviceProcess: ScreenRecordingProcess;
   startedAt: string;
-  originalShowTouches: string | undefined;
-  restoreShowTouches: boolean;
 };
 
 export interface ScreenRecordingCommandRunner {
@@ -298,8 +296,6 @@ export class AdbScreenRecordingService implements ScreenRecordingService {
         processId: process,
         deviceProcess,
         startedAt: new Date().toISOString(),
-        originalShowTouches,
-        restoreShowTouches: showTouchesChanged,
       };
       this.#sessions.set(serial, session);
       return await this.status(serial);
@@ -342,9 +338,7 @@ export class AdbScreenRecordingService implements ScreenRecordingService {
       await this.#runner
         .runText(["-s", serial, "shell", "rm", "-f", session.remotePath])
         .catch(() => undefined);
-      if (session.restoreShowTouches) {
-        await this.#restoreShowTouches(serial, session.originalShowTouches);
-      }
+      await this.#disableShowTouches(serial);
     }
   }
 
@@ -404,6 +398,12 @@ export class AdbScreenRecordingService implements ScreenRecordingService {
     }
     await this.#runner
       .runText(["-s", serial, "shell", "settings", "put", "system", "show_touches", value])
+      .catch(() => undefined);
+  }
+
+  async #disableShowTouches(serial: string): Promise<void> {
+    await this.#runner
+      .runText(["-s", serial, "shell", "settings", "put", "system", "show_touches", "0"])
       .catch(() => undefined);
   }
 
